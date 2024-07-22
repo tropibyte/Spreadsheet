@@ -1,9 +1,8 @@
 #include "pch.h"
 #include "grid32.h"
 #include "grid32_internal.h"
-#include "grid32_wndproc.h"
 
-LRESULT Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+LRESULT CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     CGrid32Mgr* pMgr = reinterpret_cast<CGrid32Mgr*>(GetWindowLongPtr(hWnd, 0)); 
     if (pMgr == nullptr && uMsg != WM_NCCREATE)

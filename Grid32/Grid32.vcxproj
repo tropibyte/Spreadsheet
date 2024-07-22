@@ -154,7 +154,6 @@
     <ClInclude Include="framework.h" />
     <ClInclude Include="grid32.h" />
     <ClInclude Include="Grid32Mgr.h" />
-    <ClInclude Include="grid32_wndproc.h" />
     <ClInclude Include="grid32_internal.h" />
     <ClInclude Include="pch.h" />
   </ItemGroup>

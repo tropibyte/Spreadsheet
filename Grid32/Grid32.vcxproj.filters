@@ -24,9 +24,6 @@
     <ClInclude Include="grid32.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="grid32_wndproc.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Grid32Mgr.h">
       <Filter>Header Files</Filter>
     </ClInclude>

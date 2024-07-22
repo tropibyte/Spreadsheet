@@ -3,14 +3,13 @@
 #include "grid32_internal.h"
 
 
-
 bool RegisterGrid32Class(HINSTANCE hInstance)
 {
     WNDCLASSEX wc = { 0 };
 
     wc.cbSize = sizeof(WNDCLASSEX);
     wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS | CS_OWNDC | CS_GLOBALCLASS;
-    wc.lpfnWndProc = Grid32_WndProc;
+    wc.lpfnWndProc = CGrid32Mgr::Grid32_WndProc;
     wc.cbClsExtra = 0;
     wc.cbWndExtra = 2 * sizeof(PVOID);
     wc.hInstance = hInstance;
