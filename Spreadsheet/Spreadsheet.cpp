@@ -25,6 +25,7 @@
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #endif
+#include "GridCtrl.h"
 
 
 // CSpreadsheetApp
@@ -82,6 +83,8 @@ BOOL CSpreadsheetApp::InitInstance()
 	// in your application.
 	InitCtrls.dwICC = ICC_WIN95_CLASSES;
 	InitCommonControlsEx(&InitCtrls);
+	if (!CGridCtrl::InitGridControl())
+		return FALSE;
 
 	CWinAppEx::InitInstance();
 

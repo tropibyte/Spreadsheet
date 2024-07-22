@@ -1,5 +1,7 @@
 #pragma once
 
+#include "grid32.h"
+
 class CGrid32Mgr
 {
 	GRIDCREATESTRUCT gcs;
