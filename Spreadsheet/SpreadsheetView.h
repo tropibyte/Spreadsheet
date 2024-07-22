@@ -13,9 +13,9 @@
 //
 
 #pragma once
+#include "GridView.h"  // Include the header for CGridView
 
-
-class CSpreadsheetView : public CView
+class CSpreadsheetView : public CGridView
 {
 protected: // create from serialization only
 	CSpreadsheetView() noexcept;

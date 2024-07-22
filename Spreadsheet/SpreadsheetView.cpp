@@ -30,12 +30,12 @@
 
 // CSpreadsheetView
 
-IMPLEMENT_DYNCREATE(CSpreadsheetView, CView)
+IMPLEMENT_DYNCREATE(CSpreadsheetView, CGridView)
 
-BEGIN_MESSAGE_MAP(CSpreadsheetView, CView)
+BEGIN_MESSAGE_MAP(CSpreadsheetView, CGridView)
 	// Standard printing commands
-	ON_COMMAND(ID_FILE_PRINT, &CView::OnFilePrint)
-	ON_COMMAND(ID_FILE_PRINT_DIRECT, &CView::OnFilePrint)
+	ON_COMMAND(ID_FILE_PRINT, &CGridView::OnFilePrint)
+	ON_COMMAND(ID_FILE_PRINT_DIRECT, &CGridView::OnFilePrint)
 	ON_COMMAND(ID_FILE_PRINT_PREVIEW, &CSpreadsheetView::OnFilePrintPreview)
 	ON_WM_CONTEXTMENU()
 	ON_WM_RBUTTONUP()
@@ -57,8 +57,9 @@ BOOL CSpreadsheetView::PreCreateWindow(CREATESTRUCT& cs)
 {
 	// TODO: Modify the Window class or styles here by modifying
 	//  the CREATESTRUCT cs
+	cs.style |= GS_SPREADSHEET;
 
-	return CView::PreCreateWindow(cs);
+	return CGridView::PreCreateWindow(cs);
 }
 
 // CSpreadsheetView drawing
@@ -119,12 +120,12 @@ void CSpreadsheetView::OnContextMenu(CWnd* /* pWnd */, CPoint point)
 #ifdef _DEBUG
 void CSpreadsheetView::AssertValid() const
 {
-	CView::AssertValid();
+	CGridView::AssertValid();
 }
 
 void CSpreadsheetView::Dump(CDumpContext& dc) const
 {
-	CView::Dump(dc);
+	CGridView::Dump(dc);
 }
 
 CSpreadsheetDoc* CSpreadsheetView::GetDocument() const // non-debug version is inline

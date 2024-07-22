@@ -10,7 +10,7 @@
 
 IMPLEMENT_DYNCREATE(CGridView, CCtrlView)
 
-CGridView::CGridView() : CCtrlView(GRID_WNDCLASS_NAME, 0)
+CGridView::CGridView() : CCtrlView(GRID_WNDCLASS_NAME, GRID_DEFAULT_STYLE)
 {
 
 }

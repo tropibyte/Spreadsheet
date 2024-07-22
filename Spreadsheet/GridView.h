@@ -3,6 +3,8 @@
 #include "GridCtrl.h"
 // CGridView view
 
+const DWORD GRID_DEFAULT_STYLE = WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | WS_HSCROLL;
+
 class CGridView : public CCtrlView
 {
 	DECLARE_DYNCREATE(CGridView)
