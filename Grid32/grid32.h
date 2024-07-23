@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #ifndef _GRID32
 #define _GRID32
 
@@ -22,6 +24,13 @@ typedef struct {
 	size_t nWidth, nHeight;
 }GRIDCREATESTRUCT, *PGRIDCREATESTRUCT;
 
-
+typedef struct {
+	std::wstring m_wsText, m_wsFontFace;
+	float m_fPointSize;
+	UINT m_nBorderWidth;
+	COLORREF m_clrTextColor, m_clrBorderColor;
+	BOOL bItalic, bUnderline;
+	UINT bWeight;
+}GRIDCELL, *PGRIDCELL;
 
 #endif // !_GRID32
