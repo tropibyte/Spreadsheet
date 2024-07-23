@@ -12,7 +12,7 @@ public:
 	CGridCtrl();
 	virtual ~CGridCtrl();
 	static HMODULE InitGridControl();
-	BOOL Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID, const GRIDCREATESTRUCT &gcs);
+	BOOL Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID, GRIDCREATESTRUCT &gcs);
 
 protected:
 	DECLARE_MESSAGE_MAP()

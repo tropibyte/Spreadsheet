@@ -24,7 +24,7 @@ HMODULE CGridCtrl::InitGridControl()
 	return LoadLibrary(_T("Grid32.dll"));
 }
 
-BOOL CGridCtrl::Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID, const GRIDCREATESTRUCT& gcs)
+BOOL CGridCtrl::Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID, GRIDCREATESTRUCT& gcs)
 {
     // Ensure the style includes WS_CHILD
     dwStyle |= WS_CHILD;
@@ -39,7 +39,7 @@ BOOL CGridCtrl::Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT n
         rect,           // Position and size
         pParentWnd,     // Parent window
         nID,            // Control ID
-        NULL            // Additional creation parameters
+        reinterpret_cast<CCreateContext *>(&gcs)            // Additional creation parameters
     );
 }
 

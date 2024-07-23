@@ -57,7 +57,7 @@ BOOL CSpreadsheetView::PreCreateWindow(CREATESTRUCT& cs)
 {
 	// TODO: Modify the Window class or styles here by modifying
 	//  the CREATESTRUCT cs
-	cs.style |= GS_SPREADSHEET;
+	cs.style |= GS_SPREADSHEET | WS_VISIBLE;
 
 	return CGridView::PreCreateWindow(cs);
 }

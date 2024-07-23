@@ -1,17 +1,18 @@
 #pragma once
 
 #include "GridCtrl.h"
-// CGridView view
 
+// CGridView view
 const DWORD GRID_DEFAULT_STYLE = WS_CHILD | WS_VISIBLE | WS_BORDER | WS_VSCROLL | WS_HSCROLL;
 
-class CGridView : public CCtrlView
+class CGridView : public CView
 {
 	DECLARE_DYNCREATE(CGridView)
 
 protected:
 	CGridView();           // protected constructor used by dynamic creation
 	virtual ~CGridView();
+	CGridCtrl m_wndGridCtrl;
 
 public:
 	virtual void OnDraw(CDC* pDC);      // overridden to draw this view
@@ -24,6 +25,9 @@ public:
 
 protected:
 	DECLARE_MESSAGE_MAP()
+public:
+	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);
+	afx_msg void OnSize(UINT nType, int cx, int cy);
 };
 
 

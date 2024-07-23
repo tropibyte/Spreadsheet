@@ -191,6 +191,7 @@ protected:
 // Implementation
 protected:
 	DECLARE_MESSAGE_MAP()
+	virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
 };
 
 CAboutDlg::CAboutDlg() noexcept : CDialogEx(IDD_ABOUTBOX)
@@ -235,3 +236,11 @@ void CSpreadsheetApp::SaveCustomState()
 
 
 
+
+
+BOOL CAboutDlg::PreCreateWindow(CREATESTRUCT& cs)
+{
+	// TODO: Add your specialized code here and/or call the base class
+
+	return CDialogEx::PreCreateWindow(cs);
+}
