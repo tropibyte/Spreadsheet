@@ -27,7 +27,7 @@ m_hWndGrid(NULL), nRowHeaderHeight(40), nColHeaderWidth(60)
     m_cornerCell.fontInfo.bItalic = FALSE;                 // No italic
     m_cornerCell.fontInfo.bUnderline = FALSE;              // No underline
     m_cornerCell.fontInfo.bWeight = 400;                   // Normal weight (400)
-    m_selectionPoint = m_beginDrawPoint = { 0,0 };
+    m_selectionPoint = m_visibleTopLeft = { 0,0 };
     m_scrollDifference = { 0, 0 };
 }
 
@@ -549,13 +549,10 @@ void CGrid32Mgr::OnHScroll(UINT nSBCode, UINT nPos, HWND hScrollBar)
     switch (nSBCode)
     {
     case SB_LINELEFT:
-        if(m_scrollDifference.x > 0)
-            --m_scrollDifference.x;
-
+        IncrementSelectedCell(-1, 0, INCREMENT_SINGLE);
         break;
     case SB_LINERIGHT:
-        if (m_scrollDifference.x < totalGridCellRect.right)
-            ++m_scrollDifference.x;
+        IncrementSelectedCell(1, 0, INCREMENT_SINGLE);
         break;
     case SB_PAGELEFT:
         // Handle left page scroll
@@ -564,10 +561,10 @@ void CGrid32Mgr::OnHScroll(UINT nSBCode, UINT nPos, HWND hScrollBar)
         // Handle right page scroll
         break;
     case SB_THUMBTRACK:
-        m_scrollDifference.x = (LONG)nPos;
+        m_visibleTopLeft.nCol = (LONG)nPos;
         break;
     case SB_THUMBPOSITION:
-        m_scrollDifference.x = (LONG)nPos;
+        m_visibleTopLeft.nCol = (LONG)nPos;
         SetScrollPos(m_hWndGrid, SB_HORZ, nPos, TRUE);
         break;
     case SB_LEFT:
@@ -591,12 +588,10 @@ void CGrid32Mgr::OnVScroll(UINT nSBCode, UINT nPos, HWND hScrollBar)
     switch (nSBCode)
     {
     case SB_LINEUP:
-        if (m_scrollDifference.y > 0)
-            --m_scrollDifference.y;
+        IncrementSelectedCell(0, -1, INCREMENT_SINGLE);
         break;
     case SB_LINEDOWN:
-        if (m_scrollDifference.y < totalGridCellRect.bottom)
-            ++m_scrollDifference.y;
+        IncrementSelectedCell(0, 1, INCREMENT_SINGLE);
         break;
     case SB_PAGEUP:
         // Handle page scroll up
@@ -605,13 +600,13 @@ void CGrid32Mgr::OnVScroll(UINT nSBCode, UINT nPos, HWND hScrollBar)
         // Handle page scroll down
         break;
     case SB_THUMBTRACK:
-        // Handle drag scroll (nPos is the position of the scroll box)
+        m_visibleTopLeft.nCol = (LONG)nPos;
         break;
     case SB_THUMBPOSITION:
-        m_scrollDifference.y = (LONG)nPos;
+        m_visibleTopLeft.nCol = (LONG)nPos;
         break;
     case SB_TOP:
-        m_scrollDifference.y = 0;
+        m_visibleTopLeft.nCol = 0;
         break;
     case SB_BOTTOM:
         // Handle scroll to bottom
@@ -628,28 +623,35 @@ void CGrid32Mgr::OnVScroll(UINT nSBCode, UINT nPos, HWND hScrollBar)
 
 void CGrid32Mgr::SetScrollRanges()
 {
-    // Set the horizontal scroll range
-    SCROLLINFO siH = { sizeof(SCROLLINFO) };
-    siH.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
-    siH.nMin = 0;
-    siH.nMax = totalGridCellRect.right; // Assuming each column is of uniform width
-    siH.nPage = 25; // Page size can be the width of one column or more
-    siH.nPos = 0;
-    SetScrollInfo(m_hWndGrid, SB_HORZ, &siH, TRUE);
-
-    // Set the vertical scroll range
-    SCROLLINFO siV = { sizeof(SCROLLINFO) };
-    siV.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
-    siV.nMin = 0;
-    siV.nMax = totalGridCellRect.bottom; // Assuming each row is of uniform height
-    siV.nPage = 25; // Page size can be the height of one row or more
-    siV.nPos = 0;
-    SetScrollInfo(m_hWndGrid, SB_VERT, &siV, TRUE);
+    if (gcs.style & WS_HSCROLL)
+    {
+        // Set the horizontal scroll range
+        SCROLLINFO siH = { sizeof(SCROLLINFO) };
+        siH.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+        siH.nMin = 0;
+        siH.nMax = static_cast<int>(gcs.nWidth); // Assuming each column is of uniform width
+        siH.nPage = 25; // Page size can be the width of one column or more
+        siH.nPos = 0;
+        SetScrollInfo(m_hWndGrid, SB_HORZ, &siH, TRUE);
+    }
+    if (gcs.style & WS_VSCROLL)
+    {
+        // Set the vertical scroll range
+        SCROLLINFO siV = { sizeof(SCROLLINFO) };
+        siV.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+        siV.nMin = 0;
+        siV.nMax = static_cast<int>(gcs.nHeight); // Assuming each row is of uniform height
+        siV.nPage = 25; // Page size can be the height of one row or more
+        siV.nPos = 0;
+        SetScrollInfo(m_hWndGrid, SB_VERT, &siV, TRUE);
+    }
 }
 
 void CGrid32Mgr::IncrementSelectedCell(long nRow, long nCol, short nWhich)
 {
+    // Increment or decrement the selection point
     UINT absRow = (UINT)abs(nRow), absCol = (UINT)abs(nCol);
+
     if (nRow < 0)
     {
         if (absRow >= m_selectionPoint.nRow)
@@ -660,8 +662,8 @@ void CGrid32Mgr::IncrementSelectedCell(long nRow, long nCol, short nWhich)
     else
     {
         m_selectionPoint.nRow += absRow;
-        if (m_selectionPoint.nRow >= gcs.nHeight)
-            m_selectionPoint.nRow = gcs.nHeight - 1;
+        if (m_selectionPoint.nRow >= (UINT)gcs.nHeight)
+            m_selectionPoint.nRow = (UINT)gcs.nHeight - 1;
     }
 
     if (nCol < 0)
@@ -674,10 +676,99 @@ void CGrid32Mgr::IncrementSelectedCell(long nRow, long nCol, short nWhich)
     else
     {
         m_selectionPoint.nCol += absCol;
-        if (m_selectionPoint.nCol >= gcs.nHeight)
-            m_selectionPoint.nCol = gcs.nHeight - 1;
+        if (m_selectionPoint.nCol >= (UINT)gcs.nWidth)
+            m_selectionPoint.nCol = (UINT)gcs.nWidth - 1;
     }
 
+    // Get the dimensions of the client area
+    RECT clientRect;
+    GetClientRect(m_hWndGrid, &clientRect);
+
+    // Calculate the total height and width of the visible grid area
+    int cellTop = 0, cellLeft = 0;
+    int cellBottom = 0, cellRight = 0;
+
+    for (size_t i = m_visibleTopLeft.nRow; i < m_selectionPoint.nRow; ++i)
+    {
+        cellTop += static_cast<int>(pRowInfoArray[i].nHeight);
+    }
+    for (size_t i = m_visibleTopLeft.nCol; i < m_selectionPoint.nCol; ++i)
+    {
+        cellLeft += static_cast<int>(pColInfoArray[i].nWidth);
+    }
+
+    cellBottom = cellTop + static_cast<int>(pRowInfoArray[m_selectionPoint.nRow].nHeight);
+    cellRight = cellLeft + static_cast<int>(pColInfoArray[m_selectionPoint.nCol].nWidth);
+
+    // Determine the scroll direction based on visibility
+    int scrollFlags = 0;
+
+    if (cellTop < clientRect.top || cellBottom > clientRect.bottom)
+        scrollFlags |= SCROLL_VERT;
+
+    if (cellLeft < clientRect.left || cellRight > clientRect.right)
+        scrollFlags |= SCROLL_HORZ;
+
+    if (scrollFlags != 0)
+    {
+        // Scroll to make the selected cell visible
+        ScrollToCell(m_selectionPoint.nRow, m_selectionPoint.nCol, scrollFlags);
+    }
+}
+
+void CGrid32Mgr::ScrollToCell(size_t row, size_t col, int scrollFlags)
+{
+    int scrollY = 0, scrollX = 0;
+    int newTop = 0, newLeft = 0;
+
+    if (scrollFlags & SCROLL_VERT)
+    {
+        for (size_t i = m_visibleTopLeft.nCol; i < row; ++i)
+        {
+            scrollY += static_cast<int>(pRowInfoArray[i].nHeight);
+        }
+        SetScrollPos(m_hWndGrid, SB_VERT, row, TRUE);
+
+        // Update the top row index
+        if (row > m_visibleTopLeft.nRow)
+            m_scrollDifference.y += scrollY;
+        else
+            m_scrollDifference.y -= scrollY;
+
+        newTop = static_cast<int>(row);
+    }
+    else
+    {
+        // Use current visible top row if no vertical scrolling
+        newTop = m_visibleTopLeft.nRow;
+    }
+
+    if (scrollFlags & SCROLL_HORZ)
+    {
+        for (size_t i = m_visibleTopLeft.nCol; i < col; ++i)
+        {
+            scrollX += static_cast<int>(pColInfoArray[i].nWidth);
+        }
+        SetScrollPos(m_hWndGrid, SB_HORZ, col, TRUE);
+        if (col > m_visibleTopLeft.nCol)
+            m_scrollDifference.x += scrollX;
+        else
+            m_scrollDifference.x -= scrollX;
+        // Update the left column index
+        newLeft = static_cast<int>(col);
+    }
+    else
+    {
+        // Use current visible left column if no horizontal scrolling
+        newLeft = m_visibleTopLeft.nCol;
+    }
+
+    // Update visible top-left position
+    m_visibleTopLeft.nRow = newTop;
+    m_visibleTopLeft.nCol = newLeft;
+
+    // Force the grid to redraw
+    InvalidateRect(m_hWndGrid, NULL, TRUE);
 }
 
 void CGrid32Mgr::OnMove(int x, int y)
@@ -719,4 +810,6 @@ bool CGrid32Mgr::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
         // Handle other keys
         break;
     }
+
+    return false;
 }

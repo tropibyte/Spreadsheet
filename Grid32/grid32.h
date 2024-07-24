@@ -23,6 +23,9 @@
 #define INCREMENT_SINGLE			1
 #define INCREMENT_PAGE				10
 
+#define SCROLL_VERT					1
+#define SCROLL_HORZ					2
+
 typedef struct {
 	size_t cbSize;
 	size_t nWidth, nHeight;

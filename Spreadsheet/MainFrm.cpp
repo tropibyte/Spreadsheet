@@ -41,7 +41,7 @@ END_MESSAGE_MAP()
 
 // CMainFrame construction/destruction
 
-CMainFrame::CMainFrame() noexcept
+CMainFrame::CMainFrame() noexcept : m_pCurrOutlookPage(nullptr), m_pCurrOutlookWnd(nullptr)
 {
 	// TODO: add member initialization code here
 	theApp.m_nAppLook = theApp.GetInt(_T("ApplicationLook"), ID_VIEW_APPLOOK_OFF_2007_SILVER);
