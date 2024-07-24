@@ -113,9 +113,9 @@ void CGrid32Mgr::CalculateTotalGridRect()
 {
     memset(&totalGridCellRect, 0, sizeof(RECT));
     for (size_t idx = 0; idx < gcs.nWidth; ++idx)
-        totalGridCellRect.right += pColInfoArray[idx].nWidth;
+        totalGridCellRect.right += (long)pColInfoArray[idx].nWidth;
     for (size_t idx = 0; idx < gcs.nHeight; ++idx)
-        totalGridCellRect.bottom += pRowInfoArray[idx].nHeight;
+        totalGridCellRect.bottom += (long)pRowInfoArray[idx].nHeight;
 }
 
 void CGrid32Mgr::OffsetRectByScroll(RECT& rect)
@@ -233,7 +233,7 @@ void CGrid32Mgr::DrawColHeaders(HDC hDC, const RECT& rect)
 
     for (size_t idx = 0; idx < gcs.nWidth; ++idx)
     {
-        colHeaderRect.right += pColInfoArray[idx].nWidth;
+        colHeaderRect.right += (long)pColInfoArray[idx].nWidth;
 
         if (CanDrawRect(rect, colHeaderRect))
         {
@@ -275,7 +275,7 @@ void CGrid32Mgr::DrawRowHeaders(HDC hDC, const RECT& rect)
 
     for (size_t idx = 0; idx < gcs.nWidth; ++idx)
     {
-        rowHeaderRect.bottom += pRowInfoArray[idx].nHeight;
+        rowHeaderRect.bottom += (long)pRowInfoArray[idx].nHeight;
 
         if (CanDrawRect(rect, rowHeaderRect))
         {
@@ -320,10 +320,10 @@ void CGrid32Mgr::DrawGrid(HDC hDC, const RECT& clientRect)
     
     for (size_t col = 0; col < gcs.nWidth; ++col)
     {
-        gridCellRect.right += pColInfoArray[col].nWidth;
+        gridCellRect.right += (long)pColInfoArray[col].nWidth;
         for (size_t row = 0; row < gcs.nHeight; ++row)
         {
-            gridCellRect.bottom += pRowInfoArray[row].nHeight;
+            gridCellRect.bottom += (long)pRowInfoArray[row].nHeight;
             // Draw the cell background
             HBRUSH hBackgroundBrush = CreateSolidBrush(m_defaultGridCell.clrBackground);
             FillRect(hDC, &gridCellRect, hBackgroundBrush);
@@ -360,12 +360,12 @@ void CGrid32Mgr::DrawCells(HDC hDC, const RECT& clientRect)
 
     for (size_t col = 0; col < gcs.nWidth; ++col)
     {
-        gridCellRect.right += pColInfoArray[col].nWidth;
+        gridCellRect.right += (long)pColInfoArray[col].nWidth;
         for (size_t row = 0; row < gcs.nHeight; ++row)
         {
-            PGRIDCELL pCell = GetCell(row, col);
+            PGRIDCELL pCell = GetCell((UINT)row, (UINT)col);
 
-            gridCellRect.bottom += pRowInfoArray[row].nHeight;
+            gridCellRect.bottom += (long)pRowInfoArray[row].nHeight;
 
             if (CanDrawRect(clientRect, gridCellRect) && pCell != &m_defaultGridCell)
             {
@@ -452,4 +452,14 @@ void CGrid32Mgr::DeleteAllCells()
         delete cellPair.second;
     }
     mapCells.clear();
+}
+
+//Unused function, but it keeps asking me to create it and says "Create" needs to create it, so...
+void CGrid32Mgr::DrawButton(HDC hDC, COLORREF background, COLORREF border, RECT coordinates, bool bRaised)
+{
+    UNREFERENCED_PARAMETER(hDC);
+    UNREFERENCED_PARAMETER(background);
+    UNREFERENCED_PARAMETER(border);
+    UNREFERENCED_PARAMETER(coordinates);
+    UNREFERENCED_PARAMETER(bRaised);
 }

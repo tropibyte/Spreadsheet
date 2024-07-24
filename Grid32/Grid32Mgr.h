@@ -39,5 +39,8 @@ public:
 	void SetCell(UINT nRow, UINT nCol, const GRIDCELL& gc);
 	void DeleteCell(UINT nRow, UINT nCol);
 	void DeleteAllCells();
+	// Unused
+	void DrawButton(HDC hDC, COLORREF background, COLORREF border, RECT coordinates, bool bRaised);
+
 };
 
