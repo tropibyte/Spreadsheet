@@ -22,37 +22,41 @@
 typedef struct {
 	size_t cbSize;
 	size_t nWidth, nHeight;
-	size_t nDefRowWidth, nDefColHeight;
+	size_t nDefRowHeight, nDefColWidth;
 	LONG   style;
 }GRIDCREATESTRUCT, *PGRIDCREATESTRUCT;
 
-typedef struct {
+typedef struct __FONTINFO {
 	std::wstring m_wsFontFace;
 	float m_fPointSize;
-	UINT m_nBorderWidth;
 	COLORREF m_clrTextColor;
 	BOOL bItalic, bUnderline;
 	UINT bWeight;
+	__FONTINFO();
 }FONTINFO;
 
 struct cell_base
 {
-	FONTINFO fi;
-	COLORREF clrBackground, clrTextColor, m_clrBorderColor;
+	FONTINFO fontInfo;
+	COLORREF clrBackground, m_clrBorderColor;
+	UINT m_nBorderWidth;
+	int penStyle;
 	std::wstring m_wsName;
+	cell_base();
 };
 
-typedef struct : public cell_base {
-	size_t nWidth;
+typedef struct __ROWINFO : public cell_base {
+	size_t nHeight;
+	__ROWINFO() : nHeight(0) {}
 }ROWINFO;
 
-typedef struct : public cell_base {
-	size_t nHeight;
+typedef struct __COLINFO : public cell_base {
+	size_t nWidth;
+	__COLINFO() : nWidth(0) {}
 }COLINFO;
 
-typedef struct : public cell_base {
+typedef struct __GRIDCELL : public cell_base {
 	std::wstring m_wsText;
-	FONTINFO fi;
-}GRIDCELL, * PGRIDCELL;
+}GRIDCELL, *PGRIDCELL;
 
 #endif // !_GRID32

@@ -22,6 +22,12 @@ public:
 	virtual void Dump(CDumpContext& dc) const;
 #endif
 #endif
+protected:
+	virtual void OnFindNext(LPCTSTR lpszFind, BOOL bNext, BOOL bCase);
+	virtual void OnReplaceSel(LPCTSTR lpszFind, BOOL bNext, BOOL bCase,
+		LPCTSTR lpszReplace);
+	virtual void OnReplaceAll(LPCTSTR lpszFind, LPCTSTR lpszReplace,
+		BOOL bCase);
 
 protected:
 	DECLARE_MESSAGE_MAP()

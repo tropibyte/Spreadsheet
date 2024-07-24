@@ -39,7 +39,7 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
             return -1; // Fail creation
         }
 
-        pMgr->gcs.style = pCreateStruct->style;
+        pGridCreateStruct->style = pCreateStruct->style;
 
         if (!pMgr->Create(pGridCreateStruct))
         {
