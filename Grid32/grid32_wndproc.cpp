@@ -54,16 +54,40 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         break;
 
     case WM_MOVE:
+    {
+        int x = (int)(short)LOWORD(lParam);
+        int y = (int)(short)HIWORD(lParam);
+        pMgr->OnMove(x, y);
+    }
         break;
     case WM_SIZE:
+    {
+        UINT nType = (UINT)wParam;
+        int cx = (int)LOWORD(lParam);
+        int cy = (int)HIWORD(lParam);
+        pMgr->OnSize(nType, cx, cy);
+    }
+        break;
+    case WM_HSCROLL:
+        pMgr->OnHScroll(LOWORD(wParam), HIWORD(wParam), (HWND)lParam);
+        break;
+    case WM_VSCROLL:
+        pMgr->OnVScroll(LOWORD(wParam), HIWORD(wParam), (HWND)lParam);
+        break;
+    case WM_KEYDOWN:
+        if (pMgr->OnKeyDown((UINT)wParam, (UINT)lParam, 0))
+        {
+            InvalidateRect(hWnd, NULL, false);
+            return 0;
+        }
+
         break;
     case WM_NCPAINT:
         // Handle non-client area painting
         break;
 
     case WM_ERASEBKGND:
-        // Handle background erasing
-        break;
+        return TRUE;
 
     case WM_PAINT:
     {

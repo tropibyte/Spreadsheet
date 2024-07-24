@@ -17,6 +17,8 @@ protected:
 	HWND m_hWndGrid;
 	long nRowHeaderHeight, nColHeaderWidth;
 	RECT totalGridCellRect;
+	GRIDPOINT m_selectionPoint, m_beginDrawPoint;
+	POINT m_scrollDifference;
 
 public:
 	CGrid32Mgr();
@@ -28,6 +30,7 @@ public:
 	void CalculateTotalGridRect();
 	void OffsetRectByScroll(RECT&/*rect*/);
 	bool CanDrawRect(RECT clientRect, RECT rect);
+	void DrawSelectionBox(HDC hDC, const RECT& clientRect);
 	void DrawHeader(HDC hDC, const RECT& rect);
 	void DrawCornerCell(HDC hDC);
 	void DrawHeaderButton(HDC hDC, COLORREF background, COLORREF border, RECT coordinates, bool bRaised);
@@ -39,8 +42,12 @@ public:
 	void SetCell(UINT nRow, UINT nCol, const GRIDCELL& gc);
 	void DeleteCell(UINT nRow, UINT nCol);
 	void DeleteAllCells();
-	// Unused
-	void DrawButton(HDC hDC, COLORREF background, COLORREF border, RECT coordinates, bool bRaised);
-
+	void OnHScroll(UINT nSBCode, UINT nPos, HWND hScrollBar);
+	void OnVScroll(UINT nSBCode, UINT nPos, HWND hScrollBar);
+	void SetScrollRanges();
+	void IncrementSelectedCell(long nRow, long nCol, short nWhich);
+	void OnMove(int x, int y);
+	void OnSize(UINT nType, int cx, int cy);
+	bool OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags);
 };
 

@@ -16,14 +16,19 @@
 #define GS_ROWHEADER				0x0008
 #define GS_COLHEADER				0x0010
 #define GS_SPREADSHEETHEADER		0x0020
+#define GS_HIGHLIGHTSELECTION		0x0040
 
-#define GS_SPREADSHEET				(GS_SPREADSHEETHEADER | GS_ROWHEADER | GS_COLHEADER | GS_AUTOHSCROLL | GS_AUTOVSCROLL | GS_DRAWLINES | GS_TABULAR)
+#define GS_SPREADSHEET				(GS_SPREADSHEETHEADER | GS_HIGHLIGHTSELECTION | GS_ROWHEADER | GS_COLHEADER | GS_AUTOHSCROLL | GS_AUTOVSCROLL | GS_DRAWLINES | GS_TABULAR)
+
+#define INCREMENT_SINGLE			1
+#define INCREMENT_PAGE				10
 
 typedef struct {
 	size_t cbSize;
 	size_t nWidth, nHeight;
 	size_t nDefRowHeight, nDefColWidth;
 	LONG   style;
+	COLORREF clrSelectBox;
 }GRIDCREATESTRUCT, *PGRIDCREATESTRUCT;
 
 typedef struct __FONTINFO {
@@ -59,4 +64,8 @@ typedef struct __GRIDCELL : public cell_base {
 	std::wstring m_wsText;
 }GRIDCELL, *PGRIDCELL;
 
+typedef struct __GRIDPOINT
+{
+	UINT nRow, nCol;
+}GRIDPOINT;
 #endif // !_GRID32

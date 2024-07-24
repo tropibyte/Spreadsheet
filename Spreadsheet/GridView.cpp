@@ -23,6 +23,11 @@ CGridView::~CGridView()
 BEGIN_MESSAGE_MAP(CGridView, CView)
 	ON_WM_CREATE()
 	ON_WM_SIZE()
+    ON_WM_KEYDOWN()
+    ON_WM_KEYUP()
+    ON_WM_INPUT()
+    ON_WM_SYSKEYUP()
+    ON_WM_SYSKEYDOWN()
 END_MESSAGE_MAP()
 
 
@@ -72,7 +77,8 @@ int CGridView::OnCreate(LPCREATESTRUCT lpCreateStruct)
     gcs.nWidth = 702;
     gcs.nHeight = 32768;
     gcs.nDefColWidth = 150;
-    gcs.nDefRowHeight = 50;
+    gcs.nDefRowHeight = 40;
+    gcs.clrSelectBox = RGB(255, 0, 0);
 
     if (CView::OnCreate(lpCreateStruct) == -1)
         return -1;
@@ -94,3 +100,57 @@ void CGridView::OnSize(UINT nType, int cx, int cy)
     }
 }
 
+
+
+void CGridView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
+{
+    if (m_wndGridCtrl.GetSafeHwnd() != NULL)
+    {
+        // Forward the WM_KEYDOWN message to the grid control
+        m_wndGridCtrl.SendMessage(WM_KEYDOWN, nChar, MAKELPARAM(nRepCnt, nFlags));
+    }
+    CView::OnKeyDown(nChar, nRepCnt, nFlags);
+}
+
+
+void CGridView::OnKeyUp(UINT nChar, UINT nRepCnt, UINT nFlags)
+{
+    if (m_wndGridCtrl.GetSafeHwnd() != NULL)
+    {
+        // Forward the WM_KEYDOWN message to the grid control
+        m_wndGridCtrl.SendMessage(WM_KEYUP, nChar, MAKELPARAM(nRepCnt, nFlags));
+    }
+    CView::OnKeyUp(nChar, nRepCnt, nFlags);
+}
+
+
+void CGridView::OnRawInput(UINT nInputcode, HRAWINPUT hRawInput)
+{
+    // This feature requires Windows XP or greater.
+    // The symbol _WIN32_WINNT must be >= 0x0501.
+    // TODO: Add your message handler code here and/or call default
+
+    CView::OnRawInput(nInputcode, hRawInput);
+}
+
+
+void CGridView::OnSysKeyUp(UINT nChar, UINT nRepCnt, UINT nFlags)
+{
+    if (m_wndGridCtrl.GetSafeHwnd() != NULL)
+    {
+        // Forward the WM_KEYDOWN message to the grid control
+        m_wndGridCtrl.SendMessage(WM_SYSKEYUP, nChar, MAKELPARAM(nRepCnt, nFlags));
+    }
+    CView::OnSysKeyUp(nChar, nRepCnt, nFlags);
+}
+
+
+void CGridView::OnSysKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
+{
+    if (m_wndGridCtrl.GetSafeHwnd() != NULL)
+    {
+        // Forward the WM_KEYDOWN message to the grid control
+        m_wndGridCtrl.SendMessage(WM_SYSKEYDOWN, nChar, MAKELPARAM(nRepCnt, nFlags));
+    }
+    CView::OnSysKeyDown(nChar, nRepCnt, nFlags);
+}

@@ -2,7 +2,7 @@
 #include "Grid32Mgr.h"
 
 CGrid32Mgr::CGrid32Mgr() : pRowInfoArray(nullptr), pColInfoArray(nullptr), 
-m_hWndGrid(NULL), nRowHeaderHeight(50), nColHeaderWidth(50)
+m_hWndGrid(NULL), nRowHeaderHeight(40), nColHeaderWidth(60)
 {
     memset(&gcs, 0, sizeof(GRIDCREATESTRUCT));
     memset(&m_cornerCell, 0, sizeof(m_cornerCell));
@@ -27,6 +27,8 @@ m_hWndGrid(NULL), nRowHeaderHeight(50), nColHeaderWidth(50)
     m_cornerCell.fontInfo.bItalic = FALSE;                 // No italic
     m_cornerCell.fontInfo.bUnderline = FALSE;              // No underline
     m_cornerCell.fontInfo.bWeight = 400;                   // Normal weight (400)
+    m_selectionPoint = m_beginDrawPoint = { 0,0 };
+    m_scrollDifference = { 0, 0 };
 }
 
 
@@ -62,7 +64,7 @@ bool CGrid32Mgr::Create(PGRIDCREATESTRUCT pGCS)
     if (!pRowInfoArray || !pColInfoArray)
         return false;
 
-    nColHeaderWidth = nRowHeaderHeight = (long)gcs.nDefRowHeight;
+    //nColHeaderWidth = nRowHeaderHeight = (long)gcs.nDefRowHeight;
 
     for (size_t idx = 0; idx < gcs.nWidth; ++idx)
     {
@@ -99,14 +101,41 @@ bool CGrid32Mgr::Create(PGRIDCREATESTRUCT pGCS)
 
 void CGrid32Mgr::Paint(PAINTSTRUCT& ps)
 {
-    HDC& hDC = ps.hdc;
+    HDC hDC = ps.hdc;
+
     // Retrieve client area dimensions
     RECT rect;
     GetClientRect(m_hWndGrid, &rect);
+    int width = rect.right - rect.left;
+    int height = rect.bottom - rect.top;
 
-    DrawGrid(hDC, rect);
-    DrawCells(hDC, rect);
-    DrawHeader(hDC, rect);
+    // Create a memory DC compatible with the screen DC
+    HDC memDC = CreateCompatibleDC(hDC);
+
+    // Create a bitmap compatible with the screen DC
+    HBITMAP memBitmap = CreateCompatibleBitmap(hDC, width, height);
+
+    // Select the bitmap into the memory DC
+    HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, memBitmap);
+
+    // Fill the background with white (or any desired background color)
+    HBRUSH hBrush = CreateSolidBrush(m_defaultGridCell.clrBackground);
+    FillRect(memDC, &rect, hBrush);
+    DeleteObject(hBrush);
+
+    // Perform all drawing operations on the memory DC
+    DrawGrid(memDC, rect);
+    DrawCells(memDC, rect);
+    DrawSelectionBox(memDC, rect);
+    DrawHeader(memDC, rect);
+
+    // Copy the contents of the memory DC to the screen
+    BitBlt(hDC, 0, 0, width, height, memDC, 0, 0, SRCCOPY);
+
+    // Clean up
+    SelectObject(memDC, oldBitmap);
+    DeleteObject(memBitmap);
+    DeleteDC(memDC);
 }
 
 void CGrid32Mgr::CalculateTotalGridRect()
@@ -120,6 +149,8 @@ void CGrid32Mgr::CalculateTotalGridRect()
 
 void CGrid32Mgr::OffsetRectByScroll(RECT& rect)
 {
+    OffsetRect(&rect, 0-m_scrollDifference.x, 0 - m_scrollDifference.y);
+
     if ((gcs.style & GS_ROWHEADER) && (gcs.style & GS_COLHEADER))
     {
         OffsetRect(&rect, nColHeaderWidth, nRowHeaderHeight);
@@ -135,10 +166,67 @@ bool CGrid32Mgr::CanDrawRect(RECT clientRect, RECT rect)
         rect.bottom < clientRect.top);
 }
 
+void CGrid32Mgr::DrawSelectionBox(HDC hDC, const RECT& clientRect)
+{
+    if (!(gcs.style & GS_HIGHLIGHTSELECTION))
+        return;
+
+    RECT gridCellRect = totalGridCellRect;
+    OffsetRectByScroll(gridCellRect);
+
+    gridCellRect.right = gridCellRect.left;
+    gridCellRect.bottom = gridCellRect.top;
+
+    for (size_t col = 0; col < gcs.nWidth; ++col)
+    {
+        gridCellRect.right += (long)pColInfoArray[col].nWidth;
+        if (col >= m_selectionPoint.nCol)
+        {
+            for (size_t row = 0; row < gcs.nHeight; ++row)
+            {
+                gridCellRect.bottom += (long)pRowInfoArray[row].nHeight;
+                if (row >= m_selectionPoint.nRow)
+                {
+                    if (CanDrawRect(clientRect, gridCellRect))
+                    {
+                        // Create a pen with the specified color and a width of 3
+                        HPEN hPen = CreatePen(PS_SOLID, 3, gcs.clrSelectBox);
+                        HPEN hOldPen = (HPEN)SelectObject(hDC, hPen);
+
+                        // Use a NULL brush to only draw the border
+                        HBRUSH hOldBrush = (HBRUSH)SelectObject(hDC, GetStockObject(NULL_BRUSH));
+
+                        // Draw the rectangle
+                        Rectangle(hDC, gridCellRect.left, gridCellRect.top, gridCellRect.right, gridCellRect.bottom);
+
+                        // Restore the old pen and brush
+                        SelectObject(hDC, hOldPen);
+                        SelectObject(hDC, hOldBrush);
+
+                        // Delete the created pen
+                        DeleteObject(hPen);
+
+                        return;
+                    }
+                    else if (clientRect.right < gridCellRect.left || clientRect.bottom < gridCellRect.top)
+                        break;
+                }
+                gridCellRect.top = gridCellRect.bottom;
+                if (clientRect.bottom < gridCellRect.top)
+                    break;
+            }
+        }
+        gridCellRect.left = gridCellRect.right;
+        if (clientRect.right < gridCellRect.left)
+            break;
+    }
+}
+
+
+
 void CGrid32Mgr::DrawHeader(HDC hDC, const RECT &rect)
 {
     // Check if gcs.style has both GS_ROWHEADER and GS_COLHEADER bits set
-    CalculateTotalGridRect();
     if (gcs.style & GS_ROWHEADER)
     {
         DrawRowHeaders(hDC, rect);
@@ -182,9 +270,9 @@ void CGrid32Mgr::DrawHeaderButton(HDC hDC, COLORREF background, COLORREF border,
     if (bRaised)
     {
         // Calculate highlight (average with white) and shadow (average with black) colors
-        COLORREF highlight = RGB((GetRValue(background) + 255) / 2,
-            (GetGValue(background) + 255) / 2,
-            (GetBValue(background) + 255) / 2);
+        COLORREF highlight = RGB(GetRValue(background) <= 192 ? (GetRValue(background) + 255) / 2 : 255,
+            GetGValue(background) <= 192 ? (GetGValue(background) + 255) / 2 : 255,
+            GetGValue(background) <= 192 ? (GetBValue(background) + 255) / 2 : 255);
 
         COLORREF shadow = RGB(GetRValue(background) / 2,
             GetGValue(background) / 2,
@@ -398,13 +486,15 @@ void CGrid32Mgr::DrawCells(HDC hDC, const RECT& clientRect)
                 SelectObject(hDC, hOldFont);
                 DeleteObject(hFont);
             }
-            else if (clientRect.right < gridCellRect.left || clientRect.bottom < gridCellRect.top)
+            else if (clientRect.bottom < gridCellRect.top)
                 break;
 
             gridCellRect.top = gridCellRect.bottom;
         }
 
         gridCellRect.left = gridCellRect.right;
+        if (clientRect.right < gridCellRect.left)
+            break;
     }
 }
 
@@ -454,12 +544,179 @@ void CGrid32Mgr::DeleteAllCells()
     mapCells.clear();
 }
 
-//Unused function, but it keeps asking me to create it and says "Create" needs to create it, so...
-void CGrid32Mgr::DrawButton(HDC hDC, COLORREF background, COLORREF border, RECT coordinates, bool bRaised)
+void CGrid32Mgr::OnHScroll(UINT nSBCode, UINT nPos, HWND hScrollBar)
 {
-    UNREFERENCED_PARAMETER(hDC);
-    UNREFERENCED_PARAMETER(background);
-    UNREFERENCED_PARAMETER(border);
-    UNREFERENCED_PARAMETER(coordinates);
-    UNREFERENCED_PARAMETER(bRaised);
+    switch (nSBCode)
+    {
+    case SB_LINELEFT:
+        if(m_scrollDifference.x > 0)
+            --m_scrollDifference.x;
+
+        break;
+    case SB_LINERIGHT:
+        if (m_scrollDifference.x < totalGridCellRect.right)
+            ++m_scrollDifference.x;
+        break;
+    case SB_PAGELEFT:
+        // Handle left page scroll
+        break;
+    case SB_PAGERIGHT:
+        // Handle right page scroll
+        break;
+    case SB_THUMBTRACK:
+        m_scrollDifference.x = (LONG)nPos;
+        break;
+    case SB_THUMBPOSITION:
+        m_scrollDifference.x = (LONG)nPos;
+        SetScrollPos(m_hWndGrid, SB_HORZ, nPos, TRUE);
+        break;
+    case SB_LEFT:
+        m_scrollDifference.x = 0;
+        break;
+    case SB_RIGHT:
+        // Handle scroll to far right
+        break;
+    case SB_ENDSCROLL:
+        // Handle end of scroll action
+        break;
+    default:
+        break;
+    }
+
+    InvalidateRect(m_hWndGrid, NULL, true);
+}
+
+void CGrid32Mgr::OnVScroll(UINT nSBCode, UINT nPos, HWND hScrollBar)
+{
+    switch (nSBCode)
+    {
+    case SB_LINEUP:
+        if (m_scrollDifference.y > 0)
+            --m_scrollDifference.y;
+        break;
+    case SB_LINEDOWN:
+        if (m_scrollDifference.y < totalGridCellRect.bottom)
+            ++m_scrollDifference.y;
+        break;
+    case SB_PAGEUP:
+        // Handle page scroll up
+        break;
+    case SB_PAGEDOWN:
+        // Handle page scroll down
+        break;
+    case SB_THUMBTRACK:
+        // Handle drag scroll (nPos is the position of the scroll box)
+        break;
+    case SB_THUMBPOSITION:
+        m_scrollDifference.y = (LONG)nPos;
+        break;
+    case SB_TOP:
+        m_scrollDifference.y = 0;
+        break;
+    case SB_BOTTOM:
+        // Handle scroll to bottom
+        break;
+    case SB_ENDSCROLL:
+        // Handle end of scroll action
+        break;
+    default:
+        break;
+    }
+    InvalidateRect(m_hWndGrid, NULL, false);
+}
+
+
+void CGrid32Mgr::SetScrollRanges()
+{
+    // Set the horizontal scroll range
+    SCROLLINFO siH = { sizeof(SCROLLINFO) };
+    siH.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+    siH.nMin = 0;
+    siH.nMax = totalGridCellRect.right; // Assuming each column is of uniform width
+    siH.nPage = 25; // Page size can be the width of one column or more
+    siH.nPos = 0;
+    SetScrollInfo(m_hWndGrid, SB_HORZ, &siH, TRUE);
+
+    // Set the vertical scroll range
+    SCROLLINFO siV = { sizeof(SCROLLINFO) };
+    siV.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+    siV.nMin = 0;
+    siV.nMax = totalGridCellRect.bottom; // Assuming each row is of uniform height
+    siV.nPage = 25; // Page size can be the height of one row or more
+    siV.nPos = 0;
+    SetScrollInfo(m_hWndGrid, SB_VERT, &siV, TRUE);
+}
+
+void CGrid32Mgr::IncrementSelectedCell(long nRow, long nCol, short nWhich)
+{
+    UINT absRow = (UINT)abs(nRow), absCol = (UINT)abs(nCol);
+    if (nRow < 0)
+    {
+        if (absRow >= m_selectionPoint.nRow)
+            m_selectionPoint.nRow = 0;
+        else
+            m_selectionPoint.nRow -= absRow;
+    }
+    else
+    {
+        m_selectionPoint.nRow += absRow;
+        if (m_selectionPoint.nRow >= gcs.nHeight)
+            m_selectionPoint.nRow = gcs.nHeight - 1;
+    }
+
+    if (nCol < 0)
+    {
+        if (absCol >= m_selectionPoint.nCol)
+            m_selectionPoint.nCol = 0;
+        else
+            m_selectionPoint.nCol -= absCol;
+    }
+    else
+    {
+        m_selectionPoint.nCol += absCol;
+        if (m_selectionPoint.nCol >= gcs.nHeight)
+            m_selectionPoint.nCol = gcs.nHeight - 1;
+    }
+
+}
+
+void CGrid32Mgr::OnMove(int x, int y)
+{
+    UNREFERENCED_PARAMETER(x);
+    UNREFERENCED_PARAMETER(y);
+}
+
+void CGrid32Mgr::OnSize(UINT nType, int cx, int cy)
+{
+    UNREFERENCED_PARAMETER(nType);
+    UNREFERENCED_PARAMETER(cx);
+    UNREFERENCED_PARAMETER(cy);
+    CalculateTotalGridRect();
+    SetScrollRanges();
+}
+
+bool CGrid32Mgr::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
+{
+    switch (nChar)
+    {
+    case VK_LEFT:
+        IncrementSelectedCell(0, -1, INCREMENT_SINGLE);
+        return true;
+
+    case VK_RIGHT:
+        IncrementSelectedCell(0, 1, INCREMENT_SINGLE);
+        return true;
+
+    case VK_UP:
+        IncrementSelectedCell(-1, 0, INCREMENT_SINGLE);
+        return true;
+
+    case VK_DOWN:
+        IncrementSelectedCell(1, 0, INCREMENT_SINGLE);
+        return true;
+
+    default:
+        // Handle other keys
+        break;
+    }
 }

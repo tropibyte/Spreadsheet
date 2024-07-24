@@ -84,19 +84,19 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	// Navigation pane will be created at left, so temporary disable docking at the left side:
 	EnableDocking(CBRS_ALIGN_TOP | CBRS_ALIGN_BOTTOM | CBRS_ALIGN_RIGHT);
 
-	// Create and setup "Outlook" navigation bar:
-	if (!CreateOutlookBar(m_wndNavigationBar, ID_VIEW_NAVIGATION, m_wndTree, m_wndCalendar, 250))
-	{
-		TRACE0("Failed to create navigation pane\n");
-		return -1;      // fail to create
-	}
+	//// Create and setup "Outlook" navigation bar:
+	//if (!CreateOutlookBar(m_wndNavigationBar, ID_VIEW_NAVIGATION, m_wndTree, m_wndCalendar, 250))
+	//{
+	//	TRACE0("Failed to create navigation pane\n");
+	//	return -1;      // fail to create
+	//}
 
-	// Create a caption bar:
-	if (!CreateCaptionBar())
-	{
-		TRACE0("Failed to create caption bar\n");
-		return -1;      // fail to create
-	}
+	//// Create a caption bar:
+	//if (!CreateCaptionBar())
+	//{
+	//	TRACE0("Failed to create caption bar\n");
+	//	return -1;      // fail to create
+	//}
 
 	// Outlook bar is created and docking on the left side should be allowed.
 	EnableDocking(CBRS_ALIGN_LEFT);
@@ -306,13 +306,13 @@ void CMainFrame::OnUpdateApplicationLook(CCmdUI* pCmdUI)
 
 void CMainFrame::OnViewCaptionBar()
 {
-	m_wndCaptionBar.ShowWindow(m_wndCaptionBar.IsVisible() ? SW_HIDE : SW_SHOW);
+	//m_wndCaptionBar.ShowWindow(m_wndCaptionBar.IsVisible() ? SW_HIDE : SW_SHOW);
 	RecalcLayout(FALSE);
 }
 
 void CMainFrame::OnUpdateViewCaptionBar(CCmdUI* pCmdUI)
 {
-	pCmdUI->SetCheck(m_wndCaptionBar.IsVisible());
+	//pCmdUI->SetCheck(m_wndCaptionBar.IsVisible());
 }
 
 void CMainFrame::OnOptions()
