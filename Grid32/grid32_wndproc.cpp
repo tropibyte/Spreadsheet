@@ -18,6 +18,10 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
     case WM_NCCREATE:
     {
         pMgr = new CGrid32Mgr();
+        if (!pMgr)
+            return -1;
+
+        pMgr->m_hWndGrid = hWnd;
         SetWindowLongPtr(hWnd, 0, reinterpret_cast<LONG_PTR>(pMgr));
         break;
     }
@@ -34,6 +38,8 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         {
             return -1; // Fail creation
         }
+
+        pMgr->gcs.style = pCreateStruct->style;
 
         if (!pMgr->Create(pGridCreateStruct))
         {
@@ -64,7 +70,7 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(hWnd, &ps);
         if(hdc)
-            pMgr->Paint(hWnd, ps);
+            pMgr->Paint(ps);
 
         EndPaint(hWnd, &ps);
         return 0; // Indicate that we have handled the message

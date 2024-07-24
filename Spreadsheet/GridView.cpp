@@ -62,6 +62,8 @@ int CGridView::OnCreate(LPCREATESTRUCT lpCreateStruct)
     gcs.cbSize = sizeof(GRIDCREATESTRUCT);
     gcs.nWidth = 702;
     gcs.nHeight = 32768;
+    gcs.nDefColHeight = 30;
+    gcs.nDefRowWidth = 100;
 
     if (CView::OnCreate(lpCreateStruct) == -1)
         return -1;
