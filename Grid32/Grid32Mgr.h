@@ -46,7 +46,7 @@ public:
 	void OnVScroll(UINT nSBCode, UINT nPos, HWND hScrollBar);
 	void SetScrollRanges();
 	void IncrementSelectedCell(long nRow, long nCol, short nWhich);
-	void ScrollToCell(size_t row, size_t col, int scrollFlags);
+	void ScrollToCell(size_t row, size_t col, GRIDPOINT& oldVisibleTopLeft, int scrollFlags);
 	void OnMove(int x, int y);
 	void OnSize(UINT nType, int cx, int cy);
 	bool OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags);

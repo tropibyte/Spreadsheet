@@ -651,6 +651,7 @@ void CGrid32Mgr::IncrementSelectedCell(long nRow, long nCol, short nWhich)
 {
     // Increment or decrement the selection point
     UINT absRow = (UINT)abs(nRow), absCol = (UINT)abs(nCol);
+    GRIDPOINT oldVisibleTopLeft = m_visibleTopLeft;
 
     if (nRow < 0)
     {
@@ -681,7 +682,7 @@ void CGrid32Mgr::IncrementSelectedCell(long nRow, long nCol, short nWhich)
     }
 
     // Get the dimensions of the client area
-    RECT clientRect, cell = { 0,0,0,0 };
+    RECT clientRect, cell = { 0, 0, 0, 0 };
     GetClientRect(m_hWndGrid, &clientRect);
 
     // Calculate the total height and width of the visible grid area
@@ -695,8 +696,25 @@ void CGrid32Mgr::IncrementSelectedCell(long nRow, long nCol, short nWhich)
     }
     else
     {
-        //ChatGPT, please handle this case
+        int nHeight = 0;
+        for (size_t i = m_selectionPoint.nRow; i != ~0 && i >= 0; --i)
+        {
+            if (i == 0)
+            {
+                m_visibleTopLeft.nRow = 0;
+                cell.top = -100;
+                break;
+            }
+            if (nHeight + static_cast<int>(pRowInfoArray[i].nHeight) > clientRect.bottom)
+            {
+                m_visibleTopLeft.nRow = i;
+                cell.top -= nHeight;
+                break;
+            }
+            nHeight += static_cast<int>(pRowInfoArray[i].nHeight);
+        }
     }
+
     if (m_visibleTopLeft.nCol <= m_selectionPoint.nCol)
     {
         for (size_t i = m_visibleTopLeft.nCol; i < m_selectionPoint.nCol; ++i)
@@ -706,7 +724,22 @@ void CGrid32Mgr::IncrementSelectedCell(long nRow, long nCol, short nWhich)
     }
     else
     {
-        //ChatGPT, please handle this case
+        int nWidth = 0;
+        for (size_t i = m_selectionPoint.nCol; i != ~0 && i >= 0; --i)
+        {
+            if (nWidth + static_cast<int>(pColInfoArray[i].nWidth) > clientRect.right)
+            {
+                m_visibleTopLeft.nCol = i;
+                break;
+            }
+            nWidth += static_cast<int>(pColInfoArray[i].nWidth);
+            if (i == 0)
+            {
+                m_visibleTopLeft.nCol = 0;
+                break;
+            }
+        }
+        cell.left -= nWidth;
     }
 
     cell.bottom = cell.top + static_cast<int>(pRowInfoArray[m_selectionPoint.nRow].nHeight);
@@ -724,14 +757,19 @@ void CGrid32Mgr::IncrementSelectedCell(long nRow, long nCol, short nWhich)
     if (scrollFlags != 0)
     {
         // Scroll to make the selected cell visible
-        ScrollToCell(m_selectionPoint.nRow, m_selectionPoint.nCol, scrollFlags);
+        ScrollToCell(m_selectionPoint.nRow, m_selectionPoint.nCol, oldVisibleTopLeft, scrollFlags);
     }
+
+    // Force the grid to redraw
+    InvalidateRect(m_hWndGrid, NULL, false);
 }
 
-void CGrid32Mgr::ScrollToCell(size_t row, size_t col, int scrollFlags)
+void CGrid32Mgr::ScrollToCell(size_t row, size_t col, GRIDPOINT& oldVisibleTopLeft, int scrollFlags)
 {
     int scrollY = 0, scrollX = 0;
     int newTop = 0, newLeft = 0;
+    RECT clientRect;
+    GetClientRect(m_hWndGrid, &clientRect);
 
     if (scrollFlags & SCROLL_VERT)
     {
@@ -757,17 +795,47 @@ void CGrid32Mgr::ScrollToCell(size_t row, size_t col, int scrollFlags)
 
     if (scrollFlags & SCROLL_HORZ)
     {
-        for (size_t i = m_visibleTopLeft.nCol; i < col; ++i)
+        if (oldVisibleTopLeft.nCol)
         {
-            scrollX += static_cast<int>(pColInfoArray[i].nWidth);
+
+        }
+         
+        if (col > m_visibleTopLeft.nCol && m_visibleTopLeft.nCol >= oldVisibleTopLeft.nCol)
+        {
+            for (size_t i = m_visibleTopLeft.nCol; i < col; ++i)
+            {
+                scrollX += static_cast<int>(pColInfoArray[i].nWidth);
+            }
+            m_scrollDifference.x += scrollX;
+            // Update the left column index
+            newLeft = static_cast<int>(col);
+        }
+        else if (m_visibleTopLeft.nCol == 0)
+        {
+            m_scrollDifference.x = 0;
+        }
+        else
+        {
+            //for(size_t i = m_visibleTopLeft.nCol; i <= m_selectionPoint.nCol; ++i)
+            for(size_t i = m_selectionPoint.nCol; i != ~0 && i >= m_visibleTopLeft.nCol; --i)
+            {
+                if (scrollX + static_cast<int>(pColInfoArray[i].nWidth) > clientRect.right)
+                {
+                    m_visibleTopLeft.nCol = i+1;
+                    break;
+                }
+                scrollX += static_cast<int>(pColInfoArray[i].nWidth);
+
+            }
+
+            m_scrollDifference.x -= scrollX;
+            // Update the left column index
+            newLeft = m_visibleTopLeft.nCol;
+
         }
         SetScrollPos(m_hWndGrid, SB_HORZ, col, TRUE);
-        if (col > m_visibleTopLeft.nCol)
-            m_scrollDifference.x += scrollX;
-        else
-            m_scrollDifference.x -= scrollX;
-        // Update the left column index
-        newLeft = static_cast<int>(col);
+        if (m_scrollDifference.x < 0)
+            m_scrollDifference.x = 0;
     }
     else
     {
@@ -779,8 +847,6 @@ void CGrid32Mgr::ScrollToCell(size_t row, size_t col, int scrollFlags)
     m_visibleTopLeft.nRow = newTop;
     m_visibleTopLeft.nCol = newLeft;
 
-    // Force the grid to redraw
-    InvalidateRect(m_hWndGrid, NULL, TRUE);
 }
 
 void CGrid32Mgr::OnMove(int x, int y)
