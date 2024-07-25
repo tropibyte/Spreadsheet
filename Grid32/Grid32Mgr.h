@@ -38,6 +38,9 @@ public:
 	void DrawColHeaders(HDC hDC, const RECT& rect);
 	void DrawGrid(HDC hDC, const RECT& clientRect);
 	void DrawCells(HDC hDC, const RECT& clientRect);
+	void DrawVoidSpace(HDC hDC, const RECT& rect);
+	size_t CalculatedColumnDistance(size_t start, size_t end);
+	size_t CalculatedRowDistance(size_t start, size_t end);
 	PGRIDCELL GetCell(UINT nRow, UINT nCol);
 	void SetCell(UINT nRow, UINT nCol, const GRIDCELL& gc);
 	void DeleteCell(UINT nRow, UINT nCol);

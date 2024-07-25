@@ -75,7 +75,7 @@ int CGridView::OnCreate(LPCREATESTRUCT lpCreateStruct)
     memset(&gcs, 0, sizeof(GRIDCREATESTRUCT));
     gcs.cbSize = sizeof(GRIDCREATESTRUCT);
     gcs.nWidth = 702;
-    gcs.nHeight = 32768;
+    gcs.nHeight = 4096;
     gcs.nDefColWidth = 150;
     gcs.nDefRowHeight = 40;
     gcs.clrSelectBox = RGB(255, 0, 0);

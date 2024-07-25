@@ -2,7 +2,7 @@
 #include "Grid32Mgr.h"
 
 CGrid32Mgr::CGrid32Mgr() : pRowInfoArray(nullptr), pColInfoArray(nullptr), 
-m_hWndGrid(NULL), nRowHeaderHeight(40), nColHeaderWidth(60)
+m_hWndGrid(NULL), nRowHeaderHeight(40), nColHeaderWidth(70)
 {
     memset(&gcs, 0, sizeof(GRIDCREATESTRUCT));
     memset(&m_cornerCell, 0, sizeof(m_cornerCell));
@@ -128,6 +128,7 @@ void CGrid32Mgr::Paint(PAINTSTRUCT& ps)
     DrawCells(memDC, rect);
     DrawSelectionBox(memDC, rect);
     DrawHeader(memDC, rect);
+    DrawVoidSpace(memDC, rect);
 
     // Copy the contents of the memory DC to the screen
     BitBlt(hDC, 0, 0, width, height, memDC, 0, 0, SRCCOPY);
@@ -361,7 +362,7 @@ void CGrid32Mgr::DrawRowHeaders(HDC hDC, const RECT& rect)
     rowHeaderRect.right = nColHeaderWidth;
     rowHeaderRect.bottom = rowHeaderRect.top;
 
-    for (size_t idx = 0; idx < gcs.nWidth; ++idx)
+    for (size_t idx = 0; idx < gcs.nHeight; ++idx)
     {
         rowHeaderRect.bottom += (long)pRowInfoArray[idx].nHeight;
 
@@ -497,6 +498,95 @@ void CGrid32Mgr::DrawCells(HDC hDC, const RECT& clientRect)
             break;
     }
 }
+
+void CGrid32Mgr::DrawVoidSpace(HDC hDC, const RECT& rect)
+{
+    RECT clientRect;
+    GetClientRect(m_hWndGrid, &clientRect);
+    bool bDrawBorder = false;
+    long nMaxWidth = static_cast<long>(CalculatedColumnDistance(m_visibleTopLeft.nCol, gcs.nWidth));
+    long nMaxHeight = static_cast<long>(CalculatedRowDistance(m_visibleTopLeft.nRow, gcs.nHeight));
+    if (nMaxWidth < clientRect.right)
+    {
+        HBRUSH hBrush = CreateSolidBrush(RGB(128, 128, 128));
+        HPEN hPen = CreatePen(PS_SOLID, 1, RGB(128, 128, 128));
+
+        HPEN oldPen = (HPEN)SelectObject(hDC, hPen);
+        HBRUSH oldBrush = (HBRUSH)SelectObject(hDC, hBrush);
+
+        Rectangle(hDC, nMaxWidth + nColHeaderWidth, clientRect.top, clientRect.right, clientRect.bottom);
+
+        DeleteObject(SelectObject(hDC, oldPen));
+        DeleteObject(SelectObject(hDC, oldBrush));
+
+        bDrawBorder = true;
+    }
+    if (nMaxHeight < clientRect.bottom)
+    {
+        HBRUSH hBrush = CreateSolidBrush(RGB(128, 128, 128));
+        HPEN hPen = CreatePen(PS_SOLID, 1, RGB(128, 128, 128));
+
+        HPEN oldPen = (HPEN)SelectObject(hDC, hPen);
+        HBRUSH oldBrush = (HBRUSH)SelectObject(hDC, hBrush);
+
+        Rectangle(hDC, 0, nMaxHeight + nRowHeaderHeight, clientRect.right, clientRect.bottom);
+
+        DeleteObject(SelectObject(hDC, oldPen));
+        DeleteObject(SelectObject(hDC, oldBrush));
+
+        bDrawBorder = true;
+    }
+
+    if (bDrawBorder)
+    {
+        int x = nMaxWidth < clientRect.right ? nMaxWidth : clientRect.right;
+        int y = nMaxHeight < clientRect.bottom ? nMaxHeight : clientRect.bottom;
+
+        x += nColHeaderWidth + 1;
+        y += nRowHeaderHeight + 1;
+
+        HPEN hPen = CreatePen(PS_SOLID, 3, 0);
+        HPEN oldPen = (HPEN)SelectObject(hDC, hPen);
+
+        if (x < clientRect.right)
+        {
+            MoveToEx(hDC, x, 0, NULL);
+            LineTo(hDC, x, y < clientRect.bottom ? y : clientRect.bottom);
+        }
+
+        if (y < clientRect.bottom)
+        {
+            MoveToEx(hDC, 0, y, NULL);
+            LineTo(hDC, x < clientRect.right ? x : clientRect.right, y);
+        }
+
+
+        DeleteObject(SelectObject(hDC, oldPen));
+    }
+}
+
+size_t CGrid32Mgr::CalculatedColumnDistance(size_t start, size_t end)
+{
+    size_t nWidth = 0;
+    if (start >= gcs.nWidth || end > gcs.nWidth)
+        return 0;
+    for (size_t idx = start; idx < end; ++idx)
+        nWidth += pColInfoArray[idx].nWidth;
+
+    return nWidth;
+}
+
+size_t CGrid32Mgr::CalculatedRowDistance(size_t start, size_t end)
+{
+    size_t nHeight = 0;
+    if (start >= gcs.nHeight || end > gcs.nHeight)
+        return 0;
+    for (size_t idx = start; idx < end; ++idx)
+        nHeight += pRowInfoArray[idx].nHeight;
+
+    return nHeight;
+}
+
 
 PGRIDCELL CGrid32Mgr::GetCell(UINT nRow, UINT nCol)
 {
@@ -682,7 +772,7 @@ void CGrid32Mgr::IncrementSelectedCell(long nRow, long nCol, short nWhich)
     }
 
     // Get the dimensions of the client area
-    RECT clientRect, cell = { 0, 0, 0, 0 };
+    RECT clientRect, cell = { nColHeaderWidth, nRowHeaderHeight, 0, 0 };
     GetClientRect(m_hWndGrid, &clientRect);
 
     // Calculate the total height and width of the visible grid area
@@ -773,7 +863,7 @@ void CGrid32Mgr::ScrollToCell(size_t row, size_t col, GRIDPOINT& oldVisibleTopLe
 
     if (scrollFlags & SCROLL_VERT)
     {
-        for (size_t i = m_visibleTopLeft.nCol; i < row; ++i)
+        for (size_t i = m_visibleTopLeft.nRow; i < row; ++i)
         {
             scrollY += static_cast<int>(pRowInfoArray[i].nHeight);
         }
