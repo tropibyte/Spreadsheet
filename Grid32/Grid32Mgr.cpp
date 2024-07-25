@@ -685,13 +685,28 @@ void CGrid32Mgr::IncrementSelectedCell(long nRow, long nCol, short nWhich)
     GetClientRect(m_hWndGrid, &clientRect);
 
     // Calculate the total height and width of the visible grid area
-    for (size_t i = m_visibleTopLeft.nRow; i < m_selectionPoint.nRow; ++i)
+
+    if (m_visibleTopLeft.nRow <= m_selectionPoint.nRow)
     {
-        cell.top += static_cast<int>(pRowInfoArray[i].nHeight);
+        for (size_t i = m_visibleTopLeft.nRow; i < m_selectionPoint.nRow; ++i)
+        {
+            cell.top += static_cast<int>(pRowInfoArray[i].nHeight);
+        }
     }
-    for (size_t i = m_visibleTopLeft.nCol; i < m_selectionPoint.nCol; ++i)
+    else
     {
-        cell.left += static_cast<int>(pColInfoArray[i].nWidth);
+        //ChatGPT, please handle this case
+    }
+    if (m_visibleTopLeft.nCol <= m_selectionPoint.nCol)
+    {
+        for (size_t i = m_visibleTopLeft.nCol; i < m_selectionPoint.nCol; ++i)
+        {
+            cell.left += static_cast<int>(pColInfoArray[i].nWidth);
+        }
+    }
+    else
+    {
+        //ChatGPT, please handle this case
     }
 
     cell.bottom = cell.top + static_cast<int>(pRowInfoArray[m_selectionPoint.nRow].nHeight);
