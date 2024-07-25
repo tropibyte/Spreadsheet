@@ -681,32 +681,29 @@ void CGrid32Mgr::IncrementSelectedCell(long nRow, long nCol, short nWhich)
     }
 
     // Get the dimensions of the client area
-    RECT clientRect;
+    RECT clientRect, cell = { 0,0,0,0 };
     GetClientRect(m_hWndGrid, &clientRect);
 
     // Calculate the total height and width of the visible grid area
-    int cellTop = 0, cellLeft = 0;
-    int cellBottom = 0, cellRight = 0;
-
     for (size_t i = m_visibleTopLeft.nRow; i < m_selectionPoint.nRow; ++i)
     {
-        cellTop += static_cast<int>(pRowInfoArray[i].nHeight);
+        cell.top += static_cast<int>(pRowInfoArray[i].nHeight);
     }
     for (size_t i = m_visibleTopLeft.nCol; i < m_selectionPoint.nCol; ++i)
     {
-        cellLeft += static_cast<int>(pColInfoArray[i].nWidth);
+        cell.left += static_cast<int>(pColInfoArray[i].nWidth);
     }
 
-    cellBottom = cellTop + static_cast<int>(pRowInfoArray[m_selectionPoint.nRow].nHeight);
-    cellRight = cellLeft + static_cast<int>(pColInfoArray[m_selectionPoint.nCol].nWidth);
+    cell.bottom = cell.top + static_cast<int>(pRowInfoArray[m_selectionPoint.nRow].nHeight);
+    cell.right = cell.left + static_cast<int>(pColInfoArray[m_selectionPoint.nCol].nWidth);
 
     // Determine the scroll direction based on visibility
     int scrollFlags = 0;
 
-    if (cellTop < clientRect.top || cellBottom > clientRect.bottom)
+    if (cell.top < clientRect.top || cell.bottom > clientRect.bottom)
         scrollFlags |= SCROLL_VERT;
 
-    if (cellLeft < clientRect.left || cellRight > clientRect.right)
+    if (cell.left < clientRect.left || cell.right > clientRect.right)
         scrollFlags |= SCROLL_HORZ;
 
     if (scrollFlags != 0)
