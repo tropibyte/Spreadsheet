@@ -71,4 +71,13 @@ typedef struct __GRIDPOINT
 {
 	UINT nRow, nCol;
 }GRIDPOINT;
+
+typedef struct{
+	long width, height;
+}GRIDSIZE;
+
+typedef struct {
+	GRIDPOINT start, end;
+	size_t nWidth, nHeight;
+}PAGESTAT;
 #endif // !_GRID32

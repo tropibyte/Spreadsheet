@@ -224,6 +224,7 @@
     <Image Include="res\filesmall.bmp" />
     <Image Include="res\info.bmp" />
     <Image Include="res\main.bmp" />
+    <Image Include="res\main.png" />
     <Image Include="res\nav_large.bmp" />
     <Image Include="res\nav_large_hc.bmp" />
     <Image Include="res\pages.bmp" />

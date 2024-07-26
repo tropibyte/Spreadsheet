@@ -29,6 +29,7 @@ m_hWndGrid(NULL), nRowHeaderHeight(40), nColHeaderWidth(70)
     m_cornerCell.fontInfo.bWeight = 400;                   // Normal weight (400)
     m_selectionPoint = m_visibleTopLeft = { 0,0 };
     m_scrollDifference = { 0, 0 };
+    visibleGrid = { 0,0 };
 }
 
 
@@ -37,6 +38,14 @@ CGrid32Mgr::~CGrid32Mgr()
     DeleteAllCells();
     delete[] pRowInfoArray;
     delete[] pColInfoArray;
+}
+
+
+bool IsRectInside(const RECT& r1, const RECT& r2) {
+    return (r1.left >= r2.left &&
+        r1.right <= r2.right &&
+        r1.top >= r2.top &&
+        r1.bottom <= r2.bottom);
 }
 
 std::wstring CGrid32Mgr::GetColumnLabel(size_t index, size_t maxWidth)
@@ -64,7 +73,6 @@ bool CGrid32Mgr::Create(PGRIDCREATESTRUCT pGCS)
     if (!pRowInfoArray || !pColInfoArray)
         return false;
 
-    //nColHeaderWidth = nRowHeaderHeight = (long)gcs.nDefRowHeight;
 
     for (size_t idx = 0; idx < gcs.nWidth; ++idx)
     {
@@ -104,10 +112,8 @@ void CGrid32Mgr::Paint(PAINTSTRUCT& ps)
     HDC hDC = ps.hdc;
 
     // Retrieve client area dimensions
-    RECT rect;
-    GetClientRect(m_hWndGrid, &rect);
-    int width = rect.right - rect.left;
-    int height = rect.bottom - rect.top;
+    int width = m_clientRect.right - m_clientRect.left;
+    int height = m_clientRect.bottom - m_clientRect.top;
 
     // Create a memory DC compatible with the screen DC
     HDC memDC = CreateCompatibleDC(hDC);
@@ -120,15 +126,15 @@ void CGrid32Mgr::Paint(PAINTSTRUCT& ps)
 
     // Fill the background with white (or any desired background color)
     HBRUSH hBrush = CreateSolidBrush(m_defaultGridCell.clrBackground);
-    FillRect(memDC, &rect, hBrush);
+    FillRect(memDC, &m_clientRect, hBrush);
     DeleteObject(hBrush);
 
     // Perform all drawing operations on the memory DC
-    DrawGrid(memDC, rect);
-    DrawCells(memDC, rect);
-    DrawSelectionBox(memDC, rect);
-    DrawHeader(memDC, rect);
-    DrawVoidSpace(memDC, rect);
+    DrawGrid(memDC);
+    DrawCells(memDC);
+    DrawSelectionBox(memDC);
+    DrawHeader(memDC);
+    DrawVoidSpace(memDC);
 
     // Copy the contents of the memory DC to the screen
     BitBlt(hDC, 0, 0, width, height, memDC, 0, 0, SRCCOPY);
@@ -154,20 +160,20 @@ void CGrid32Mgr::OffsetRectByScroll(RECT& rect)
 
     if ((gcs.style & GS_ROWHEADER) && (gcs.style & GS_COLHEADER))
     {
-        OffsetRect(&rect, nColHeaderWidth, nRowHeaderHeight);
+        OffsetRect(&rect, GetActualColHeaderWidth(), GetActualRowHeaderHeight());
     }
 }
 
-bool CGrid32Mgr::CanDrawRect(RECT clientRect, RECT rect)
+bool CGrid32Mgr::CanDrawRect(RECT rect)
 {
     // Check if the rectangles intersect at all
-    return !(rect.left > clientRect.right ||
-        rect.right < clientRect.left ||
-        rect.top > clientRect.bottom ||
-        rect.bottom < clientRect.top);
+    return !(rect.left > m_clientRect.right ||
+        rect.right < m_clientRect.left ||
+        rect.top > m_clientRect.bottom ||
+        rect.bottom < m_clientRect.top);
 }
 
-void CGrid32Mgr::DrawSelectionBox(HDC hDC, const RECT& clientRect)
+void CGrid32Mgr::DrawSelectionBox(HDC hDC)
 {
     if (!(gcs.style & GS_HIGHLIGHTSELECTION))
         return;
@@ -188,7 +194,7 @@ void CGrid32Mgr::DrawSelectionBox(HDC hDC, const RECT& clientRect)
                 gridCellRect.bottom += (long)pRowInfoArray[row].nHeight;
                 if (row >= m_selectionPoint.nRow)
                 {
-                    if (CanDrawRect(clientRect, gridCellRect))
+                    if (CanDrawRect(gridCellRect))
                     {
                         // Create a pen with the specified color and a width of 3
                         HPEN hPen = CreatePen(PS_SOLID, 3, gcs.clrSelectBox);
@@ -209,32 +215,32 @@ void CGrid32Mgr::DrawSelectionBox(HDC hDC, const RECT& clientRect)
 
                         return;
                     }
-                    else if (clientRect.right < gridCellRect.left || clientRect.bottom < gridCellRect.top)
+                    else if (m_clientRect.right < gridCellRect.left || m_clientRect.bottom < gridCellRect.top)
                         break;
                 }
                 gridCellRect.top = gridCellRect.bottom;
-                if (clientRect.bottom < gridCellRect.top)
+                if (m_clientRect.bottom < gridCellRect.top)
                     break;
             }
         }
         gridCellRect.left = gridCellRect.right;
-        if (clientRect.right < gridCellRect.left)
+        if (m_clientRect.right < gridCellRect.left)
             break;
     }
 }
 
 
 
-void CGrid32Mgr::DrawHeader(HDC hDC, const RECT &rect)
+void CGrid32Mgr::DrawHeader(HDC hDC)
 {
     // Check if gcs.style has both GS_ROWHEADER and GS_COLHEADER bits set
     if (gcs.style & GS_ROWHEADER)
     {
-        DrawRowHeaders(hDC, rect);
+        DrawRowHeaders(hDC);
     }
     if (gcs.style & GS_COLHEADER)
     {
-        DrawColHeaders(hDC, rect);
+        DrawColHeaders(hDC);
     }
     if ((gcs.style & GS_ROWHEADER) && (gcs.style & GS_COLHEADER))
     {
@@ -312,19 +318,19 @@ void CGrid32Mgr::DrawHeaderButton(HDC hDC, COLORREF background, COLORREF border,
 }
 
 
-void CGrid32Mgr::DrawColHeaders(HDC hDC, const RECT& rect)
+void CGrid32Mgr::DrawColHeaders(HDC hDC)
 {
     RECT colHeaderRect = totalGridCellRect;
     OffsetRectByScroll(colHeaderRect);
     colHeaderRect.right = colHeaderRect.left;
     colHeaderRect.top = 0;
-    colHeaderRect.bottom = nRowHeaderHeight;
+    colHeaderRect.bottom = GetActualRowHeaderHeight();
 
     for (size_t idx = 0; idx < gcs.nWidth; ++idx)
     {
         colHeaderRect.right += (long)pColInfoArray[idx].nWidth;
 
-        if (CanDrawRect(rect, colHeaderRect))
+        if (CanDrawRect(colHeaderRect))
         {
             DrawHeaderButton(hDC, pColInfoArray[idx].clrBackground, pColInfoArray[idx].m_clrBorderColor, colHeaderRect, true);
 
@@ -348,25 +354,25 @@ void CGrid32Mgr::DrawColHeaders(HDC hDC, const RECT& rect)
             DeleteObject(hFont);
 
         }
-        else if (rect.right < colHeaderRect.left)
+        else if (m_clientRect.right < colHeaderRect.left)
             break;
         colHeaderRect.left = colHeaderRect.right;
     }
 }
 
-void CGrid32Mgr::DrawRowHeaders(HDC hDC, const RECT& rect)
+void CGrid32Mgr::DrawRowHeaders(HDC hDC)
 {
     RECT rowHeaderRect = totalGridCellRect;
     OffsetRectByScroll(rowHeaderRect);
     rowHeaderRect.left = 0;
-    rowHeaderRect.right = nColHeaderWidth;
+    rowHeaderRect.right = GetActualColHeaderWidth();
     rowHeaderRect.bottom = rowHeaderRect.top;
 
     for (size_t idx = 0; idx < gcs.nHeight; ++idx)
     {
         rowHeaderRect.bottom += (long)pRowInfoArray[idx].nHeight;
 
-        if (CanDrawRect(rect, rowHeaderRect))
+        if (CanDrawRect(rowHeaderRect))
         {
             DrawHeaderButton(hDC, pRowInfoArray[idx].clrBackground, pRowInfoArray[idx].m_clrBorderColor, rowHeaderRect, true);
 
@@ -390,13 +396,13 @@ void CGrid32Mgr::DrawRowHeaders(HDC hDC, const RECT& rect)
             DeleteObject(hFont);
 
         }
-        else if (rect.bottom < rowHeaderRect.top)
+        else if (m_clientRect.bottom < rowHeaderRect.top)
             break;
         rowHeaderRect.top = rowHeaderRect.bottom;
     }
 }
 
-void CGrid32Mgr::DrawGrid(HDC hDC, const RECT& clientRect)
+void CGrid32Mgr::DrawGrid(HDC hDC)
 {
     RECT gridCellRect = totalGridCellRect;
     OffsetRectByScroll(gridCellRect);
@@ -419,19 +425,19 @@ void CGrid32Mgr::DrawGrid(HDC hDC, const RECT& clientRect)
             DeleteObject(hBackgroundBrush);
 
             MoveToEx(hDC, 0, gridCellRect.top - 1, NULL);
-            LineTo(hDC, clientRect.right, gridCellRect.top - 1);
+            LineTo(hDC, m_clientRect.right, gridCellRect.top - 1);
 
             gridCellRect.top = gridCellRect.bottom;
 
-            if (clientRect.bottom < gridCellRect.top)
+            if (m_clientRect.bottom < gridCellRect.top)
                 break;
         }
 
         MoveToEx(hDC, gridCellRect.left - 1, 0, NULL);
-        LineTo(hDC, gridCellRect.left - 1, clientRect.bottom);
+        LineTo(hDC, gridCellRect.left - 1, m_clientRect.bottom);
 
         gridCellRect.left = gridCellRect.right;
-        if (clientRect.right < gridCellRect.left)
+        if (m_clientRect.right < gridCellRect.left)
             break;
 
     }
@@ -439,7 +445,7 @@ void CGrid32Mgr::DrawGrid(HDC hDC, const RECT& clientRect)
     DeleteObject(hBorderPen);
 }
 
-void CGrid32Mgr::DrawCells(HDC hDC, const RECT& clientRect)
+void CGrid32Mgr::DrawCells(HDC hDC)
 {
     RECT gridCellRect = totalGridCellRect;
     OffsetRectByScroll(gridCellRect);
@@ -456,7 +462,7 @@ void CGrid32Mgr::DrawCells(HDC hDC, const RECT& clientRect)
 
             gridCellRect.bottom += (long)pRowInfoArray[row].nHeight;
 
-            if (CanDrawRect(clientRect, gridCellRect) && pCell != &m_defaultGridCell)
+            if (CanDrawRect(gridCellRect) && pCell != &m_defaultGridCell)
             {
                 // Draw the cell base
                 HBRUSH hBackgroundBrush = CreateSolidBrush(pCell->clrBackground);
@@ -487,26 +493,24 @@ void CGrid32Mgr::DrawCells(HDC hDC, const RECT& clientRect)
                 SelectObject(hDC, hOldFont);
                 DeleteObject(hFont);
             }
-            else if (clientRect.bottom < gridCellRect.top)
+            else if (m_clientRect.bottom < gridCellRect.top)
                 break;
 
             gridCellRect.top = gridCellRect.bottom;
         }
 
         gridCellRect.left = gridCellRect.right;
-        if (clientRect.right < gridCellRect.left)
+        if (m_clientRect.right < gridCellRect.left)
             break;
     }
 }
 
-void CGrid32Mgr::DrawVoidSpace(HDC hDC, const RECT& rect)
+void CGrid32Mgr::DrawVoidSpace(HDC hDC)
 {
-    RECT clientRect;
-    GetClientRect(m_hWndGrid, &clientRect);
     bool bDrawBorder = false;
     long nMaxWidth = static_cast<long>(CalculatedColumnDistance(m_visibleTopLeft.nCol, gcs.nWidth));
     long nMaxHeight = static_cast<long>(CalculatedRowDistance(m_visibleTopLeft.nRow, gcs.nHeight));
-    if (nMaxWidth < clientRect.right)
+    if (nMaxWidth < m_clientRect.right)
     {
         HBRUSH hBrush = CreateSolidBrush(RGB(128, 128, 128));
         HPEN hPen = CreatePen(PS_SOLID, 1, RGB(128, 128, 128));
@@ -514,14 +518,14 @@ void CGrid32Mgr::DrawVoidSpace(HDC hDC, const RECT& rect)
         HPEN oldPen = (HPEN)SelectObject(hDC, hPen);
         HBRUSH oldBrush = (HBRUSH)SelectObject(hDC, hBrush);
 
-        Rectangle(hDC, nMaxWidth + nColHeaderWidth, clientRect.top, clientRect.right, clientRect.bottom);
+        Rectangle(hDC, nMaxWidth + GetActualColHeaderWidth(), m_clientRect.top, m_clientRect.right, m_clientRect.bottom);
 
         DeleteObject(SelectObject(hDC, oldPen));
         DeleteObject(SelectObject(hDC, oldBrush));
 
         bDrawBorder = true;
     }
-    if (nMaxHeight < clientRect.bottom)
+    if (nMaxHeight < m_clientRect.bottom)
     {
         HBRUSH hBrush = CreateSolidBrush(RGB(128, 128, 128));
         HPEN hPen = CreatePen(PS_SOLID, 1, RGB(128, 128, 128));
@@ -529,7 +533,7 @@ void CGrid32Mgr::DrawVoidSpace(HDC hDC, const RECT& rect)
         HPEN oldPen = (HPEN)SelectObject(hDC, hPen);
         HBRUSH oldBrush = (HBRUSH)SelectObject(hDC, hBrush);
 
-        Rectangle(hDC, 0, nMaxHeight + nRowHeaderHeight, clientRect.right, clientRect.bottom);
+        Rectangle(hDC, 0, nMaxHeight + GetActualRowHeaderHeight(), m_clientRect.right, m_clientRect.bottom);
 
         DeleteObject(SelectObject(hDC, oldPen));
         DeleteObject(SelectObject(hDC, oldBrush));
@@ -539,25 +543,25 @@ void CGrid32Mgr::DrawVoidSpace(HDC hDC, const RECT& rect)
 
     if (bDrawBorder)
     {
-        int x = nMaxWidth < clientRect.right ? nMaxWidth : clientRect.right;
-        int y = nMaxHeight < clientRect.bottom ? nMaxHeight : clientRect.bottom;
+        int x = nMaxWidth < m_clientRect.right ? nMaxWidth : m_clientRect.right;
+        int y = nMaxHeight < m_clientRect.bottom ? nMaxHeight : m_clientRect.bottom;
 
-        x += nColHeaderWidth + 1;
-        y += nRowHeaderHeight + 1;
+        x += GetActualColHeaderWidth() + 1;
+        y += GetActualRowHeaderHeight() + 1;
 
         HPEN hPen = CreatePen(PS_SOLID, 3, 0);
         HPEN oldPen = (HPEN)SelectObject(hDC, hPen);
 
-        if (x < clientRect.right)
+        if (x < m_clientRect.right)
         {
             MoveToEx(hDC, x, 0, NULL);
-            LineTo(hDC, x, y < clientRect.bottom ? y : clientRect.bottom);
+            LineTo(hDC, x, y < m_clientRect.bottom ? y : m_clientRect.bottom);
         }
 
-        if (y < clientRect.bottom)
+        if (y < m_clientRect.bottom)
         {
             MoveToEx(hDC, 0, y, NULL);
-            LineTo(hDC, x < clientRect.right ? x : clientRect.right, y);
+            LineTo(hDC, x < m_clientRect.right ? x : m_clientRect.right, y);
         }
 
 
@@ -639,10 +643,10 @@ void CGrid32Mgr::OnHScroll(UINT nSBCode, UINT nPos, HWND hScrollBar)
     switch (nSBCode)
     {
     case SB_LINELEFT:
-        IncrementSelectedCell(-1, 0, INCREMENT_SINGLE);
+        IncrementSelectedCell(-1, 0);
         break;
     case SB_LINERIGHT:
-        IncrementSelectedCell(1, 0, INCREMENT_SINGLE);
+        IncrementSelectedCell(1, 0);
         break;
     case SB_PAGELEFT:
         // Handle left page scroll
@@ -678,10 +682,10 @@ void CGrid32Mgr::OnVScroll(UINT nSBCode, UINT nPos, HWND hScrollBar)
     switch (nSBCode)
     {
     case SB_LINEUP:
-        IncrementSelectedCell(0, -1, INCREMENT_SINGLE);
+        IncrementSelectedCell(0, -1);
         break;
     case SB_LINEDOWN:
-        IncrementSelectedCell(0, 1, INCREMENT_SINGLE);
+        IncrementSelectedCell(0, 1);
         break;
     case SB_PAGEUP:
         // Handle page scroll up
@@ -719,7 +723,7 @@ void CGrid32Mgr::SetScrollRanges()
         SCROLLINFO siH = { sizeof(SCROLLINFO) };
         siH.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
         siH.nMin = 0;
-        siH.nMax = static_cast<int>(gcs.nWidth); // Assuming each column is of uniform width
+        siH.nMax = static_cast<int>(gcs.nWidth); 
         siH.nPage = 25; // Page size can be the width of one column or more
         siH.nPos = 0;
         SetScrollInfo(m_hWndGrid, SB_HORZ, &siH, TRUE);
@@ -737,205 +741,331 @@ void CGrid32Mgr::SetScrollRanges()
     }
 }
 
-void CGrid32Mgr::IncrementSelectedCell(long nRow, long nCol, short nWhich)
-{
-    // Increment or decrement the selection point
-    UINT absRow = (UINT)abs(nRow), absCol = (UINT)abs(nCol);
-    GRIDPOINT oldVisibleTopLeft = m_visibleTopLeft;
+void Nop(){}
 
-    if (nRow < 0)
+bool CGrid32Mgr::IsCellIncrementWithinCurrentPage(long nRow, long nCol, PAGESTAT& pageStat)
+{
+    if (nRow < 0 && (size_t)abs(nRow) > m_selectionPoint.nRow)
+        return false;
+    if (nCol < 0 && (size_t)abs(nCol) > m_selectionPoint.nCol)
+        return false;
+
+    return((m_selectionPoint.nCol + nCol) <= pageStat.end.nCol &&
+            (m_selectionPoint.nCol + nCol) >= pageStat.start.nCol &&
+            (m_selectionPoint.nRow + nRow) <= pageStat.end.nRow &&
+            (m_selectionPoint.nRow + nRow) >= pageStat.start.nRow);
+}
+
+void CGrid32Mgr::IncrementSelectedCell(long nRow, long nCol)
+{
+    PAGESTAT pageStat;
+    CalculatePageStats(pageStat);
+    _ASSERT(pageStat.nWidth < ((size_t)m_clientRect.right - GetActualColHeaderWidth()));
+    _ASSERT(pageStat.nHeight < ((size_t)m_clientRect.bottom - GetActualRowHeaderHeight()));
+    Nop();
+    
+    if (nRow > 0 && m_selectionPoint.nRow == gcs.nHeight - 1)
+        nRow = 0;
+    if (nCol > 0 && m_selectionPoint.nCol == gcs.nWidth - 1)
+        nCol = 0;
+    if (IsCellIncrementWithinCurrentPage(nRow, nCol, pageStat))
     {
-        if (absRow >= m_selectionPoint.nRow)
-            m_selectionPoint.nRow = 0;
-        else
-            m_selectionPoint.nRow -= absRow;
+        m_selectionPoint.nRow += nRow;
+        m_selectionPoint.nCol += nCol;
     }
     else
     {
-        m_selectionPoint.nRow += absRow;
-        if (m_selectionPoint.nRow >= (UINT)gcs.nHeight)
-            m_selectionPoint.nRow = (UINT)gcs.nHeight - 1;
+        if (nRow < 0)
+        {
+            size_t nHeight = 0;
+            if ((long long)(m_visibleTopLeft.nRow + (size_t)nRow) > 0)
+            {
+                m_selectionPoint.nRow = m_visibleTopLeft.nRow + (size_t)nRow;
+                for (size_t idx = m_visibleTopLeft.nRow - 1; idx != ~0; --idx)
+                {
+                    if (idx == 0)
+                    {
+                        m_visibleTopLeft.nRow = 0;
+                        break;
+                    }
+                    else if((nHeight + pRowInfoArray[idx].nHeight) < m_clientRect.bottom - GetActualRowHeaderHeight())
+                        nHeight += pRowInfoArray[idx].nHeight;
+                    else
+                    {
+                        m_visibleTopLeft.nRow = idx + 1;
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                m_visibleTopLeft.nRow = m_selectionPoint.nRow = 0;
+            }
+        }
+        else if (nRow > 0)
+        {
+            if (pageStat.end.nRow + (size_t)nRow < gcs.nHeight - 1)
+            {
+                auto rowDiff = pageStat.end.nRow - m_visibleTopLeft.nRow;
+                m_visibleTopLeft.nRow = m_selectionPoint.nRow = pageStat.end.nRow + (size_t)nRow;
+            }
+        }
+
+        if (nCol < 0)
+        {
+            size_t nWidth = 0;
+            if ((long long)(m_visibleTopLeft.nCol + (size_t)nCol) > 0)
+            {
+                m_selectionPoint.nCol = m_visibleTopLeft.nCol + (size_t)nCol;
+                for (size_t idx = m_visibleTopLeft.nCol - 1; idx != ~0; --idx)
+                {
+                    if (idx == 0)
+                    {
+                        m_visibleTopLeft.nCol = 0;
+                        break;
+                    }
+                    else if ((nWidth + pColInfoArray[idx].nWidth) < (size_t)m_clientRect.right - GetActualColHeaderWidth())
+                        nWidth += pColInfoArray[idx].nWidth;
+                    else
+                    {
+                        m_visibleTopLeft.nCol = idx + 1;
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                m_visibleTopLeft.nCol = m_selectionPoint.nCol = 0;
+            }
+        }
+        else if (nCol > 0)
+        {
+            if (pageStat.end.nCol + (size_t)nCol < gcs.nWidth - 1)
+            {
+                auto colDiff = pageStat.end.nCol - m_visibleTopLeft.nCol;
+                m_visibleTopLeft.nCol = m_selectionPoint.nCol = pageStat.end.nCol + (size_t)nCol;
+            }
+        }
+    }
+
+    m_scrollDifference.x = CalculatedColumnDistance(0, m_visibleTopLeft.nCol);
+    m_scrollDifference.y = CalculatedRowDistance(0, m_visibleTopLeft.nRow);
+
+    InvalidateRect(m_hWndGrid, NULL, false);
+}
+
+void CGrid32Mgr::IncrementSelectedPage(long nRow, long nCol)
+{
+    if (nRow < 0)
+    {
+        size_t nHeight = 0;
+        auto rowDiff = m_selectionPoint.nRow - m_visibleTopLeft.nRow;
+        for (size_t idx = m_visibleTopLeft.nRow - 1; idx != ~0; --idx)
+        {
+            if (idx == 0 || m_visibleTopLeft.nRow == 0)
+            {
+                m_visibleTopLeft.nRow = 0;
+                m_selectionPoint.nRow = rowDiff;
+                break;
+            }
+            else if ((nHeight + pRowInfoArray[idx].nHeight) < (size_t)m_clientRect.bottom - GetActualRowHeaderHeight())
+                nHeight += pRowInfoArray[idx].nHeight;
+            else
+            {
+                ++idx;
+                auto rowDiff = m_visibleTopLeft.nRow - idx;
+                m_selectionPoint.nRow -= rowDiff;
+                m_visibleTopLeft.nRow = idx;
+                break;
+            }
+        }
+    }
+    else if (nRow > 0)
+    {
+        for (size_t idx = 0; idx < abs(nRow); ++idx)
+        {
+            PAGESTAT pageStat;
+            CalculatePageStats(pageStat);
+            UINT nRowDiff = pageStat.end.nRow + 1 - pageStat.start.nRow;
+            if (((size_t)m_visibleTopLeft.nRow + nRowDiff) > gcs.nHeight ||
+                ((size_t)m_selectionPoint.nRow + nRowDiff) > gcs.nHeight)
+            {
+                IncrementSelectEdge(nRow, nCol);
+                return;
+            }
+            m_visibleTopLeft.nRow += nRowDiff;
+            m_selectionPoint.nRow += nRowDiff;
+        }
     }
 
     if (nCol < 0)
     {
-        if (absCol >= m_selectionPoint.nCol)
-            m_selectionPoint.nCol = 0;
-        else
-            m_selectionPoint.nCol -= absCol;
-    }
-    else
-    {
-        m_selectionPoint.nCol += absCol;
-        if (m_selectionPoint.nCol >= (UINT)gcs.nWidth)
-            m_selectionPoint.nCol = (UINT)gcs.nWidth - 1;
-    }
-
-    // Get the dimensions of the client area
-    RECT clientRect, cell = { nColHeaderWidth, nRowHeaderHeight, 0, 0 };
-    GetClientRect(m_hWndGrid, &clientRect);
-
-    // Calculate the total height and width of the visible grid area
-
-    if (m_visibleTopLeft.nRow <= m_selectionPoint.nRow)
-    {
-        for (size_t i = m_visibleTopLeft.nRow; i < m_selectionPoint.nRow; ++i)
+        size_t nWidth = 0;
+        auto colDiff = m_selectionPoint.nCol - m_visibleTopLeft.nCol;
+        for (size_t idx = m_visibleTopLeft.nCol - 1; idx != ~0; --idx)
         {
-            cell.top += static_cast<int>(pRowInfoArray[i].nHeight);
-        }
-    }
-    else
-    {
-        int nHeight = 0;
-        for (size_t i = m_selectionPoint.nRow; i != ~0 && i >= 0; --i)
-        {
-            if (i == 0)
-            {
-                m_visibleTopLeft.nRow = 0;
-                cell.top = -100;
-                break;
-            }
-            if (nHeight + static_cast<int>(pRowInfoArray[i].nHeight) > clientRect.bottom)
-            {
-                m_visibleTopLeft.nRow = i;
-                cell.top -= nHeight;
-                break;
-            }
-            nHeight += static_cast<int>(pRowInfoArray[i].nHeight);
-        }
-    }
-
-    if (m_visibleTopLeft.nCol <= m_selectionPoint.nCol)
-    {
-        for (size_t i = m_visibleTopLeft.nCol; i < m_selectionPoint.nCol; ++i)
-        {
-            cell.left += static_cast<int>(pColInfoArray[i].nWidth);
-        }
-    }
-    else
-    {
-        int nWidth = 0;
-        for (size_t i = m_selectionPoint.nCol; i != ~0 && i >= 0; --i)
-        {
-            if (nWidth + static_cast<int>(pColInfoArray[i].nWidth) > clientRect.right)
-            {
-                m_visibleTopLeft.nCol = i;
-                break;
-            }
-            nWidth += static_cast<int>(pColInfoArray[i].nWidth);
-            if (i == 0)
+            if (idx == 0 || m_visibleTopLeft.nCol == 0)
             {
                 m_visibleTopLeft.nCol = 0;
+                m_selectionPoint.nCol = colDiff;
+                break;
+            }
+            else if ((nWidth + pColInfoArray[idx].nWidth) < (size_t)m_clientRect.right - GetActualColHeaderWidth())
+                nWidth += pColInfoArray[idx].nWidth;
+            else
+            {
+                ++idx;
+                auto colDiff = m_visibleTopLeft.nCol - idx;
+                m_selectionPoint.nCol -= colDiff;
+                m_visibleTopLeft.nCol = idx;
                 break;
             }
         }
-        cell.left -= nWidth;
     }
-
-    cell.bottom = cell.top + static_cast<int>(pRowInfoArray[m_selectionPoint.nRow].nHeight);
-    cell.right = cell.left + static_cast<int>(pColInfoArray[m_selectionPoint.nCol].nWidth);
-
-    // Determine the scroll direction based on visibility
-    int scrollFlags = 0;
-
-    if (cell.top < clientRect.top || cell.bottom > clientRect.bottom)
-        scrollFlags |= SCROLL_VERT;
-
-    if (cell.left < clientRect.left || cell.right > clientRect.right)
-        scrollFlags |= SCROLL_HORZ;
-
-    if (scrollFlags != 0)
+    else if (nCol > 0)
     {
-        // Scroll to make the selected cell visible
-        ScrollToCell(m_selectionPoint.nRow, m_selectionPoint.nCol, oldVisibleTopLeft, scrollFlags);
+        for (size_t idx = 0; idx < abs(nCol); ++idx)
+        {
+            PAGESTAT pageStat;
+            CalculatePageStats(pageStat);
+            UINT nRowDiff = pageStat.end.nCol + 1 - pageStat.start.nCol;
+            if (((size_t)m_visibleTopLeft.nCol + nRowDiff) > gcs.nWidth ||
+                ((size_t)m_selectionPoint.nCol + nRowDiff) > gcs.nWidth)
+            {
+                IncrementSelectEdge(nRow, nCol);
+                return;
+            }
+            m_visibleTopLeft.nCol += nRowDiff;
+            m_selectionPoint.nCol += nRowDiff;
+        }
     }
 
-    // Force the grid to redraw
+    m_scrollDifference.x = CalculatedColumnDistance(0, m_visibleTopLeft.nCol);
+    m_scrollDifference.y = CalculatedRowDistance(0, m_visibleTopLeft.nRow);
+
     InvalidateRect(m_hWndGrid, NULL, false);
+
 }
 
-void CGrid32Mgr::ScrollToCell(size_t row, size_t col, GRIDPOINT& oldVisibleTopLeft, int scrollFlags)
+void CGrid32Mgr::IncrementSelectEdge(long nRow, long nCol)
 {
-    int scrollY = 0, scrollX = 0;
-    int newTop = 0, newLeft = 0;
-    RECT clientRect;
-    GetClientRect(m_hWndGrid, &clientRect);
-
-    if (scrollFlags & SCROLL_VERT)
+    if (nRow < 0)
     {
-        for (size_t i = m_visibleTopLeft.nRow; i < row; ++i)
+        m_visibleTopLeft.nRow = 0;
+        m_selectionPoint.nRow = 0;
+    }
+    else if (nRow > 0)
+    {
+        size_t nHeight = 0;
+        m_selectionPoint.nRow = gcs.nHeight - 1;
+        size_t idx = m_selectionPoint.nRow - 1;
+        for (; nHeight < (m_clientRect.bottom * 2) / 3; --idx)
         {
-            scrollY += static_cast<int>(pRowInfoArray[i].nHeight);
+            nHeight += pRowInfoArray[idx].nHeight;
         }
-        SetScrollPos(m_hWndGrid, SB_VERT, row, TRUE);
 
-        // Update the top row index
-        if (row > m_visibleTopLeft.nRow)
-            m_scrollDifference.y += scrollY;
+        m_visibleTopLeft.nRow = idx;
+    }
+    if (nCol < 0)
+    {
+        m_visibleTopLeft.nCol = 0;
+        m_selectionPoint.nCol = 0;
+    }
+    else if (nCol > 0)
+    {
+        size_t nWidth = 0;
+        m_selectionPoint.nCol = gcs.nWidth - 1;
+        size_t idx = m_selectionPoint.nCol - 1;
+        for (; nWidth < (m_clientRect.right * 2) / 3; --idx)
+        {
+            nWidth += pColInfoArray[idx].nWidth;
+        }
+
+        m_visibleTopLeft.nCol = idx;
+    }
+    m_scrollDifference.x = CalculatedColumnDistance(0, m_visibleTopLeft.nCol);
+    m_scrollDifference.y = CalculatedRowDistance(0, m_visibleTopLeft.nRow);
+
+    InvalidateRect(m_hWndGrid, NULL, false);
+
+}
+
+
+size_t CGrid32Mgr::MaxBeginRow()
+{
+    return size_t();
+}
+
+size_t CGrid32Mgr::MaxBeginColumn()
+{
+    return size_t();
+}
+
+void CGrid32Mgr::CalculatePageStats(PAGESTAT& pageStat)
+{
+    memset(&pageStat, 0, sizeof(PAGESTAT));
+    pageStat.start = m_visibleTopLeft;
+    for (size_t idx = m_visibleTopLeft.nCol; idx < gcs.nWidth; ++idx)
+    {
+        if (idx == gcs.nWidth - 1)
+            pageStat.end.nCol = gcs.nWidth;
+        if (pageStat.nWidth + pColInfoArray[idx].nWidth <= ((size_t)m_clientRect.right - GetActualColHeaderWidth()))
+            pageStat.nWidth += pColInfoArray[idx].nWidth;
         else
-            m_scrollDifference.y -= scrollY;
-
-        newTop = static_cast<int>(row);
+        {
+            pageStat.end.nCol = idx - 1;
+            break;
+        }
     }
-    else
+    for (size_t idx = m_visibleTopLeft.nRow; idx < gcs.nHeight; ++idx)
     {
-        // Use current visible top row if no vertical scrolling
-        newTop = m_visibleTopLeft.nRow;
-    }
-
-    if (scrollFlags & SCROLL_HORZ)
-    {
-        if (oldVisibleTopLeft.nCol)
+        if (idx == gcs.nHeight - 1)
         {
-
+            pageStat.end.nRow = gcs.nHeight - 1;
+            break;
         }
-         
-        if (col > m_visibleTopLeft.nCol && m_visibleTopLeft.nCol >= oldVisibleTopLeft.nCol)
-        {
-            for (size_t i = m_visibleTopLeft.nCol; i < col; ++i)
-            {
-                scrollX += static_cast<int>(pColInfoArray[i].nWidth);
-            }
-            m_scrollDifference.x += scrollX;
-            // Update the left column index
-            newLeft = static_cast<int>(col);
-        }
-        else if (m_visibleTopLeft.nCol == 0)
-        {
-            m_scrollDifference.x = 0;
-        }
+        else if (pageStat.nHeight + pRowInfoArray[idx].nHeight <= ((size_t)m_clientRect.bottom - GetActualRowHeaderHeight()))
+            pageStat.nHeight += pRowInfoArray[idx].nHeight;
         else
         {
-            //for(size_t i = m_visibleTopLeft.nCol; i <= m_selectionPoint.nCol; ++i)
-            for(size_t i = m_selectionPoint.nCol; i != ~0 && i >= m_visibleTopLeft.nCol; --i)
-            {
-                if (scrollX + static_cast<int>(pColInfoArray[i].nWidth) > clientRect.right)
-                {
-                    m_visibleTopLeft.nCol = i+1;
-                    break;
-                }
-                scrollX += static_cast<int>(pColInfoArray[i].nWidth);
-
-            }
-
-            m_scrollDifference.x -= scrollX;
-            // Update the left column index
-            newLeft = m_visibleTopLeft.nCol;
-
+            pageStat.end.nRow = idx - 1;
+            break;
         }
-        SetScrollPos(m_hWndGrid, SB_HORZ, col, TRUE);
-        if (m_scrollDifference.x < 0)
-            m_scrollDifference.x = 0;
-    }
-    else
-    {
-        // Use current visible left column if no horizontal scrolling
-        newLeft = m_visibleTopLeft.nCol;
     }
 
-    // Update visible top-left position
-    m_visibleTopLeft.nRow = newTop;
-    m_visibleTopLeft.nCol = newLeft;
+
+}
+
+
+bool CGrid32Mgr::IsCellVisible(UINT nRow, UINT nCol)
+{
+    RECT cell = { 0, 0, 0, 0 };
+    RECT visibleGridRect = { GetActualColHeaderWidth(), GetActualRowHeaderHeight(), m_clientRect.right, m_clientRect.bottom };
+
+    if (m_visibleTopLeft.nRow > nRow ||
+        m_visibleTopLeft.nCol > nCol)
+        return false;
+
+    if (m_visibleTopLeft.nRow == nRow &&
+        m_visibleTopLeft.nCol == nCol)
+        return true;
+
+    GRIDSIZE cellPos = { 0,0 };
+    cell = { GetActualColHeaderWidth(), GetActualRowHeaderHeight(), (long)pColInfoArray[m_visibleTopLeft.nCol].nWidth, (long)pRowInfoArray[m_visibleTopLeft.nRow].nHeight };
+
+    for (UINT idx = m_visibleTopLeft.nRow; idx < nRow; ++idx)
+       OffsetRect(&cell, 0, pRowInfoArray[idx].nHeight);
+    for (UINT idx = m_visibleTopLeft.nCol; idx < nCol; ++idx)
+        OffsetRect(&cell, pColInfoArray[idx].nWidth, 0);
+
+    if (cellPos.width < m_clientRect.right && cellPos.height < m_clientRect.bottom)
+        return true;
+
+    return false;
+}
+
+void CGrid32Mgr::ScrollToCell(size_t row, size_t col, int scrollFlags)
+{
 
 }
 
@@ -952,6 +1082,9 @@ void CGrid32Mgr::OnSize(UINT nType, int cx, int cy)
     UNREFERENCED_PARAMETER(cy);
     CalculateTotalGridRect();
     SetScrollRanges();
+    GetClientRect(m_hWndGrid, &m_clientRect);
+    visibleGrid.width = m_clientRect.right - GetActualColHeaderWidth();
+    visibleGrid.height = m_clientRect.bottom - GetActualRowHeaderHeight();
 }
 
 bool CGrid32Mgr::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
@@ -959,21 +1092,46 @@ bool CGrid32Mgr::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
     switch (nChar)
     {
     case VK_LEFT:
-        IncrementSelectedCell(0, -1, INCREMENT_SINGLE);
+        if (GetAsyncKeyState(VK_CONTROL) & 0x8000)
+            IncrementSelectEdge(0, -1);
+        else if (GetAsyncKeyState(VK_SHIFT) & 0x8000)
+            IncrementSelectedPage(0, -1);
+        else
+            IncrementSelectedCell(0, -1);
         return true;
 
     case VK_RIGHT:
-        IncrementSelectedCell(0, 1, INCREMENT_SINGLE);
+        if (GetAsyncKeyState(VK_CONTROL) & 0x8000)
+            IncrementSelectEdge(0, 1);
+        else if (GetAsyncKeyState(VK_SHIFT) & 0x8000)
+            IncrementSelectedPage(0, 1);
+        else
+            IncrementSelectedCell(0, 1);
         return true;
 
     case VK_UP:
-        IncrementSelectedCell(-1, 0, INCREMENT_SINGLE);
+        if (GetAsyncKeyState(VK_CONTROL) & 0x8000)
+            IncrementSelectEdge(-1, 0);
+        else if (GetAsyncKeyState(VK_SHIFT) & 0x8000)
+            IncrementSelectedPage(-1, 0);
+        else
+            IncrementSelectedCell(-1, 0);
         return true;
 
     case VK_DOWN:
-        IncrementSelectedCell(1, 0, INCREMENT_SINGLE);
+        if (GetAsyncKeyState(VK_CONTROL) & 0x8000)
+            IncrementSelectEdge(1, 0);
+        else if (GetAsyncKeyState(VK_SHIFT) & 0x8000)
+            IncrementSelectedPage(1, 0);
+        else
+            IncrementSelectedCell(1, 0);
         return true;
-
+    case VK_PRIOR:
+        IncrementSelectedPage(-1, 0);
+        return true;
+    case VK_NEXT:
+        IncrementSelectedPage(1, 0);
+        return true;
     default:
         // Handle other keys
         break;
