@@ -43,6 +43,21 @@ BOOL CGridCtrl::Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT n
     );
 }
 
+BOOL CGridCtrl::SetCell(LPCWSTR pwszRef, short nWhich)
+{
+    return ::SendMessage(m_hWnd, GM_SETCELL, nWhich, (LPARAM)pwszRef) != 0;
+}
+
+BOOL CGridCtrl::SetCell(UINT nRow, UINT nCol)
+{
+    return ::SendMessage(m_hWnd, GM_SETCELL, 0, MAKELPARAM(nRow, nCol)) != 0;
+}
+
+DWORD CGridCtrl::GetLastError()
+{
+    return (DWORD)::SendMessage(m_hWnd, GM_GETLASTERROR, 0, 0);
+}
+
 
 BEGIN_MESSAGE_MAP(CGridCtrl, CWnd)
 END_MESSAGE_MAP()

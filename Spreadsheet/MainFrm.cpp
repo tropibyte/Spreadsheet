@@ -15,7 +15,6 @@
 #include "pch.h"
 #include "framework.h"
 #include "Spreadsheet.h"
-
 #include "MainFrm.h"
 
 #ifdef _DEBUG
@@ -37,6 +36,7 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWndEx)
 	ON_COMMAND(ID_FILE_PRINT_DIRECT, &CMainFrame::OnFilePrint)
 	ON_COMMAND(ID_FILE_PRINT_PREVIEW, &CMainFrame::OnFilePrintPreview)
 	ON_UPDATE_COMMAND_UI(ID_FILE_PRINT_PREVIEW, &CMainFrame::OnUpdateFilePrintPreview)
+	ON_COMMAND(ID_CELL_GOTO, &CMainFrame::OnCellGoto)
 END_MESSAGE_MAP()
 
 // CMainFrame construction/destruction
@@ -60,6 +60,7 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 
 	m_wndRibbonBar.Create(this);
 	m_wndRibbonBar.LoadFromResource(IDR_RIBBON);
+	SetupFontPanel();
 
 	if (!m_wndStatusBar.Create(this))
 	{
@@ -116,6 +117,217 @@ BOOL CMainFrame::PreCreateWindow(CREATESTRUCT& cs)
 
 	return TRUE;
 }
+
+void CMainFrame::SetupFontPanel()
+{
+	// Find or create the Font panel
+	CMFCRibbonCategory* pCategory = nullptr;
+	int categoryCount = m_wndRibbonBar.GetCategoryCount();
+	for (int i = 0; i < categoryCount; ++i)
+	{
+		if (0 == _tcsicmp(m_wndRibbonBar.GetCategory(i)->GetName(), _T("Home")))
+		{
+			pCategory = m_wndRibbonBar.GetCategory(i);
+			break;
+		}
+	}
+
+	if (!pCategory)
+		return;
+
+	// Find the Font panel
+	CMFCRibbonPanel* pFontPanel = nullptr;
+	int panelCount = pCategory->GetPanelCount();
+	for (int i = 0; i < panelCount; ++i)
+	{
+		CMFCRibbonPanel* pPanel = pCategory->GetPanel(i);
+
+		if (0 == _tcsicmp(pPanel->GetName(), _T("Font")))
+		{
+			pFontPanel = pCategory->GetPanel(i);
+			break;
+		}
+	}
+
+	// If the Font panel does not exist, create it
+	if (!pFontPanel)
+	{
+		pFontPanel = pCategory->AddPanel(_T("Font"));
+		if (!pFontPanel) // Still nullptr?  Nothing else to do
+			return;
+	}
+
+	// Clear existing items in the Font panel
+	pFontPanel->RemoveAll();
+	pFontPanel->SetCenterColumnVert(0);
+	// Font Name Combo Box
+	CMFCRibbonFontComboBox* pFontComboBox = new CMFCRibbonFontComboBox(ID_FONT_NAME, TRUE, 120);
+	pFontPanel->Add(pFontComboBox);
+
+	//// Font Size Combo Box
+	//CMFCRibbonComboBox* pFontSizeComboBox = new CMFCRibbonComboBox(ID_FONT_SIZE, TRUE, 50);
+
+	//for (int i = 8; i <= 72; i += (i < 24 ? 2 : 6)) {
+	//	if (i == 22)
+	//		continue;
+	//	CString strSize;
+	//	strSize.Format(_T("%d"), i);
+	//	pFontSizeComboBox->AddItem(strSize);
+	//}
+	//pFontPanel->Add(new CMFCRibbonSeparator(TRUE));
+	//pFontPanel->Add(pFontSizeComboBox);
+
+	//// Create a panel for buttons
+	//CMFCRibbonPanel* pButtonPanel = pCategory->AddPanel(_T("Buttons"));
+	//CMFCRibbonButton* pButton1 = new CMFCRibbonButton(2001, _T("Button 1"));
+	//pButtonPanel->Add(pButton1);
+	//CMFCRibbonButton* pButton2 = new CMFCRibbonButton(2002, _T("Button 2"));
+	//pButtonPanel->Add(pButton2);
+
+
+	// Add a button below the combo boxes
+	CMFCRibbonButton* pButton1 = new CMFCRibbonButton(2001, _T("Button 1"));
+
+	// Font Style Buttons
+	CMFCRibbonButton* pBoldButton = new CMFCRibbonButton(ID_FONT_BOLD, _T("B"), -1, -1);
+	pBoldButton->SetVisible(TRUE);
+	//pFontPanel->Add(pBoldButton);
+	pButton1->AddSubItem(pBoldButton);
+	//pFontPanel->Add(new CMFCRibbonSeparator(TRUE));
+	pButton1->AddSubItem(new CMFCRibbonSeparator(TRUE));
+
+	CMFCRibbonButton* pItalicButton = new CMFCRibbonButton(ID_FONT_ITALIC, _T("I"), -1, -1);
+	pItalicButton->SetVisible(TRUE);
+	pFontPanel->Add(pItalicButton);
+	pFontPanel->Add(new CMFCRibbonSeparator(TRUE));
+
+	CMFCRibbonButton* pUnderlineButton = new CMFCRibbonButton(ID_FONT_UNDERLINE, _T("U"), -1, -1);
+	pUnderlineButton->SetVisible(TRUE);
+	pFontPanel->Add(pUnderlineButton);
+	pFontPanel->Add(new CMFCRibbonSeparator(TRUE));
+
+	CMFCRibbonButton* pStrikethroughButton = new CMFCRibbonButton(ID_FONT_STRIKETHROUGH, _T("S"), -1, -1);
+	pStrikethroughButton->SetVisible(TRUE);
+	pFontPanel->Add(pStrikethroughButton);
+
+
+	pFontPanel->Add(pButton1);
+	pFontPanel->Add(new CMFCRibbonSeparator(TRUE));
+	// Add another button below
+	CMFCRibbonButton* pButton2 = new CMFCRibbonButton(2002, _T("Button 2"));
+	pFontPanel->Add(pButton2);
+}
+
+//void CMainFrame::SetupFontPanel()
+//{
+//	//CMFCToolBarImages m_RibbonImages;
+//
+//	//m_RibbonImages.AddIcon(IDB_BUTTON_ICON);
+//
+//	// Find or create the Font panel
+//	CMFCRibbonCategory* pCategory = nullptr;
+//	int categoryCount = m_wndRibbonBar.GetCategoryCount();
+//	for (int i = 0; i < categoryCount; ++i)
+//	{
+//		if (0 == _tcsicmp(m_wndRibbonBar.GetCategory(i)->GetName(), _T("Home")))
+//		{
+//			pCategory = m_wndRibbonBar.GetCategory(i);
+//			break;
+//		}
+//	}
+//
+//	if (!pCategory)
+//		return;
+//	// Find the Font panel
+//	CMFCRibbonPanel* pFontPanel = nullptr;
+//	int panelCount = pCategory->GetPanelCount();
+//	for (int i = 0; i < panelCount; ++i)
+//	{
+//		CMFCRibbonPanel* pPanel = pCategory->GetPanel(i);
+//		
+//		if (0 == _tcsicmp(pPanel->GetName(), _T("Font"))	)
+//		{
+//			pFontPanel = pCategory->GetPanel(i);
+//			break;
+//		}
+//	}
+//
+//	// If the Font panel does not exist, create it
+//	if (!pFontPanel)
+//	{
+//		pFontPanel = pCategory->AddPanel(_T("Font"));
+//		if (!pFontPanel) // Still nullptr?  Nothing else to do
+//			return;
+//	}
+//
+//	// Clear existing items in the Font panel
+//	pFontPanel->RemoveAll();
+//
+//	CCustomRibbonLabel* pLabel = new CCustomRibbonLabel(_T(""));
+//	//pLabel->GetParentWnd();
+////	pFontPanel->Add(pLabel);
+//	pLabel->GetParentWnd();
+//
+//	// Font Name Combo Box
+//	CMFCRibbonFontComboBox* pFontComboBox = new CMFCRibbonFontComboBox(ID_FONT_NAME, TRUE, 120);
+//	pFontComboBox->SetVisible(TRUE);
+//	//pLabel->AddSubItem(pFontComboBox);
+//	//pLabel->AddSubItem(new CMFCRibbonSeparator(TRUE));
+//	pFontPanel->Add(pFontComboBox);
+//	pFontPanel->Add(new CMFCRibbonSeparator(TRUE));
+//
+//	// Font Size Combo Box
+//	CMFCRibbonComboBox* pFontSizeComboBox = new CMFCRibbonComboBox(ID_FONT_SIZE, TRUE, 50);
+//
+//	for (int i = 8; i <= 72; i += (i < 24 ? 2 : 6)) {
+//		if (i == 22)
+//			continue;
+//		CString strSize;
+//		strSize.Format(_T("%d"), i);
+//		pFontSizeComboBox->AddItem(strSize);
+//	}
+//	pFontSizeComboBox->SetVisible(TRUE);
+//	//pLabel->AddSubItem(pFontSizeComboBox);
+//	//pFontPanel->Add(pLabel);
+//	pFontPanel->Add(pFontSizeComboBox);
+//
+//	//pFontPanel->Add(new CCustomRibbonSpacer(1, 1));
+//
+//	// Font Style Buttons
+//	CMFCRibbonButton* pBoldButton = new CMFCRibbonButton(ID_FONT_BOLD, _T("B"), -1, -1);
+//	pBoldButton->SetVisible(TRUE);
+//	pFontPanel->Add(pBoldButton);
+//	pFontPanel->Add(new CMFCRibbonSeparator(TRUE));
+//
+//	CMFCRibbonButton* pItalicButton = new CMFCRibbonButton(ID_FONT_ITALIC, _T("I"), -1, -1);
+//	pItalicButton->SetVisible(TRUE);
+//	pFontPanel->Add(pItalicButton);
+//	pFontPanel->Add(new CMFCRibbonSeparator(TRUE));
+//
+//	CMFCRibbonButton* pUnderlineButton = new CMFCRibbonButton(ID_FONT_UNDERLINE, _T("U"), -1, -1);
+//	pUnderlineButton->SetVisible(TRUE);
+//	pFontPanel->Add(pUnderlineButton);
+//	pFontPanel->Add(new CMFCRibbonSeparator(TRUE));
+//
+//	CMFCRibbonButton* pStrikethroughButton = new CMFCRibbonButton(ID_FONT_STRIKETHROUGH, _T("S"), -1, -1);
+//	pStrikethroughButton->SetVisible(TRUE);
+//	pFontPanel->Add(pStrikethroughButton);
+//
+//	// Font Color Picker
+//	CMFCRibbonColorButton* pFontColorButton = new CMFCRibbonColorButton(ID_FONT_COLOR, _T("Font Color"), TRUE, -1, -1);
+//	pFontColorButton->SetVisible(TRUE);
+//	pFontPanel->Add(pFontColorButton);
+//
+//	// Background Color Picker
+//	CMFCRibbonColorButton* pBackgroundColorButton = new CMFCRibbonColorButton(ID_FONT_CELL_BKGND, _T("Background Color"), TRUE, -1, -1);
+//	pBackgroundColorButton->SetVisible(TRUE); 
+//	pFontPanel->Add(pBackgroundColorButton);
+//
+//	// Recalculate layout
+//	m_wndRibbonBar.RecalcLayout();
+//	m_wndRibbonBar.Invalidate();
+//	m_wndRibbonBar.RedrawWindow();
+//}
 
 BOOL CMainFrame::CreateOutlookBar(CMFCOutlookBar& bar, UINT uiID, CMFCShellTreeCtrl& tree, CCalendarBar& calendar, int nInitialWidth)
 {
@@ -344,4 +556,38 @@ void CMainFrame::OnFilePrintPreview()
 void CMainFrame::OnUpdateFilePrintPreview(CCmdUI* pCmdUI)
 {
 	pCmdUI->SetCheck(IsPrintPreview());
+}
+
+
+void CMainFrame::OnCellGoto()
+{
+	AfxMessageBox(_T("Ctrl+G pressed"));
+}
+
+
+BOOL CMainFrame::PreTranslateMessage(MSG* pMsg)
+{
+	if (m_hAccelTable != nullptr && ::TranslateAccelerator(m_hWnd, m_hAccelTable, pMsg))
+	{
+		return TRUE;
+	}
+	return CFrameWnd::PreTranslateMessage(pMsg);
+}
+
+
+BOOL CMainFrame::LoadFrame(UINT nIDResource, DWORD dwDefaultStyle, CWnd* pParentWnd, CCreateContext* pContext)
+{
+	// TODO: Add your specialized code here and/or call the base class
+
+	if (CFrameWndEx::LoadFrame(nIDResource, dwDefaultStyle, pParentWnd, pContext))
+	{
+		if (m_hAccelTable)
+			return TRUE;
+
+		m_hAccelTable = LoadAccelerators(AfxGetInstanceHandle(), MAKEINTRESOURCE(IDR_MAINFRAME));
+		if (m_hAccelTable)
+			return TRUE;
+	}
+
+	return FALSE;
 }

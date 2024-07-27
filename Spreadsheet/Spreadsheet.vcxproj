@@ -184,7 +184,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="calendarbar.h" />
+    <ClInclude Include="FontRibbonPanel.h" />
     <ClInclude Include="framework.h" />
+    <ClInclude Include="GotoDlg.h" />
     <ClInclude Include="GridCtrl.h" />
     <ClInclude Include="GridView.h" />
     <ClInclude Include="MainFrm.h" />
@@ -197,6 +199,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="calendarbar.cpp" />
+    <ClCompile Include="FontRibbonPanel.cpp" />
+    <ClCompile Include="GotoDlg.cpp" />
     <ClCompile Include="GridCtrl.cpp" />
     <ClCompile Include="GridView.cpp" />
     <ClCompile Include="MainFrm.cpp" />
@@ -219,10 +223,14 @@
     <ResourceCompile Include="Spreadsheet.rc" />
   </ItemGroup>
   <ItemGroup>
+    <Image Include="res\bitmap1.bmp" />
+    <Image Include="res\bold.bmp" />
     <Image Include="res\buttons.bmp" />
     <Image Include="res\filelarge.bmp" />
     <Image Include="res\filesmall.bmp" />
+    <Image Include="res\fontribbon.bmp" />
     <Image Include="res\info.bmp" />
+    <Image Include="res\italic.bmp" />
     <Image Include="res\main.bmp" />
     <Image Include="res\main.png" />
     <Image Include="res\nav_large.bmp" />
@@ -235,6 +243,7 @@
     <Image Include="res\SpreadsheetDoc.ico" />
     <Image Include="res\Toolbar.bmp" />
     <Image Include="res\Toolbar256.bmp" />
+    <Image Include="res\underline.bmp" />
     <Image Include="res\writelarge.bmp" />
     <Image Include="res\writesmall.bmp" />
   </ItemGroup>

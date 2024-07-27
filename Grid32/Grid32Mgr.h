@@ -22,6 +22,7 @@ protected:
 	}visibleGrid;
 	GRIDPOINT m_selectionPoint, m_visibleTopLeft;
 	POINT m_scrollDifference;
+	DWORD dwError;
 
 public:
 	CGrid32Mgr();
@@ -59,11 +60,33 @@ public:
 	void OnMove(int x, int y);
 	void OnSize(UINT nType, int cx, int cy);
 	bool OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags);
+	bool OnKeyUp(UINT nChar, UINT nRepCnt, UINT nFlags);
+	void GetCellByPoint(int x, int y, GRIDPOINT& gridPt);
+	void SetCellByPoint(int x, int y, GRIDPOINT& gridPt);
+	void OnLButtonDown(UINT nFlags, int x, int y);
+	void OnLButtonUp(UINT nFlags, int x, int y);
+	void OnMouseWheel(int zDelta, UINT nFlags, int x, int y);
+	void OnRButtonDown(UINT nFlags, int x, int y);
+	void OnRButtonUp(UINT nFlags, int x, int y);
+	void OnClear();
+	void OnCopy();
+	void OnCut();
+	void OnPaste();
+	void OnUndo();
+	void OnRedo();
+	void OnCanUndo();
+	void OnCanRedo();
 	bool IsCellVisible(UINT nRow, UINT nCol);
 	size_t MaxBeginRow();
 	size_t MaxBeginColumn();
 	void CalculatePageStats(PAGESTAT& pageStat);
 	long GetActualRowHeaderHeight() { return gcs.style & GS_ROWHEADER ? nRowHeaderHeight : 0; }
 	long GetActualColHeaderWidth() { return gcs.style & GS_COLHEADER ? nColHeaderWidth : 0; }
+	BOOL OnSetCell(LPCWSTR pwszRef, short nWhich);
+	BOOL OnSetCell(UINT nRow, UINT nCol);
+	DWORD GetLastError() { return dwError; }
+	void SetLastError(DWORD dwNewError) {	dwError = dwNewError;	}
+	std::wstring FormatCellReference(LPCWSTR pwszRef);
+	bool SetCurrentCell(UINT nRow, UINT nCol);
 };
 

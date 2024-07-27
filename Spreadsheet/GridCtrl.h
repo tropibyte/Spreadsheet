@@ -13,6 +13,9 @@ public:
 	virtual ~CGridCtrl();
 	static HMODULE InitGridControl();
 	BOOL Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID, GRIDCREATESTRUCT &gcs);
+	BOOL SetCell(LPCWSTR pwszRef, short nWhich);
+	BOOL SetCell(UINT nRow, UINT nCol);
+	DWORD GetLastError();
 
 protected:
 	DECLARE_MESSAGE_MAP()

@@ -23,11 +23,23 @@ public:
 #endif
 #endif
 protected:
+	virtual BOOL SetCell(LPCWSTR pwszRef, short nWhich);
+	virtual BOOL SetCell(UINT nRow, UINT nCol);
 	virtual void OnFindNext(LPCTSTR lpszFind, BOOL bNext, BOOL bCase);
 	virtual void OnReplaceSel(LPCTSTR lpszFind, BOOL bNext, BOOL bCase,
 		LPCTSTR lpszReplace);
 	virtual void OnReplaceAll(LPCTSTR lpszFind, LPCTSTR lpszReplace,
 		BOOL bCase);
+	virtual void OnTextNotFound(LPCTSTR lpszFind);
+	virtual void OnEditCut();
+	virtual void OnEditCopy();
+	virtual void OnEditPaste();
+	virtual void OnEditSelectAll();
+	virtual void OnEditClear();
+	virtual void OnEditUndo();
+	virtual void OnEditFind();
+	virtual void OnEditReplace();
+	virtual void OnEditRepeat();
 
 protected:
 	DECLARE_MESSAGE_MAP()

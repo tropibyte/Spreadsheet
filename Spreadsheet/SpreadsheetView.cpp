@@ -26,6 +26,7 @@
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #endif
+#include "GotoDlg.h"
 
 
 // CSpreadsheetView
@@ -39,6 +40,12 @@ BEGIN_MESSAGE_MAP(CSpreadsheetView, CGridView)
 	ON_COMMAND(ID_FILE_PRINT_PREVIEW, &CSpreadsheetView::OnFilePrintPreview)
 	ON_WM_CONTEXTMENU()
 	ON_WM_RBUTTONUP()
+	ON_COMMAND(ID_EDIT_PASTE, &CSpreadsheetView::OnEditPaste)
+	ON_COMMAND(ID_EDIT_CUT, &CSpreadsheetView::OnEditCut)
+	ON_COMMAND(ID_EDIT_COPY, &CSpreadsheetView::OnEditCopy)
+	ON_COMMAND(ID_EDIT_SELECT_ALL, &CSpreadsheetView::OnEditSelectAll)
+	ON_COMMAND(ID_CELL_GOTO, &CSpreadsheetView::OnCellGoto)
+	ON_COMMAND(ID_CELL_FONT, &CSpreadsheetView::OnCellFont)
 END_MESSAGE_MAP()
 
 // CSpreadsheetView construction/destruction
@@ -137,3 +144,51 @@ CSpreadsheetDoc* CSpreadsheetView::GetDocument() const // non-debug version is i
 
 
 // CSpreadsheetView message handlers
+
+
+
+
+
+void CSpreadsheetView::OnEditCut()
+{
+	// TODO: Add your command handler code here
+	MessageBox(L"Cut", L"Spreadsheet");
+}
+
+void CSpreadsheetView::OnEditCopy()
+{
+	// TODO: Add your command handler code here
+	MessageBox(L"Copy", L"Spreadsheet");
+}
+
+void CSpreadsheetView::OnEditPaste()
+{
+	// TODO: Add your command handler code here
+	MessageBox(L"Paste", L"Spreadsheet");
+}
+
+
+
+void CSpreadsheetView::OnEditSelectAll()
+{
+	// TODO: Add your command handler code here
+}
+
+
+void CSpreadsheetView::OnCellGoto()
+{
+	CGotoDlg dlg;
+	if (dlg.DoModal() == IDOK)
+	{
+		if (SetCell(dlg.m_cellRef.GetString(), dlg.nWhich))
+		{
+			//  handle error
+		}
+	}
+}
+
+
+void CSpreadsheetView::OnCellFont()
+{
+	// TODO: Add your command handler code here
+}

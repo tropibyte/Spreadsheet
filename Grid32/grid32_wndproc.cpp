@@ -82,6 +82,32 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         }
 
         break;
+    case WM_KEYUP:
+        if (pMgr->OnKeyUp((UINT)wParam, (UINT)lParam, 0))
+        {
+            // Handle key up actions if necessary
+            return 0;
+        }
+        break;
+
+    case WM_LBUTTONDOWN:
+        pMgr->OnLButtonDown((UINT)wParam, LOWORD(lParam), HIWORD(lParam));
+        break;
+
+    case WM_LBUTTONUP:
+        pMgr->OnLButtonUp((UINT)wParam, LOWORD(lParam), HIWORD(lParam));
+        break;
+
+    case WM_MOUSEWHEEL:
+        pMgr->OnMouseWheel((short)GET_WHEEL_DELTA_WPARAM(wParam), (UINT)wParam, LOWORD(lParam), HIWORD(lParam));
+        break;
+    case WM_RBUTTONDOWN:
+        pMgr->OnRButtonDown((UINT)wParam, LOWORD(lParam), HIWORD(lParam));
+        break;
+
+    case WM_RBUTTONUP:
+        pMgr->OnRButtonUp((UINT)wParam, LOWORD(lParam), HIWORD(lParam));
+        break;
     case WM_NCPAINT:
         // Handle non-client area painting
         break;
@@ -99,8 +125,51 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         EndPaint(hWnd, &ps);
         return 0; // Indicate that we have handled the message
     }
+    case WM_CLEAR:
+        pMgr->OnClear();
+    break;
 
+    case WM_COPY:
+        pMgr->OnCopy();
+        break;
 
+    case WM_CUT:
+        pMgr->OnCut();
+        break;
+
+    case WM_PASTE:
+        pMgr->OnPaste();
+        break;
+
+    case WM_UNDO:
+        pMgr->OnUndo();
+        break;
+    case GM_REDO:
+        pMgr->OnRedo();
+        break;
+    case GM_CANUNDO:
+        pMgr->OnCanUndo();
+        break;
+    case GM_CANREDO:
+        pMgr->OnCanRedo();
+        break;
+    case GM_SETCELL:
+    {
+        if (wParam)
+        {
+            LPCWSTR pwszRef = (LPCWSTR)lParam;
+            return pMgr->OnSetCell(pwszRef, (short)wParam);
+        }
+        else
+        {
+            UINT nRow = LOWORD(lParam);
+            UINT nCol = HIWORD(lParam);
+            return pMgr->OnSetCell(nRow, nCol);
+        }
+        break;
+    }
+    case GM_GETLASTERROR:
+        return pMgr->dwError;
     }
 
     return DefWindowProc(hWnd, uMsg, wParam, lParam);

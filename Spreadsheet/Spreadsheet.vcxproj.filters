@@ -48,6 +48,12 @@
     <ClInclude Include="GridView.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="FontRibbonPanel.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="GotoDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Spreadsheet.cpp">
@@ -72,6 +78,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="GridView.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="FontRibbonPanel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="GotoDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -142,6 +154,21 @@
       <Filter>Resource Files</Filter>
     </Image>
     <Image Include="res\main.png">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\bitmap1.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\bold.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\italic.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\underline.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\fontribbon.bmp">
       <Filter>Resource Files</Filter>
     </Image>
   </ItemGroup>

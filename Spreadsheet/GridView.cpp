@@ -53,6 +53,20 @@ void CGridView::Dump(CDumpContext& dc) const
 {
 	CView::Dump(dc);
 }
+
+BOOL CGridView::SetCell(LPCWSTR pwszRef, short nWhich)
+{
+    return m_wndGridCtrl.SetCell(pwszRef, nWhich);
+}
+
+BOOL CGridView::SetCell(UINT nRow, UINT nCol)
+{
+    return m_wndGridCtrl.SetCell(nRow, nCol);
+}
+
+#endif
+#endif //_DEBUG
+
 void CGridView::OnFindNext(LPCTSTR lpszFind, BOOL bNext, BOOL bCase)
 {
 }
@@ -62,8 +76,46 @@ void CGridView::OnReplaceSel(LPCTSTR lpszFind, BOOL bNext, BOOL bCase, LPCTSTR l
 void CGridView::OnReplaceAll(LPCTSTR lpszFind, LPCTSTR lpszReplace, BOOL bCase)
 {
 }
-#endif
-#endif //_DEBUG
+
+void CGridView::OnTextNotFound(LPCTSTR lpszFind)
+{
+}
+
+void CGridView::OnEditCut()
+{
+}
+
+void CGridView::OnEditCopy()
+{
+}
+
+void CGridView::OnEditPaste()
+{
+}
+
+void CGridView::OnEditSelectAll()
+{
+}
+
+void CGridView::OnEditClear()
+{
+}
+
+void CGridView::OnEditUndo()
+{
+}
+
+void CGridView::OnEditFind()
+{
+}
+
+void CGridView::OnEditReplace()
+{
+}
+
+void CGridView::OnEditRepeat()
+{
+}
 
 
 // CGridView message handlers

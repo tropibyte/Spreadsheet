@@ -16,6 +16,7 @@
 #include "CalendarBar.h"
 #include "Resource.h"
 
+
 class COutlookBar : public CMFCOutlookBar
 {
 	virtual BOOL AllowShowOnPaneMenu() const { return TRUE; }
@@ -28,6 +29,7 @@ class CMainFrame : public CFrameWndEx
 protected: // create from serialization only
 	CMainFrame() noexcept;
 	DECLARE_DYNCREATE(CMainFrame)
+	void SetupFontPanel();
 
 // Attributes
 public:
@@ -38,7 +40,7 @@ public:
 // Overrides
 public:
 	virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
-
+	
 // Implementation
 public:
 	virtual ~CMainFrame();
@@ -78,6 +80,10 @@ protected:
 	CMFCOutlookBarTabCtrl* FindOutlookParent(CWnd* pWnd);
 	CMFCOutlookBarTabCtrl* m_pCurrOutlookWnd;
 	CMFCOutlookBarPane*    m_pCurrOutlookPage;
+public:
+	afx_msg void OnCellGoto();
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
+	virtual BOOL LoadFrame(UINT nIDResource, DWORD dwDefaultStyle = WS_OVERLAPPEDWINDOW | FWS_ADDTOTITLE, CWnd* pParentWnd = NULL, CCreateContext* pContext = NULL);
 };
 
 

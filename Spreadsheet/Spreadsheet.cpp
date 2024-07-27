@@ -192,6 +192,8 @@ protected:
 protected:
 	DECLARE_MESSAGE_MAP()
 	virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
+public:
+//	afx_msg void OnCellGoto();
 };
 
 CAboutDlg::CAboutDlg() noexcept : CDialogEx(IDD_ABOUTBOX)
@@ -204,6 +206,7 @@ void CAboutDlg::DoDataExchange(CDataExchange* pDX)
 }
 
 BEGIN_MESSAGE_MAP(CAboutDlg, CDialogEx)
+//	ON_COMMAND(ID_CELL_GOTO, &CAboutDlg::OnCellGoto)
 END_MESSAGE_MAP()
 
 // App command to run the dialog
@@ -244,3 +247,9 @@ BOOL CAboutDlg::PreCreateWindow(CREATESTRUCT& cs)
 
 	return CDialogEx::PreCreateWindow(cs);
 }
+
+
+//void CAboutDlg::OnCellGoto()
+//{
+//	// TODO: Add your command handler code here
+//}
