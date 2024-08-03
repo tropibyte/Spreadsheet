@@ -2,6 +2,14 @@
 #include "grid32.h"
 #include "grid32_internal.h"
 
+GRIDPOINT MakeGridPointFromWPARAM(WPARAM wParam)
+{
+    GRIDPOINT pt;
+    pt.nCol = LOWORD(wParam);
+    pt.nRow = HIWORD(wParam);
+    return pt;
+}
+
 LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     bool bCallDefault = true;
@@ -44,7 +52,7 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         if (!pMgr->Create(pGridCreateStruct))
         {
             return -1; // Fail creation
-        }    
+        }
     }
     break;
     case WM_NCDESTROY:
@@ -59,7 +67,7 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         int y = (int)(short)HIWORD(lParam);
         pMgr->OnMove(x, y);
     }
-        break;
+    break;
     case WM_SIZE:
     {
         UINT nType = (UINT)wParam;
@@ -67,7 +75,7 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         int cy = (int)HIWORD(lParam);
         pMgr->OnSize(nType, cx, cy);
     }
-        break;
+    break;
     case WM_HSCROLL:
         pMgr->OnHScroll(LOWORD(wParam), HIWORD(wParam), (HWND)lParam);
         break;
@@ -77,7 +85,7 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
     case WM_KEYDOWN:
         if (pMgr->OnKeyDown((UINT)wParam, (UINT)lParam, 0))
         {
-            InvalidateRect(hWnd, NULL, false);
+            pMgr->Invalidate(false);
             return 0;
         }
 
@@ -97,7 +105,23 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
     case WM_LBUTTONUP:
         pMgr->OnLButtonUp((UINT)wParam, LOWORD(lParam), HIWORD(lParam));
         break;
-
+    case WM_MOUSEMOVE:
+        pMgr->OnMouseMove((UINT)wParam, LOWORD(lParam), HIWORD(lParam));
+        break;
+    case WM_NCMOUSEMOVE:
+        pMgr->OnNcMouseMove((UINT)wParam, LOWORD(lParam), HIWORD(lParam));
+        break;
+    case WM_NCHITTEST:
+    {
+        bool bHitTested = false;
+        pMgr->m_gridHitTest = pMgr->OnNcHitTest((UINT)wParam, LOWORD(lParam), HIWORD(lParam), bHitTested);
+        if (bHitTested)
+        {
+            pMgr->SetCursorBasedOnNcHitTest();
+            return HTCLIENT;
+        }
+        break;
+    }
     case WM_MOUSEWHEEL:
         pMgr->OnMouseWheel((short)GET_WHEEL_DELTA_WPARAM(wParam), (UINT)wParam, LOWORD(lParam), HIWORD(lParam));
         break;
@@ -107,6 +131,9 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 
     case WM_RBUTTONUP:
         pMgr->OnRButtonUp((UINT)wParam, LOWORD(lParam), HIWORD(lParam));
+        break;
+    case WM_TIMER:
+        pMgr->OnTimer((UINT_PTR)wParam);
         break;
     case WM_NCPAINT:
         // Handle non-client area painting
@@ -119,15 +146,15 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
     {
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(hWnd, &ps);
-        if(hdc)
-            pMgr->Paint(ps);
+        if (hdc)
+            pMgr->OnPaint(ps);
 
         EndPaint(hWnd, &ps);
         return 0; // Indicate that we have handled the message
     }
     case WM_CLEAR:
         pMgr->OnClear();
-    break;
+        break;
 
     case WM_COPY:
         pMgr->OnCopy();
@@ -158,18 +185,59 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         if (wParam)
         {
             LPCWSTR pwszRef = (LPCWSTR)lParam;
-            return pMgr->OnSetCell(pwszRef, (short)wParam);
+            return pMgr->OnSetCurrentCell(pwszRef, (short)wParam);
         }
         else
         {
             UINT nRow = LOWORD(lParam);
             UINT nCol = HIWORD(lParam);
-            return pMgr->OnSetCell(nRow, nCol);
+            return pMgr->OnSetCurrentCell(nRow, nCol);
         }
         break;
     }
     case GM_GETLASTERROR:
         return pMgr->dwError;
+
+    case GM_SETCOLUMNWIDTH:
+        return pMgr->SetColumnWidth((size_t)wParam, (size_t)lParam);
+
+    case GM_GETCOLUMNWIDTH:
+        return pMgr->GetColumnWidth((size_t)wParam);
+
+    case GM_SETROWHEIGHT:
+        return pMgr->SetRowHeight((size_t)wParam, (size_t)lParam);
+
+    case GM_GETROWHEIGHT:
+        return pMgr->GetRowHeight((size_t)wParam);
+
+    case GM_SETSELECTION:
+        pMgr->OnSetSelection(reinterpret_cast<GRIDSELECTION*>(lParam));
+        break;
+
+    case GM_GETSELECTION:
+        pMgr->OnGetSelection(reinterpret_cast<GRIDSELECTION*>(lParam));
+        break;
+
+    case GM_SETCELLTEXT:
+        pMgr->SetCellText(MakeGridPointFromWPARAM(wParam), reinterpret_cast<LPCWSTR>(lParam));
+        break;
+
+    case GM_GETCELLTEXT:
+    {
+        if (!lParam)
+        {
+            pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
+            return 0;
+        }
+
+        return pMgr->OnGetCellText(MakeGridPointFromWPARAM(wParam), reinterpret_cast<GRID_GETTEXT*>(lParam));
+    }
+    case GM_SETREDRAW:
+        pMgr->m_bRedraw = wParam != 0 ? TRUE : FALSE;
+        break;
+
+    case GM_GETREDRAW:
+        return pMgr->m_bRedraw ? TRUE : FALSE;
     }
 
     return DefWindowProc(hWnd, uMsg, wParam, lParam);

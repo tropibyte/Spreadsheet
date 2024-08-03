@@ -14,8 +14,8 @@ bool RegisterGrid32Class(HINSTANCE hInstance)
     wc.cbWndExtra = 2 * sizeof(PVOID);
     wc.hInstance = hInstance;
     wc.hIcon = NULL;
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.hCursor = NULL;
+    wc.hbrBackground = NULL; // (HBRUSH)(COLOR_WINDOW + 1);
     wc.lpszMenuName = NULL;
     wc.lpszClassName = GRID_WNDCLASS_NAME;
     wc.hIconSm = NULL;
@@ -40,6 +40,6 @@ cell_base::cell_base() : clrBackground(0), m_clrBorderColor(0), m_nBorderWidth(0
 {
 }
 
-__FONTINFO::__FONTINFO() : m_fPointSize(0), m_clrTextColor(0), bItalic(false), bUnderline(false), bWeight(0)
+__FONTINFO::__FONTINFO() : m_fPointSize(0), m_clrTextColor(0), bItalic(false), bUnderline(false), bWeight(0), bStrikeThrough(false)
 {
 }

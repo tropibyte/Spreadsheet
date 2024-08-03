@@ -47,5 +47,8 @@
     <ClCompile Include="Grid32Mgr.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="EditWndProc.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

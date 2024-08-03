@@ -159,6 +159,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp" />
+    <ClCompile Include="EditWndProc.cpp" />
     <ClCompile Include="grid32.cpp" />
     <ClCompile Include="Grid32Mgr.cpp" />
     <ClCompile Include="grid32_wndproc.cpp" />

@@ -31,6 +31,17 @@
 #define SETBYNAME					1
 #define SETBYCOORDINATE				2
 
+// Grid32 WM_NCHITTEST constants
+
+#define GRID_HTCORNER			    (HTHELP + 11)
+#define GRID_HTCOLHEADER		    (HTHELP + 12)
+#define GRID_HTROWHEADER			(HTHELP + 13)
+#define GRID_HTCOLDIVIDER			(HTHELP + 14)
+#define GRID_HTROWDIVIDER			(HTHELP + 15)
+#define GRID_HTCELL					(HTHELP + 16)
+#define GRID_HTOUTSIDE				(HTHELP + 17)
+
+
 // Grid32 Messages
 
 #define GM_REDO						(WM_USER + 1)
@@ -38,11 +49,25 @@
 #define GM_CANREDO					(WM_USER + 3)
 #define GM_SETCELL					(WM_USER + 4)
 #define GM_GETLASTERROR				(WM_USER + 5)
+#define GM_SETCOLUMNWIDTH			(WM_USER + 6)
+#define GM_GETCOLUMNWIDTH			(WM_USER + 7)
+#define GM_SETROWHEIGHT				(WM_USER + 8)
+#define GM_GETROWHEIGHT				(WM_USER + 9)
+#define GM_SETSELECTION				(WM_USER + 10)
+#define GM_GETSELECTION				(WM_USER + 11)
+#define GM_SETCELLTEXT				(WM_USER + 12)
+#define GM_GETCELLTEXT				(WM_USER + 13)
+#define GM_SETREDRAW				(WM_SETREDRAW)
+#define GM_GETREDRAW				(WM_USER + 14)
 
 // Grid32 Error
 
-#define GRID_ERROR_INVALID_CELL_REFERENCE   30001
-#define GRID_ERROR_NOT_IMPLEMENTED			30002
+#define GRID_ERROR_INVALID_CELL_REFERENCE			30001
+#define GRID_ERROR_NOT_IMPLEMENTED					30002
+#define GRID_ERROR_OUT_OF_RANGE						30003
+#define GRID_ERROR_INVALID_PARAMETER				30004
+#define GRID_ERROR_NOT_EXIST						30005
+#define GRID_ERROR_OUT_OF_MEMORY					30006
 
 
 // Grid32 structures
@@ -54,6 +79,15 @@ typedef struct {
 	LONG   style;
 	COLORREF clrSelectBox;
 }GRIDCREATESTRUCT, *PGRIDCREATESTRUCT;
+
+typedef struct __GRIDPOINT
+{
+	UINT nRow, nCol;
+}GRIDPOINT;
+
+typedef struct __MergeRange {
+	GRIDPOINT start, end;
+}MERGERANGE;
 
 typedef struct __FONTINFO {
 	std::wstring m_wsFontFace;
@@ -70,6 +104,7 @@ struct cell_base
 	COLORREF clrBackground, m_clrBorderColor;
 	UINT m_nBorderWidth;
 	int penStyle;
+	UINT justification;
 	std::wstring m_wsName;
 	cell_base();
 };
@@ -86,12 +121,8 @@ typedef struct __COLINFO : public cell_base {
 
 typedef struct __GRIDCELL : public cell_base {
 	std::wstring m_wsText;
+	MERGERANGE mergeRange;
 }GRIDCELL, *PGRIDCELL;
-
-typedef struct __GRIDPOINT
-{
-	UINT nRow, nCol;
-}GRIDPOINT;
 
 typedef struct{
 	long width, height;
@@ -105,5 +136,23 @@ typedef struct {
 typedef struct {
 	LPCWSTR pwszRef;
 	short nWhich;
-}GRIDSETCELL;
+}GRIDSETCURCELL;
+
+typedef struct {
+	GRIDPOINT start, end;
+}GRIDSELECTION;
+
+typedef struct {
+	LPWSTR wszBuff;
+	UINT nLen;
+}GRID_GETTEXT;
+
+typedef struct tagGRIDNMHDR : tagNMHDR {
+	// Add custom members for your notification data
+	// For example:
+	POINT pt; // Mouse position
+	GRIDPOINT cellPt; // Grid cell coordinates
+	void* pExtra; //Extra info as needed
+} GRIDNMHDR, * LPGRIDNMHDR;
+
 #endif // !_GRID32
