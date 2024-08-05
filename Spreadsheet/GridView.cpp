@@ -130,7 +130,7 @@ int CGridView::OnCreate(LPCREATESTRUCT lpCreateStruct)
     gcs.nHeight = 4096;
     gcs.nDefColWidth = 150;
     gcs.nDefRowHeight = 40;
-    gcs.clrSelectBox = RGB(255, 0, 0);
+    gcs.clrCurrentCellHighlightBox = RGB(255, 0, 0);
 
     if (CView::OnCreate(lpCreateStruct) == -1)
         return -1;

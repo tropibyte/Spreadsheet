@@ -1,9 +1,7 @@
 #include "pch.h"
-#include <sstream>
-#include <cctype>
-#include <set>
 #include <CommCtrl.h>
 #include "Grid32Mgr.h"
+
 
 const std::set<char> allowedPunctuation = {
 '!', '@', '#', '$', '%', '^', '&', '*', '(', ')',
@@ -15,7 +13,8 @@ const std::set<char> allowedPunctuation = {
 CGrid32Mgr::CGrid32Mgr() : pRowInfoArray(nullptr), pColInfoArray(nullptr), 
 m_hWndGrid(NULL), nColHeaderHeight(40), nRowHeaderWidth(70), m_editWndProc(nullptr),
 m_nMouseHoverDelay(400), m_npHoverDelaySet(0), m_nToBeSized(~0), 
-m_rgbSizingLine(RGB(0, 0, 64)), m_nSizingLine(0)
+m_rgbSizingLine(RGB(0, 0, 64)), m_nSizingLine(0), m_bResizable(true),
+m_bSizing(false), m_bSelecting(false), m_hDefaultFont(NULL)
 {
     memset(&gcs, 0, sizeof(GRIDCREATESTRUCT));
     m_defaultGridCell.clrBackground = RGB(255, 255, 255);
@@ -47,6 +46,7 @@ m_rgbSizingLine(RGB(0, 0, 64)), m_nSizingLine(0)
     dwError = 0;
     memset(&m_selectionRect, 0, sizeof(GRIDSELECTION));
     m_bSelecting = FALSE;
+    m_mouseDraggingStartPoint = { 0, 0 };
 }
 
 
@@ -139,7 +139,32 @@ bool CGrid32Mgr::Create(PGRIDCREATESTRUCT pGCS)
     }
 
     SetLastError(0);
+
+    GdiplusStartupInput gdiplusStartupInput;
+    if (GdiplusStartup(&m_gdiplusToken, &gdiplusStartupInput, NULL) != Ok) {
+        return false; // Initialization failed
+    }
+
+    HDC hDC = GetDC(m_hWndGrid);
+    m_hDefaultFont = CreateFontW(
+        (int)(m_defaultGridCell.fontInfo.m_fPointSize * GetDeviceCaps(hDC, LOGPIXELSY)) / -72, 0, 0, 0,
+        m_defaultGridCell.fontInfo.bWeight, m_defaultGridCell.fontInfo.bItalic,
+        m_defaultGridCell.fontInfo.bUnderline, 0, 0, 0, 0, 0, 0,
+        m_defaultGridCell.fontInfo.m_wsFontFace.c_str()
+    );
+
+    ReleaseDC(m_hWndGrid, hDC);
+    SendMessage(m_hWndEdit, WM_SETFONT, (WPARAM)m_hDefaultFont, 0);
+
     return true; // Return true if creation succeeded, false otherwise
+}
+
+void CGrid32Mgr::OnDestroy()
+{
+    SendMessage(m_hWndEdit, WM_SETFONT, 0, 0);
+    DeleteObject(m_hDefaultFont);
+    m_hDefaultFont = NULL;
+    GdiplusShutdown(m_gdiplusToken);
 }
 
 void CGrid32Mgr::OnPaint(PAINTSTRUCT& ps)
@@ -167,6 +192,7 @@ void CGrid32Mgr::OnPaint(PAINTSTRUCT& ps)
     // Perform all drawing operations on the memory DC
     DrawGrid(memDC);
     DrawCells(memDC);
+    DrawSelectionSurround(memDC); 
     DrawCurrentCellBox(memDC);
     DrawHeader(memDC);
     DrawVoidSpace(memDC);
@@ -233,7 +259,7 @@ void CGrid32Mgr::DrawCurrentCellBox(HDC hDC)
                     if (CanDrawRect(gridCellRect))
                     {
                         // Create a pen with the specified color and a width of 3
-                        HPEN hPen = CreatePen(PS_SOLID, 3, gcs.clrSelectBox);
+                        HPEN hPen = CreatePen(PS_SOLID, 3, gcs.clrCurrentCellHighlightBox);
                         HPEN hOldPen = (HPEN)SelectObject(hDC, hPen);
 
                         // Use a NULL brush to only draw the border
@@ -481,66 +507,12 @@ void CGrid32Mgr::DrawGrid(HDC hDC)
     DeleteObject(hBorderPen);
 }
 
-//void CGrid32Mgr::DrawCells(HDC hDC)
-//{
-//    RECT gridCellRect = totalGridCellRect;
-//    OffsetRectByScroll(gridCellRect);
-//
-//    gridCellRect.right = gridCellRect.left;
-//    gridCellRect.bottom = gridCellRect.top;
-//
-//    for (size_t col = m_visibleTopLeft.nCol; col < gcs.nWidth; ++col)
-//    {
-//        gridCellRect.right += (long)pColInfoArray[col].nWidth;
-//        for (size_t row = m_visibleTopLeft.nRow; row < gcs.nHeight; ++row)
-//        {
-//            PGRIDCELL pCell = GetCell((UINT)row, (UINT)col);
-//
-//            gridCellRect.bottom += (long)pRowInfoArray[row].nHeight;
-//
-//            if (CanDrawRect(gridCellRect) && pCell != &m_defaultGridCell)
-//            {
-//                // Draw the cell base
-//                HBRUSH hBackgroundBrush = CreateSolidBrush(pCell->clrBackground);
-//                HPEN hBorderPen = CreatePen(pCell->penStyle, pCell->m_nBorderWidth, pCell->m_clrBorderColor);
-//                HPEN hOldPen = (HPEN)SelectObject(hDC, hBorderPen);
-//                HBRUSH hOldBrush = (HBRUSH)SelectObject(hDC, hBackgroundBrush);
-//                Rectangle(hDC, gridCellRect.left, gridCellRect.top, gridCellRect.right, gridCellRect.bottom);
-//                SelectObject(hDC, hOldPen);
-//                SelectObject(hDC, hOldBrush);
-//                DeleteObject(hBorderPen);
-//                DeleteObject(hBackgroundBrush);
-//
-//                // Draw the cell text
-//                SetBkMode(hDC, TRANSPARENT);
-//                SetTextColor(hDC, pCell->fontInfo.m_clrTextColor);
-//
-//                HFONT hFont = CreateFontW(
-//                    (int)(pCell->fontInfo.m_fPointSize * GetDeviceCaps(hDC, LOGPIXELSY)) / -72, 0, 0, 0,
-//                    pCell->fontInfo.bWeight, pCell->fontInfo.bItalic,
-//                    pCell->fontInfo.bUnderline, 0, 0, 0, 0, 0, 0,
-//                    pCell->fontInfo.m_wsFontFace.c_str()
-//                );
-//
-//                HFONT hOldFont = (HFONT)SelectObject(hDC, hFont);
-//
-//                DrawTextW(hDC, pCell->m_wsText.c_str(), -1, &gridCellRect, pCell->justification | DT_SINGLELINE);
-//
-//                SelectObject(hDC, hOldFont);
-//                DeleteObject(hFont);
-//            }
-//            else if (m_clientRect.bottom < gridCellRect.top)
-//                break;
-//
-//            gridCellRect.top = gridCellRect.bottom;
-//        }
-//
-//        gridCellRect.left = gridCellRect.right;
-//        if (m_clientRect.right < gridCellRect.left)
-//            break;
-//    }
-//
-//}
+void CGrid32Mgr::DrawSelectionOverlay(HDC hDC, RECT &gridCellRect)
+{
+    BYTE alpha = 255 / 5;
+    DrawSemiTransparentRectangle(hDC, gridCellRect, gcs.clrSelectionOverlay, alpha);
+}
+
 
 void CGrid32Mgr::DrawCells(HDC hDC)
 {
@@ -549,14 +521,15 @@ void CGrid32Mgr::DrawCells(HDC hDC)
     for (size_t col = m_visibleTopLeft.nCol;
         col < gcs.nWidth && gridCellRect.left <= m_clientRect.right; ++col)
     {
-        gridCellRect.left = GetColumnStartPos(col);
+        gridCellRect.left = (long)GetColumnStartPos((UINT)col);
         gridCellRect.right = gridCellRect.left + (long)pColInfoArray[col].nWidth;
         for (size_t row = m_visibleTopLeft.nRow;
             row < gcs.nHeight && gridCellRect.top <= m_clientRect.bottom; ++row)
         {
-            gridCellRect.top = GetRowStartPos(row);
+            gridCellRect.top = (long)GetRowStartPos((UINT)row);
             gridCellRect.bottom = gridCellRect.top + (long)pRowInfoArray[row].nHeight;
 
+            GRIDPOINT gridPt = { (UINT)row, (UINT)col };
             PGRIDCELL pCell = GetCell((UINT)row, (UINT)col);
 
             if (CanDrawRect(gridCellRect) && pCell != &m_defaultGridCell)
@@ -597,6 +570,14 @@ void CGrid32Mgr::DrawCells(HDC hDC)
 
                 SelectObject(hDC, hOldFont);
                 DeleteObject(hFont);
+
+            }
+
+            if (!IsSelectionUnicellular() && 
+                IsCellPointInsideSelection(gridPt) && 
+                !AreGridPointsEqual(gridPt, m_currentCell))
+            {
+                DrawSelectionOverlay(hDC, gridCellRect);
             }
         }
 
@@ -670,14 +651,14 @@ void CGrid32Mgr::DrawVoidSpace(HDC hDC)
 
 void CGrid32Mgr::DrawSizingLine(HDC hDC)
 {
-    if (!m_bSizing)
+    if (!m_bResizable || !m_bSizing)
         return;
 
     HPEN hOldPen = NULL, hPen = CreatePen(PS_DASHDOT, 1, m_rgbSizingLine);
     POINT pt;
     GetCursorPos(&pt);
     ScreenToClient(m_hWndGrid, &pt);
-    SelectObject(hDC, hPen);
+    hOldPen = (HPEN)SelectObject(hDC, hPen);
     if (m_gridHitTest == GRID_HTCOLDIVIDER)
     {
         MoveToEx(hDC, pt.x, 0, NULL);
@@ -690,6 +671,56 @@ void CGrid32Mgr::DrawSizingLine(HDC hDC)
     }
     SelectObject(hDC, hOldPen);
     DeleteObject(hPen);
+}
+
+void CGrid32Mgr::DrawSemiTransparentRectangle(HDC hdc, RECT rect, COLORREF color, BYTE alpha) 
+{
+    Graphics graphics(hdc);
+    Color fillColor(alpha, GetRValue(color), GetGValue(color), GetBValue(color));
+    SolidBrush brush(fillColor);
+    //graphics.FillRectangle(&brush, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+    Gdiplus::Rect rect2;
+    rect2.X = rect.left;
+    rect2.Y = rect.top;
+    rect2.Width = rect.right - rect.left;
+    rect2.Height = rect.bottom - rect.top;
+    graphics.FillRectangle(&brush, rect2);
+}
+
+void CGrid32Mgr::DrawSelectionSurround(HDC hDC)
+{
+    if (IsSelectionUnicellular())
+        return;
+
+    GRIDSELECTION normalizedSelection = m_selectionRect;
+
+    NormalizeSelectionRect(normalizedSelection);
+    POINT startPt = { (long)GetColumnStartPos((UINT)normalizedSelection.start.nCol),
+                        (long)GetRowStartPos((UINT)normalizedSelection.start.nRow) },
+          endPt = { (long)GetColumnStartPos((UINT)normalizedSelection.end.nCol),
+                        (long)GetRowStartPos((UINT)normalizedSelection.end.nRow) };
+
+    UINT endCol = normalizedSelection.end.nCol < gcs.nWidth ?
+        normalizedSelection.end.nCol : (UINT)(gcs.nWidth - 1);
+    UINT endRow = normalizedSelection.end.nRow < gcs.nHeight ?
+        normalizedSelection.end.nRow : (UINT)(gcs.nHeight - 1);
+
+    endPt.x += (long)pColInfoArray[endCol].nWidth;
+    endPt.y += (long)pRowInfoArray[endRow].nHeight;
+
+    if (normalizedSelection.start.nCol < m_visibleTopLeft.nCol)
+        startPt.x = -10;
+    if (normalizedSelection.start.nRow < m_visibleTopLeft.nRow)
+        startPt.y = -10;
+
+    HPEN hPen = CreatePen(PS_SOLID, 3, gcs.clrSelectionOverlay), hOldPen;
+    HBRUSH hOldBrush;
+    hOldPen = (HPEN)SelectObject(hDC, hPen);
+    hOldBrush = (HBRUSH)SelectObject(hDC, GetStockObject(NULL_BRUSH));
+    Rectangle(hDC, startPt.x, startPt.y, endPt.x, endPt.y);
+    SelectObject(hDC, hOldBrush);
+    DeleteObject(SelectObject(hDC, hOldPen));
+    hPen = NULL;
 }
 
 bool CGrid32Mgr::IsCellMerged(UINT row, UINT col) 
@@ -771,17 +802,12 @@ void CGrid32Mgr::GetCurrentCellRect(RECT &rect)
 
 PGRIDCELL CGrid32Mgr::GetCell(UINT nRow, UINT nCol)
 {
-    //auto it = mapCells.find(std::make_pair(nRow, nCol));
-    //if (it != mapCells.end())
-    //{
-    //    return it->second;
-    //}
-
-    for (auto it = mapCells.begin(); it != mapCells.end(); ++it)
+    auto it = mapCells.find(std::make_pair(nRow, nCol));
+    if (it != mapCells.end())
     {
-        if(it->first.first == nRow && it->first.second == nCol)
-            return it->second;
+        return it->second;
     }
+
     return &m_defaultGridCell;
 }
 
@@ -832,7 +858,7 @@ UINT CGrid32Mgr::GetCellTextLen(UINT nRow, UINT nCol)
     auto it = mapCells.find(key);
 
     if (it != mapCells.end()) {
-        return it->second->m_wsText.length() + 2;
+        return (UINT)(it->second->m_wsText.length() + 2);
     }
 
     return 0;
@@ -1430,9 +1456,13 @@ bool CGrid32Mgr::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
     case VK_NEXT:
         IncrementSelectedPage(1, 0);
         return true;
+    case VK_DELETE:
+        ClearCellText(m_currentCell.nRow, m_currentCell.nCol);
+        Invalidate();
+        break;
     default:
         // Handle alphanumeric characters, space, and specific punctuation
-        if (std::isalnum(nChar) || std::isspace(nChar) || allowedPunctuation.count(nChar))
+        if (VK_BACK == nChar || std::isalnum(nChar) || std::isspace(nChar) || allowedPunctuation.count(nChar))
         {
             // Show edit control at current cell position
             UINT nLen = GetCurrentCellTextLen();
@@ -1467,19 +1497,29 @@ bool CGrid32Mgr::OnKeyUp(UINT nChar, UINT nRepCnt, UINT nFlags)
 
 void CGrid32Mgr::GetCellByPoint(int x, int y, GRIDPOINT& gridPt)
 {
-    if (x < GetActualRowHeaderWidth() || x >= m_clientRect.right ||
-        y < GetActualColHeaderHeight() || y >= m_clientRect.bottom)
+    if (x < GetActualRowHeaderWidth() || x >= m_clientRect.right)
+        gridPt.nCol = ~0;
+    else
+    {
+        size_t nWidth = (size_t)GetActualRowHeaderWidth(); 
+        size_t idx = m_visibleTopLeft.nCol;
+        if (idx > (size_t)(~0)/2)
+            idx = m_visibleTopLeft.nCol = 0;
+        for (; nWidth + pColInfoArray[idx].nWidth < x; ++idx, nWidth += pColInfoArray[idx].nWidth);
+        gridPt.nCol = (UINT)idx;
+
+    }
+
+    if(y < GetActualColHeaderHeight() || y >= m_clientRect.bottom)
     {
         gridPt.nRow = ~0;
-        gridPt.nCol = ~0;
     }
     else
     {
-        size_t nWidth = (size_t)GetActualRowHeaderWidth(), nHeight = (size_t)GetActualColHeaderHeight();
-        size_t idx = m_visibleTopLeft.nCol;
-        for (; nWidth + pColInfoArray[idx].nWidth < x; ++idx, nWidth += pColInfoArray[idx].nWidth);
-        gridPt.nCol = (UINT)idx;
-        idx = m_visibleTopLeft.nRow;
+        size_t nHeight = (size_t)GetActualColHeaderHeight();
+        size_t idx = m_visibleTopLeft.nRow;
+        if (idx > (size_t)-100)
+            idx = m_visibleTopLeft.nRow = 0;
         for (; nHeight + pRowInfoArray[idx].nHeight < y; ++idx, nHeight += pRowInfoArray[idx].nHeight);
         gridPt.nRow = (UINT)idx;
     }
@@ -1513,22 +1553,200 @@ void CGrid32Mgr::SetCellByPoint(int x, int y, GRIDPOINT &gridPt)
             m_scrollDifference.y = (long)CalculatedRowDistance(0, (size_t)m_visibleTopLeft.nRow);
         }
 
+        gridPt = m_currentCell;
         Invalidate(false);
     }
 }
+
+void CGrid32Mgr::StartMouseTracking()
+{
+    // Get the default hover time-out from system settings
+    UINT hoverTime = 0;
+    SystemParametersInfo(SPI_GETMOUSEHOVERTIME, 0, &hoverTime, 0);
+
+    // Set up the TRACKMOUSEEVENT structure
+    TRACKMOUSEEVENT tme;
+    memset(&tme, 0, sizeof(TRACKMOUSEEVENT));
+    tme.cbSize = sizeof(TRACKMOUSEEVENT);
+    tme.dwFlags = TME_HOVER | TME_LEAVE;
+    tme.hwndTrack = m_hWndGrid;
+    //tme.dwHoverTime = hoverTime; // Use the system hover time
+    tme.dwHoverTime = 100;
+
+    // Start tracking
+    TrackMouseEvent(&tme);
+}
+
+void CGrid32Mgr::CancelMouseTracking()
+{
+    // Set up the TRACKMOUSEEVENT structure to cancel tracking
+    TRACKMOUSEEVENT tme;
+    memset(&tme, 0, sizeof(TRACKMOUSEEVENT));
+    tme.cbSize = sizeof(TRACKMOUSEEVENT);
+    tme.dwFlags = TME_CANCEL | TME_HOVER | TME_LEAVE;
+    tme.hwndTrack = m_hWndGrid;
+
+    // Cancel tracking
+    TrackMouseEvent(&tme);
+}
+
+void CGrid32Mgr::ConstrainMouseToClientArea()
+{
+    RECT clientRect, screenRect;
+    GetClientRect(m_hWndGrid, &clientRect);
+    GetWindowRect(GetDesktopWindow(), &screenRect);
+
+    MapWindowPoints(m_hWndGrid, GetDesktopWindow(), (LPPOINT)&clientRect, 2);
+
+    screenRect.left = clientRect.left - 1;
+    if (screenRect.left < 1)
+        screenRect.left = 1;
+    screenRect.top = clientRect.top - 1;
+    if (screenRect.top < 1)
+        screenRect.top = 1;
+
+    // Constrain the cursor to the screenRect
+    ClipCursor(&screenRect);
+}
+
+void CGrid32Mgr::CalcSelectionCoordinatesWithMouse(int x, int y, bool& bChangeX, bool bChangeY)
+{
+    bChangeX = false, bChangeY = false;
+    POINT pt;
+    GRIDPOINT gridPt;
+    GetCursorPos(&pt);
+    ScreenToClient(m_hWndGrid, &pt);
+    GetCellByPoint(x, y, gridPt);
+
+    if (pt.x <= GetActualRowHeaderWidth())
+    {
+        if (m_visibleTopLeft.nCol > (UINT)-100)
+            m_visibleTopLeft.nCol = 0;
+        else if (m_visibleTopLeft.nCol > 0)
+            --m_visibleTopLeft.nCol;
+
+        if (m_selectionRect.end.nCol > (UINT)-100)
+            m_selectionRect.end.nCol = 0;
+        else if (m_selectionRect.end.nCol > 0)
+            --m_selectionRect.end.nCol;
+
+        bChangeX = true;
+    }
+    else if (pt.x >= m_clientRect.right)
+    {
+        ++m_visibleTopLeft.nCol;
+        ++m_selectionRect.end.nCol;
+        ConstrainMaxPosition();
+        bChangeX = true;
+    }
+    else
+    {
+        if (gridPt.nCol != ~0)
+        {
+            if (m_selectionRect.end.nCol != gridPt.nCol)
+            {
+                m_selectionRect.end.nCol = gridPt.nCol;
+                bChangeX = true;
+            }
+        }
+    }
+
+    if (pt.y <= GetActualColHeaderHeight())
+    {
+        if (m_visibleTopLeft.nRow > 0)
+            --m_visibleTopLeft.nRow;
+        else
+            m_visibleTopLeft.nRow = 0;
+        if (m_selectionRect.end.nRow > 0)
+            --m_selectionRect.end.nRow;
+        else
+            m_selectionRect.end.nRow = 0;
+
+        bChangeY = true;
+    }
+    else if (pt.y >= m_clientRect.bottom)
+    {
+        ++m_visibleTopLeft.nRow;
+        ++m_selectionRect.end.nRow;
+        ConstrainMaxPosition();
+        bChangeY = true;
+    }
+    else
+    {
+        if (gridPt.nRow != ~0)
+        {
+            if (m_selectionRect.end.nRow != gridPt.nRow)
+            {
+                m_selectionRect.end.nRow = gridPt.nRow;
+                bChangeY = true;
+            }
+        }
+    }
+
+    if (bChangeX)
+        m_scrollDifference.x = (long)CalculatedColumnDistance(0, (size_t)m_visibleTopLeft.nCol);
+    if (bChangeY)
+        m_scrollDifference.y = (long)CalculatedRowDistance(0, (size_t)m_visibleTopLeft.nRow);
+
+}
+
+void CGrid32Mgr::GetCurrentMouseCoordinates(int& x, int& y)
+{
+    POINT pt;
+    GetCursorPos(&pt);
+    ScreenToClient(m_hWndGrid, &pt);
+
+    //Get the mouse coordinates ourselves to fix bug with negative coordinates
+    x = pt.x;
+    y = pt.y;
+}
+
 void CGrid32Mgr::OnLButtonDown(UINT nFlags, int x, int y)
 {
+    GetCurrentMouseCoordinates(x, y);
     // Handle left mouse button down events here
     GRIDPOINT gridPt;
     switch (m_gridHitTest)
     {
     case GRID_HTCELL:
-        SetCellByPoint(x, y, gridPt);
+        if (!m_bSelecting && !m_bSizing/* &&
+            m_mouseDraggingStartPoint.x <= 0 && m_mouseDraggingStartPoint.y <= 0*/)
+        {
+            SetCellByPoint(x, y, gridPt);
+            m_mouseDraggingStartPoint.x = x;
+            m_mouseDraggingStartPoint.y = y;
+            if(gridPt.nRow != ~0 && gridPt.nCol != ~0)
+                m_selectionRect.start = m_selectionRect.end = gridPt;
+            else
+            {
+                GetCellByPoint(x, y, gridPt);
+                _ASSERT(gridPt.nRow != ~0 && gridPt.nCol != ~0);
+                m_selectionRect.end = gridPt;
+            }
+
+            SetCapture(m_hWndGrid);
+            m_bSelecting = TRUE;
+            StartMouseTracking();
+//            ConstrainMouseToClientArea();
+
+        }
+        else if (m_bSelecting)
+        {
+            GetCellByPoint(x, y, gridPt);
+            m_selectionRect.end = gridPt;
+            StartMouseTracking();
+//            ConstrainMouseToClientArea();
+        }
+
         break;
     case GRID_HTCOLDIVIDER:
     case GRID_HTROWDIVIDER:
-        SetCapture(m_hWndGrid);
-        m_bSizing = TRUE;
+        if (m_bResizable && !m_bSelecting)
+        {
+            SetCapture(m_hWndGrid);
+//            ConstrainMouseToClientArea();
+            m_bSizing = TRUE;
+        }
         break;
     }
 
@@ -1542,13 +1760,25 @@ void CGrid32Mgr::OnLButtonDown(UINT nFlags, int x, int y)
 
 void CGrid32Mgr::OnLButtonUp(UINT nFlags, int x, int y)
 {
-    if (m_bSizing)
+    GetCurrentMouseCoordinates(x, y);
+
+    if (m_bSelecting)
+    {
+        GRIDPOINT gridPt;
+        GetCellByPoint(x, y, gridPt);
+  //      _ASSERT(gridPt.nRow != ~0 && gridPt.nCol != ~0);
+        m_selectionRect.end = gridPt;
+        ConstrainMaxPosition();
+        CancelMouseTracking();
+        Invalidate();
+    }
+    else if (m_bResizable && m_bSizing)
     {
         if (m_gridHitTest == GRID_HTCOLDIVIDER)
         {
-            long nWidth = GetColumnStartPos(m_nToBeSized);
+            long long nWidth = (signed)GetColumnStartPos((UINT)m_nToBeSized);
 
-            long nNewSize = x - nWidth;
+            long long nNewSize = x - nWidth;
 
             if (nNewSize > 0)
                 pColInfoArray[m_nToBeSized].nWidth = (size_t)nNewSize;
@@ -1557,9 +1787,9 @@ void CGrid32Mgr::OnLButtonUp(UINT nFlags, int x, int y)
         }
         else if (m_gridHitTest == GRID_HTROWDIVIDER)
         {
-            long nHeight = GetRowStartPos(m_nToBeSized);
+            long long nHeight = (signed)GetRowStartPos((UINT)m_nToBeSized);
 
-            long nNewSize = y - nHeight;
+            long long nNewSize = y - nHeight;
 
             if (nNewSize > 0)
                 pRowInfoArray[m_nToBeSized].nHeight = (size_t)nNewSize;
@@ -1569,12 +1799,17 @@ void CGrid32Mgr::OnLButtonUp(UINT nFlags, int x, int y)
     }
     m_bSelecting = m_bSizing = 0;
     ReleaseCapture();
+    ClipCursor(NULL);
     m_gridHitTest = 0;
+    m_mouseDraggingStartPoint = { ~0, ~0 };
 }
+
 
 void CGrid32Mgr::OnMouseMove(UINT nFlags, int x, int y)
 {
-    if (m_bSizing)
+    GetCurrentMouseCoordinates(x, y);
+
+    if (m_bResizable && m_bSizing)
     {
         if (m_gridHitTest == GRID_HTCOLDIVIDER)
         {
@@ -1595,6 +1830,27 @@ void CGrid32Mgr::OnMouseMove(UINT nFlags, int x, int y)
             m_nSizingLine = y;
         }
     }
+    else if (m_bSelecting)
+    {
+        bool bChangeX = false, bChangeY = false;
+        if (x > GetActualRowHeaderWidth() && x < m_clientRect.right && 
+            y > GetActualColHeaderHeight() && y < m_clientRect.bottom)
+        {
+            GRIDPOINT gridPt;
+            GetCellByPoint(x, y, gridPt);
+            m_selectionRect.end = gridPt;
+        }
+        else
+        {
+            CalcSelectionCoordinatesWithMouse(x, y, bChangeX, bChangeY);
+        }
+
+        if (bChangeX || bChangeY)
+        {
+            ConstrainMaxPosition();
+        }
+        Invalidate();
+    }
     else
     {
         GetCellByPoint(x, y, m_HoverCell);
@@ -1606,11 +1862,33 @@ void CGrid32Mgr::OnMouseMove(UINT nFlags, int x, int y)
     }
 }
 
+void CGrid32Mgr::OnMouseHover(UINT nFlags, int x, int y)
+{
+    GetCurrentMouseCoordinates(x, y);
+
+    bool bChangeX = false, bChangeY = false;
+    if (m_bSelecting)
+    {
+        CalcSelectionCoordinatesWithMouse(x, y, bChangeX, bChangeY);
+        StartMouseTracking();
+        if (bChangeX || bChangeY)
+        {
+            m_scrollDifference.x = (long)CalculatedColumnDistance(0, (size_t)m_visibleTopLeft.nCol);
+            m_scrollDifference.y = (long)CalculatedRowDistance(0, (size_t)m_visibleTopLeft.nRow);
+
+            Invalidate();
+        }
+    }
+}
+
+void CGrid32Mgr::OnMouseLeave(UINT nFlags, int x, int y)
+{
+    OnMouseHover(nFlags, x, y);
+}
 
 void CGrid32Mgr::OnNcMouseMove(UINT nFlags, int x, int y)
 {
-    //if (y <= GetActualColHeaderHeight() || x <= GetActualRowHeaderWidth())
-    //    MessageBox(m_hWndGrid, L"Yeup", L"Grid32", MB_OK);
+    GetCurrentMouseCoordinates(x, y);
 }
 
 LRESULT CGrid32Mgr::OnNcHitTest(UINT nFlags, int x, int y, bool& bHitTested)
@@ -2037,6 +2315,8 @@ void CGrid32Mgr::ShowEditControl()
         TRUE);
 
     // Show the edit control
+    BringWindowToTop(m_hWndEdit); 
+    SendMessage(m_hWndEdit, EM_SCROLLCARET, 0, 0);
     ShowWindow(m_hWndEdit, SW_SHOW);
     SetFocus(m_hWndEdit);
 }
@@ -2111,36 +2391,153 @@ bool CGrid32Mgr::IsOverRowDivider(int x, int y)
     return false;
 }
 
-long CGrid32Mgr::GetColumnStartPos(UINT nCol)
+long long CGrid32Mgr::GetColumnStartPos(UINT nCol)
 {
-    long startPos = GetActualRowHeaderWidth();
+    long long startPos = GetActualRowHeaderWidth();
 
     // If nCol is the first visible column, return the row header width
     if (nCol == m_visibleTopLeft.nCol)
         return startPos;
 
+    if (nCol >= gcs.nWidth)
+        nCol = (UINT)(gcs.nWidth - 1);
     // Sum up the widths of all visible columns up to nCol
     for (UINT col = m_visibleTopLeft.nCol; col < nCol; ++col)
     {
-        startPos += pColInfoArray[col].nWidth;
+        startPos += (signed)pColInfoArray[col].nWidth;
     }
 
     return startPos;
 }
 
-long CGrid32Mgr::GetRowStartPos(UINT nRow)
+long long CGrid32Mgr::GetRowStartPos(UINT nRow)
 {
-    long startPos = GetActualColHeaderHeight();
+    long long startPos = GetActualColHeaderHeight();
 
     // If nRow is the first visible row, return the column header height
     if (nRow == m_visibleTopLeft.nRow)
         return startPos;
 
+    if (nRow >= gcs.nHeight)
+        nRow = (UINT)(gcs.nHeight - 1);
+
     // Sum up the heights of all visible rows up to nRow
     for (UINT row = m_visibleTopLeft.nRow; row < nRow; ++row)
     {
-        startPos += pRowInfoArray[row].nHeight;
+        startPos += (signed)pRowInfoArray[row].nHeight;
     }
 
     return startPos;
+}
+
+
+bool CGrid32Mgr::IsCellFontDefault(GRIDCELL& gc)
+{
+    const FONTINFO& cellFont = gc.fontInfo;
+    const FONTINFO& defaultFont = m_defaultGridCell.fontInfo;
+
+    return (cellFont.m_wsFontFace == defaultFont.m_wsFontFace &&
+        cellFont.m_fPointSize == defaultFont.m_fPointSize &&
+        cellFont.m_clrTextColor == defaultFont.m_clrTextColor &&
+        cellFont.bItalic == defaultFont.bItalic &&
+        cellFont.bUnderline == defaultFont.bUnderline &&
+        cellFont.bStrikeThrough == defaultFont.bStrikeThrough &&
+        cellFont.bWeight == defaultFont.bWeight);
+}
+
+bool CGrid32Mgr::AreGridPointsEqual(const GRIDPOINT& point1, const GRIDPOINT& point2)
+{
+    return (point1.nRow == point2.nRow && point1.nCol == point2.nCol);
+}
+
+
+bool CGrid32Mgr::IsCellPointInsideSelection(const GRIDPOINT& gridPt)
+{
+    // Normalize the selection rectangle to ensure start is always the top-left
+    // and end is always the bottom-right.
+    UINT startRow = min(m_selectionRect.start.nRow, m_selectionRect.end.nRow);
+    UINT endRow = max(m_selectionRect.start.nRow, m_selectionRect.end.nRow);
+    UINT startCol = min(m_selectionRect.start.nCol, m_selectionRect.end.nCol);
+    UINT endCol = max(m_selectionRect.start.nCol, m_selectionRect.end.nCol);
+
+    // Check if the gridPt is inside the normalized selection rectangle
+    return (gridPt.nRow >= startRow && gridPt.nRow <= endRow &&
+        gridPt.nCol >= startCol && gridPt.nCol <= endCol);
+}
+
+bool CGrid32Mgr::IsSelectionUnicellular()
+{
+    return AreGridPointsEqual(m_selectionRect.start, m_selectionRect.end);
+}
+
+void CGrid32Mgr::ConstrainMaxPosition()
+{
+    size_t nPos = 0, idx = 0;
+    if (m_selectionRect.end.nCol >= (UINT)-100)  //decremented once too many
+        m_selectionRect.end.nCol = 0;
+    else if (m_selectionRect.end.nCol >= gcs.nWidth)
+        m_selectionRect.end.nCol = (UINT)(gcs.nWidth - 1);
+    
+    if (m_selectionRect.end.nRow >= (UINT)-100)
+        m_selectionRect.end.nRow = 0;
+    else if (m_selectionRect.end.nRow >= gcs.nHeight)
+        m_selectionRect.end.nRow = (UINT)(gcs.nHeight - 1);
+
+    for (idx = gcs.nWidth - 1;
+        idx > 0 && nPos < (m_clientRect.right * 2) / 3;
+        nPos += pColInfoArray[idx--].nWidth);
+
+    if (m_visibleTopLeft.nCol >= (UINT)-100)
+        m_visibleTopLeft.nCol = 0;
+    else if (m_visibleTopLeft.nCol > idx)
+        m_visibleTopLeft.nCol = (UINT)(idx);
+
+    for (idx = gcs.nHeight - 1;
+        idx > 0 && nPos < (m_clientRect.bottom * 2) / 3;
+        nPos += pRowInfoArray[idx--].nHeight);
+
+    if (m_visibleTopLeft.nRow >= (UINT)-100)
+        m_visibleTopLeft.nRow = 0;
+    else if (m_visibleTopLeft.nRow > idx)
+        m_visibleTopLeft.nRow = (UINT)(idx);
+
+}
+
+
+void CGrid32Mgr::NormalizeSelectionRect(GRIDSELECTION& selection)
+{
+    // Create a new GRIDPOINT to hold the normalized start and end points
+    GRIDPOINT normalizedStart, normalizedEnd;
+
+    // Normalize the rows
+    if (selection.start.nRow <= selection.end.nRow)
+    {
+        normalizedStart.nRow = selection.start.nRow;
+        normalizedEnd.nRow = selection.end.nRow;
+    }
+    else
+    {
+        normalizedStart.nRow = selection.end.nRow;
+        normalizedEnd.nRow = selection.start.nRow;
+    }
+
+    // Normalize the columns
+    if (selection.start.nCol <= selection.end.nCol)
+    {
+        normalizedStart.nCol = selection.start.nCol;
+        normalizedEnd.nCol = selection.end.nCol;
+    }
+    else
+    {
+        normalizedStart.nCol = selection.end.nCol;
+        normalizedEnd.nCol = selection.start.nCol;
+    }
+
+    // Assign the normalized points back to the selection
+    selection.start = normalizedStart;
+    selection.end = normalizedEnd;
+}
+
+void CGrid32Mgr::OnIncrementCell(UINT direction, GRIDPOINT* pGridPoint)
+{
 }

@@ -25,7 +25,7 @@ protected:
 	}visibleGrid;
 	GRIDPOINT m_currentCell, m_visibleTopLeft, m_HoverCell;
 	POINT m_scrollDifference;
-	BOOL m_bRedraw;
+	BOOL m_bRedraw, m_bResizable;
 	DWORD dwError;
 	GRIDSELECTION m_selectionRect;
 	BOOL m_bSelecting, m_bSizing;
@@ -37,12 +37,16 @@ protected:
 	size_t m_nToBeSized;
 	long m_nSizingLine;
 	COLORREF m_rgbSizingLine;
+	HFONT m_hDefaultFont;
+	POINT m_mouseDraggingStartPoint;
+	ULONG_PTR m_gdiplusToken;
 
 public:
 	CGrid32Mgr();
 	virtual ~CGrid32Mgr();
 	std::wstring GetColumnLabel(size_t index, size_t maxWidth);
 	bool Create(PGRIDCREATESTRUCT pGCS);
+	void OnDestroy();
 	static LRESULT CALLBACK Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 	static LRESULT CALLBACK EditCtrl_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 	void OnPaint(PAINTSTRUCT& ps);
@@ -56,9 +60,12 @@ public:
 	void DrawRowHeaders(HDC hDC);
 	void DrawColHeaders(HDC hDC);
 	void DrawGrid(HDC hDC);
+	void DrawSelectionOverlay(HDC hDC, RECT &gridCellRect);
 	void DrawCells(HDC hDC);
 	void DrawVoidSpace(HDC hDC);
 	void DrawSizingLine(HDC hDC);
+	void DrawSemiTransparentRectangle(HDC hdc, RECT rect, COLORREF color, BYTE alpha);
+	void DrawSelectionSurround(HDC hDC);
 	bool IsCellMerged(UINT row, UINT col);
 	void DrawMergedCell(HDC hDC, const MERGERANGE& mergeRange);
 	void SelectMergedRange(UINT row, UINT col);
@@ -66,6 +73,7 @@ public:
 	size_t CalculatedRowDistance(size_t start, size_t end);
 	void GetCurrentCellRect(RECT& rect);
 	PGRIDCELL GetCell(UINT nRow, UINT nCol);
+	auto GetCurrentCell() { return GetCell(m_currentCell.nRow, m_currentCell.nCol); }
 	UINT GetCurrentCellTextLen();
 	UINT GetCellTextLen(const GRIDPOINT& gridPt);
 	UINT GetCellTextLen(UINT nRow, UINT nCol);
@@ -93,9 +101,16 @@ public:
 	bool OnKeyUp(UINT nChar, UINT nRepCnt, UINT nFlags);
 	void GetCellByPoint(int x, int y, GRIDPOINT& gridPt);
 	void SetCellByPoint(int x, int y, GRIDPOINT& gridPt);
+	void StartMouseTracking();
+	void CancelMouseTracking();
+	void ConstrainMouseToClientArea();
+	void CalcSelectionCoordinatesWithMouse(int x, int y, bool& bChangeX, bool bChangeY);
+	void GetCurrentMouseCoordinates(int& x, int& y);
 	void OnLButtonDown(UINT nFlags, int x, int y);
 	void OnLButtonUp(UINT nFlags, int x, int y);
 	void OnMouseMove(UINT nFlags, int x, int y);
+	void OnMouseHover(UINT nFlags, int x, int y);
+	void OnMouseLeave(UINT nFlags, int x, int y);
 	void OnNcMouseMove(UINT nFlags, int x, int y);
 	LRESULT OnNcHitTest(UINT nFlags, int x, int y, bool &bHitTested);
 	void OnMouseWheel(int zDelta, UINT nFlags, int x, int y);
@@ -137,7 +152,14 @@ public:
 	void OnTimer(UINT_PTR idEvent);
 	bool IsOverColumnDivider(int x, int y);
 	bool IsOverRowDivider(int x, int y);
-	long GetColumnStartPos(UINT nCol);
-	long GetRowStartPos(UINT nRow);
+	long long GetColumnStartPos(UINT nCol);
+	long long GetRowStartPos(UINT nRow);
+	bool IsCellFontDefault(GRIDCELL& gc);
+	bool AreGridPointsEqual(const GRIDPOINT& point1, const GRIDPOINT& point2);
+	bool IsCellPointInsideSelection(const GRIDPOINT& gridPt);
+	bool IsSelectionUnicellular();
+	void ConstrainMaxPosition();
+	void NormalizeSelectionRect(GRIDSELECTION& selection);
+	void OnIncrementCell(UINT incUnit, GRIDPOINT* pGridPoint);
 };
 

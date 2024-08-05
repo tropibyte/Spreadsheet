@@ -2,6 +2,8 @@
 
 #include <string>
 
+struct tagGCSTREAM;
+
 #ifndef _GRID32
 #define _GRID32
 
@@ -31,6 +33,39 @@
 #define SETBYNAME					1
 #define SETBYCOORDINATE				2
 
+// Stream format
+#define SF_TEXT 					0x0001
+#define SF_RTF						0x0002
+
+//Fill constants
+#define FILL_UP						0x0001
+#define FILL_DOWN					0x0002
+#define FILL_LEFT					0x0004
+#define FILL_RIGHT					0x0008
+
+#define FILLBYREFCELL				1
+#define FILLBYTEXT					2
+#define FILLBYGCS					3
+
+#define FILLBYRANGE					0x0001
+#define FILLBYCURRENTSELECTION		0x0002
+
+#define FILL_TEXT					0x0001
+#define FILL_COLOR					0x0002
+#define FILL_FONT					0x0004
+#define FILL_POINTSIZE				0x0008
+#define FILL_EFFECTS				0x0010
+
+//Sorting constants
+
+
+// Filtering constants
+
+#define FILTER_CONTAINS				0x0001
+#define FILTER_EQUALS				0x0002
+#define FILTER_STARTS_WITH			0x0004
+#define FILTER_ENDS_WITH			0x0008
+
 // Grid32 WM_NCHITTEST constants
 
 #define GRID_HTCORNER			    (HTHELP + 11)
@@ -59,6 +94,16 @@
 #define GM_GETCELLTEXT				(WM_USER + 13)
 #define GM_SETREDRAW				(WM_SETREDRAW)
 #define GM_GETREDRAW				(WM_USER + 14)
+#define GM_SETCURRENTCELL			(WM_USER + 15)
+#define GM_GETCURRENTCELL			(WM_USER + 16)
+#define GM_INCREMENTCURRENTCELL		(WM_USER + 17)
+#define GM_FILLCELLS				(WM_USER + 18)
+#define GM_SORTCELLS                (WM_USER + 19)
+#define GM_FILTERCELLS              (WM_USER + 20)
+#define GM_FINDTEXT					(WM_USER + 21)
+#define GM_ENUMCELLS				(WM_USER + 22)
+#define GM_STREAMIN					(WM_USER + 23)
+#define GM_STREAMOUT				(WM_USER + 24)
 
 // Grid32 Error
 
@@ -77,7 +122,7 @@ typedef struct {
 	size_t nWidth, nHeight;
 	size_t nDefRowHeight, nDefColWidth;
 	LONG   style;
-	COLORREF clrSelectBox;
+	COLORREF clrCurrentCellHighlightBox, clrSelectionOverlay;
 }GRIDCREATESTRUCT, *PGRIDCREATESTRUCT;
 
 typedef struct __GRIDPOINT
@@ -155,4 +200,41 @@ typedef struct tagGRIDNMHDR : tagNMHDR {
 	void* pExtra; //Extra info as needed
 } GRIDNMHDR, * LPGRIDNMHDR;
 
+typedef DWORD(CALLBACK* GCSTREAMCALLBACK)(struct tagGCSTREAM *);
+
+typedef struct tagGCSTREAM {
+	DWORD_PTR          m_dwCookie;
+	DWORD              m_dwError;
+	LPCWSTR			   m_pwszBuff;
+	UINT			   m_cbSize, m_cbBuffSize, m_cbBuffOut;
+	GCSTREAMCALLBACK   m_pfnCallback;
+} GCSTREAM, *LPGCSTREAM;
+
+typedef struct tagGCFILLSTRUCT
+{
+	UINT  m_cbSize;
+	DWORD m_dwFillDirection, m_dwFillHow;
+	DWORD m_dwFillRange, m_dwFillWhat;
+	GRIDPOINT m_refCell;
+	GRIDCELL refGC;
+	std::wstring& m_wsText = refGC.m_wsText;
+}GCFILLSTRUCT, *LPGCFILLSTRUCT;
+
+typedef struct tagGCSORTSTRUCT
+{
+	UINT m_cbSize;        // Size of this structure
+	GRIDSELECTION m_sortSel; // Column to be sorted
+	BOOL m_bAscending;    // Sort order: true for ascending, false for descending
+	DWORD m_dwWhich;
+} GCSORTSTRUCT, *LPGCSORTSTRUCT;
+
+typedef struct tagGCFILTERSTRUCT
+{
+	UINT m_cbSize;         // Size of this structure
+	GRIDPOINT m_filterColumn;  // Column to apply the filter
+	std::wstring m_wsFilterText; // Text to filter by
+	DWORD m_dwFilterType;        // Type of filtering
+} GCFILTERSTRUCT, *LPGCFILTERSTRUCT;
+
 #endif // !_GRID32
+

@@ -60,7 +60,9 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         pMgr = nullptr;
         SetWindowLongPtr(hWnd, 0, 0);
         break;
-
+    case WM_DESTROY:
+        pMgr->OnDestroy();
+        break;
     case WM_MOVE:
     {
         int x = (int)(short)LOWORD(lParam);
@@ -99,17 +101,23 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         break;
 
     case WM_LBUTTONDOWN:
-        pMgr->OnLButtonDown((UINT)wParam, LOWORD(lParam), HIWORD(lParam));
+        pMgr->OnLButtonDown((UINT)wParam, (int)LOWORD(lParam), (int)HIWORD(lParam));
         break;
 
     case WM_LBUTTONUP:
-        pMgr->OnLButtonUp((UINT)wParam, LOWORD(lParam), HIWORD(lParam));
+        pMgr->OnLButtonUp((UINT)wParam, (int)LOWORD(lParam), (int)HIWORD(lParam));
         break;
     case WM_MOUSEMOVE:
-        pMgr->OnMouseMove((UINT)wParam, LOWORD(lParam), HIWORD(lParam));
+        pMgr->OnMouseMove((UINT)wParam, (int)LOWORD(lParam), (int)HIWORD(lParam));
+        break;
+    case WM_MOUSEHOVER:
+        pMgr->OnMouseHover((UINT)wParam, (int)LOWORD(lParam), (int)HIWORD(lParam));
+        break;
+    case WM_MOUSELEAVE:
+        pMgr->OnMouseLeave((UINT)wParam, (int)LOWORD(lParam), (int)HIWORD(lParam));
         break;
     case WM_NCMOUSEMOVE:
-        pMgr->OnNcMouseMove((UINT)wParam, LOWORD(lParam), HIWORD(lParam));
+        pMgr->OnNcMouseMove((UINT)wParam, (int)LOWORD(lParam), (int)HIWORD(lParam));
         break;
     case WM_NCHITTEST:
     {
@@ -238,6 +246,43 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 
     case GM_GETREDRAW:
         return pMgr->m_bRedraw ? TRUE : FALSE;
+
+    case GM_SETCURRENTCELL:
+        pMgr->SetCurrentCell(HIWORD(lParam), LOWORD(lParam));
+        break;
+
+    case GM_GETCURRENTCELL:
+    {
+        return MAKELRESULT(pMgr->m_currentCell.nCol, pMgr->m_currentCell.nRow);
+    }
+    case GM_INCREMENTCURRENTCELL:
+        pMgr->OnIncrementCell((UINT)wParam, (GRIDPOINT *)lParam);
+        break;
+
+    case GM_FILLCELLS:
+        // Handle GM_FILLCELLS
+        break;
+    case GM_SORTCELLS:
+        break;
+    case GM_FILTERCELLS:
+        break;
+    case GM_FINDTEXT:
+        // Handle GM_FINDTEXT
+        break;
+
+    case GM_ENUMCELLS:
+        // Handle GM_ENUMCELLS
+        break;
+
+    case GM_STREAMIN:
+        // Handle GM_STREAMIN
+        break;
+
+    case GM_STREAMOUT:
+        // Handle GM_STREAMOUT
+        break;
+
+
     }
 
     return DefWindowProc(hWnd, uMsg, wParam, lParam);
