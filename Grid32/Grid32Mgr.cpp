@@ -2540,4 +2540,72 @@ void CGrid32Mgr::NormalizeSelectionRect(GRIDSELECTION& selection)
 
 void CGrid32Mgr::OnIncrementCell(UINT direction, GRIDPOINT* pGridPoint)
 {
+    switch (direction)
+    {
+    case INCREMENT_SINGLE:
+        IncrementSelectedCell(pGridPoint->nRow, pGridPoint->nCol);
+        break;
+    case INCREMENT_PAGE:
+        IncrementSelectedPage(pGridPoint->nRow, pGridPoint->nCol);
+        break;
+    case INCREMENT_EDGE:
+        IncrementSelectEdge(pGridPoint->nRow, pGridPoint->nCol);
+        break;
+    }
+}
+
+
+size_t CGrid32Mgr::OnEnumCells(GRIDCELL* gcArray, UINT numElements)
+{
+    // If gcArray is nullptr, return the number of cells in the map
+    if (!gcArray)
+        return mapCells.size();
+
+    auto itor = mapCells.begin();
+    size_t nCount = 0;
+
+    // Determine the number of elements to copy
+    size_t elementsToCopy = (numElements <= mapCells.size()) ? numElements : mapCells.size();
+
+    // Copy elements from the map to the provided array
+    for (; nCount < elementsToCopy && itor != mapCells.end(); ++itor, ++nCount)
+        CopyGridCell(gcArray[nCount], *(itor->second));
+
+    return nCount;
+}
+
+void CGrid32Mgr::OnFillCells(WPARAM wParam, const GCFILLSTRUCT& fillStruct)
+{
+}
+
+void CGrid32Mgr::OnSortCells(WPARAM wParam, const GCSORTSTRUCT& sortStruct)
+{
+}
+
+void CGrid32Mgr::OnFilterCells(WPARAM wParam, const GCFILTERSTRUCT& filterStruct)
+{
+}
+
+
+void CGrid32Mgr::CopyGridCell(GRIDCELL& dest, GRIDCELL& src)
+{
+    // Copy the base cell attributes
+    dest.fontInfo.m_wsFontFace = src.fontInfo.m_wsFontFace;
+    dest.fontInfo.m_fPointSize = src.fontInfo.m_fPointSize;
+    dest.fontInfo.m_clrTextColor = src.fontInfo.m_clrTextColor;
+    dest.fontInfo.bItalic = src.fontInfo.bItalic;
+    dest.fontInfo.bUnderline = src.fontInfo.bUnderline;
+    dest.fontInfo.bStrikeThrough = src.fontInfo.bStrikeThrough;
+    dest.fontInfo.bWeight = src.fontInfo.bWeight;
+
+    dest.clrBackground = src.clrBackground;
+    dest.m_clrBorderColor = src.m_clrBorderColor;
+    dest.m_nBorderWidth = src.m_nBorderWidth;
+    dest.penStyle = src.penStyle;
+    dest.justification = src.justification;
+    dest.m_wsName = src.m_wsName;
+
+    // Copy the specific GRIDCELL attributes
+    dest.m_wsText = src.m_wsText;
+    dest.mergeRange = src.mergeRange;
 }

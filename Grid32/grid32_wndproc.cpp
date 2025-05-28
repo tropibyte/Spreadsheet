@@ -260,11 +260,17 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         break;
 
     case GM_FILLCELLS:
-        // Handle GM_FILLCELLS
+        if (lParam)
+            pMgr->OnFillCells(wParam, *(LPGCFILLSTRUCT)lParam);
         break;
     case GM_SORTCELLS:
+        if(lParam)
+            pMgr->OnSortCells(wParam, *(GCSORTSTRUCT*)lParam);
         break;
+
     case GM_FILTERCELLS:
+        if(lParam)
+            pMgr->OnFilterCells(wParam, *(GCFILTERSTRUCT*)lParam);
         break;
     case GM_FINDTEXT:
         // Handle GM_FINDTEXT
@@ -272,6 +278,7 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 
     case GM_ENUMCELLS:
         // Handle GM_ENUMCELLS
+        pMgr->OnEnumCells((GRIDCELL*)lParam, (UINT)wParam);
         break;
 
     case GM_STREAMIN:

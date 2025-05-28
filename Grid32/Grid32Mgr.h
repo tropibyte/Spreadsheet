@@ -161,5 +161,10 @@ public:
 	void ConstrainMaxPosition();
 	void NormalizeSelectionRect(GRIDSELECTION& selection);
 	void OnIncrementCell(UINT incUnit, GRIDPOINT* pGridPoint);
+	size_t OnEnumCells(GRIDCELL* gcArray, UINT numElements);
+	void OnFillCells(WPARAM wParam, const GCFILLSTRUCT& fillStruct);
+	void OnSortCells(WPARAM wParam, const GCSORTSTRUCT& sortStruct);
+	void OnFilterCells(WPARAM wParam, const GCFILTERSTRUCT& filterStruct);
+	void CopyGridCell(GRIDCELL& dest, GRIDCELL& src);
 };
 
