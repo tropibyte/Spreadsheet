@@ -103,8 +103,9 @@ struct tagGCSTREAM;
 #define GM_FILTERCELLS              (WM_USER + 20)
 #define GM_FINDTEXT					(WM_USER + 21)
 #define GM_ENUMCELLS				(WM_USER + 22)
-#define GM_STREAMIN					(WM_USER + 23)
-#define GM_STREAMOUT				(WM_USER + 24)
+#define GM_SETCHARFORMAT			(WM_USER + 23)
+#define GM_STREAMIN					(WM_USER + 24)
+#define GM_STREAMOUT				(WM_USER + 25)
 
 // Grid32 Error
 

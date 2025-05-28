@@ -13,7 +13,7 @@ const std::set<char> allowedPunctuation = {
 CGrid32Mgr::CGrid32Mgr() : pRowInfoArray(nullptr), pColInfoArray(nullptr),
 m_hWndGrid(NULL), nColHeaderHeight(40), nRowHeaderWidth(70), m_editWndProc(nullptr),
 m_nMouseHoverDelay(400), m_npHoverDelaySet(0), m_nToBeSized(~0),
-m_rgbSizingLine(RGB(0, 0, 64)), m_nSizingLine(0), m_bResizable(true),
+m_rgbSizingLine(RGB(0, 0, 64)), m_nSizingLine(0), m_bResizable(true), m_bUndoRecordEnabled(TRUE),
 m_bSizing(false), m_bSelecting(false), m_hDefaultFont(NULL),
 m_clientRect{ 0, 0, 0, 0 }, m_gdiplusToken(0), m_gridHitTest(0),
 m_hWndEdit(NULL), m_lastClickTime(0), totalGridCellRect{ 0, 0, 0, 0 }
@@ -532,7 +532,7 @@ void CGrid32Mgr::DrawCells(HDC hDC)
             gridCellRect.bottom = gridCellRect.top + (long)pRowInfoArray[row].nHeight;
 
             GRIDPOINT gridPt = { (UINT)row, (UINT)col };
-            PGRIDCELL pCell = GetCell((UINT)row, (UINT)col);
+            PGRIDCELL pCell = GetCellOrDefault((UINT)row, (UINT)col);
 
             if (CanDrawRect(gridCellRect) && pCell != &m_defaultGridCell)
             {
@@ -802,47 +802,118 @@ void CGrid32Mgr::GetCurrentCellRect(RECT &rect)
     }
 }
 
+// Retrieve an existing cell pointer or nullptr if absent
 PGRIDCELL CGrid32Mgr::GetCell(UINT nRow, UINT nCol)
 {
-    auto it = mapCells.find(std::make_pair(nRow, nCol));
-    if (it != mapCells.end())
-    {
-        return it->second;
-    }
-
-    return &m_defaultGridCell;
+    auto key = std::make_pair(nRow, nCol);
+    auto it = mapCells.find(key);
+    return (it != mapCells.end()) ? it->second : nullptr;
 }
 
+// Retrieve an existing cell or the default cell if absent
+PGRIDCELL CGrid32Mgr::GetCellOrDefault(UINT nRow, UINT nCol)
+{
+    auto key = std::make_pair(nRow, nCol);
+    auto it = mapCells.find(key);
+    return (it != mapCells.end()) ? it->second : &m_defaultGridCell;
+}
+
+// Retrieve an existing cell or create a new one with undo support
+PGRIDCELL CGrid32Mgr::GetCellOrCreate(UINT nRow, UINT nCol, bool bRecord)
+{
+    auto key = std::make_pair(nRow, nCol);
+    auto it = mapCells.find(key);
+    if (it != mapCells.end())
+        return it->second;
+
+    // Create new cell
+    PGRIDCELL pCell = new GRIDCELL(m_defaultGridCell);
+    if (!pCell) {
+        SetLastError(GRID_ERROR_OUT_OF_MEMORY);
+        SendGridNotification(NM_OUTOFMEMORY);
+        return &m_defaultGridCell;
+    }
+    mapCells[key] = pCell;
+
+    if (bRecord)
+    {
+        // Record creation as full-cell set
+        GridEditOperation op;
+        op.type = EditOperationType::SetFullCell;
+        op.row = nRow;
+        op.col = nCol;
+        op.oldState = m_defaultGridCell;
+        op.newState = *pCell;
+        RecordUndoOperation(op);
+    }
+
+    return pCell;
+}
+
+PGRIDCELL CGrid32Mgr::CreateCell(UINT nRow, UINT nCol)
+{
+	auto key = std::make_pair(nRow, nCol);
+	auto it = mapCells.find(key);
+	if (it != mapCells.end()) {
+		// Cell already exists
+		delete it->second;
+		mapCells.erase(it); // Remove the existing cell
+	}
+	// Create new cell
+	PGRIDCELL pCell = new GRIDCELL(m_defaultGridCell);
+	if (!pCell) {
+		SetLastError(GRID_ERROR_OUT_OF_MEMORY);
+		SendGridNotification(NM_OUTOFMEMORY);
+		return nullptr;
+	}
+	mapCells[key] = pCell;
+	return pCell;
+}
+
+// Refactored SetCell method with clean undo/redo handling
 void CGrid32Mgr::SetCell(UINT nRow, UINT nCol, const GRIDCELL& gc)
 {
     auto key = std::make_pair(nRow, nCol);
     auto it = mapCells.find(key);
 
-    // If the cell exists, delete the old one
-    if (it != mapCells.end())
-    {
+    GridEditOperation op;
+    op.type = EditOperationType::SetFullCell;
+    op.row = nRow;
+    op.col = nCol;
+    op.newState = gc; // Always set new state
+
+    if (it != mapCells.end()) {
+        // Existing cell: capture old state
+        op.oldState = *it->second;
+
+        // Replace cell
         delete it->second;
         it->second = new GRIDCELL(gc);
-        if (!it->second)
-        {
+        if (!it->second) {
             SetLastError(GRID_ERROR_OUT_OF_MEMORY);
             SendGridNotification(NM_OUTOFMEMORY);
+            return;
         }
-        else
-            SetLastError(0);
     }
-    else
-    {
-        PGRIDCELL pCell  = new GRIDCELL(gc);
-        if (!pCell)
-        {
+    else {
+        // New cell: old state is default
+        op.oldState = m_defaultGridCell;
+
+        // Create cell
+        PGRIDCELL pCell = new GRIDCELL(gc);
+        if (!pCell) {
             SetLastError(GRID_ERROR_OUT_OF_MEMORY);
             SendGridNotification(NM_OUTOFMEMORY);
+            return;
         }
-        else
-            mapCells[key] = pCell, SetLastError(0);
+        mapCells[key] = pCell;
     }
+
+    // Record undo/redo
+    RecordUndoOperation(op);
+    SetLastError(0);
 }
+
 
 UINT CGrid32Mgr::GetCurrentCellTextLen()
 {
@@ -876,6 +947,45 @@ void CGrid32Mgr::GetCellText(const GRIDPOINT& gridPt, LPWSTR pText, UINT nLen)
     return GetCellText(gridPt.nRow, gridPt.nCol, pText, nLen);
 }
 
+// Direct FONTINFO overload
+void CGrid32Mgr::SetCellFormat(UINT nRow, UINT nCol, const FONTINFO& fi)
+{
+    // Prepare undo operation
+    GridEditOperation op;
+    op.type = EditOperationType::SetFormat;
+    op.row = nRow;
+    op.col = nCol;
+
+    // Capture old state
+    PGRIDCELL pCell = GetCell(nRow, nCol);
+    op.oldState = *pCell;
+
+    // Apply new formatting
+	if (!pCell)
+	{
+		pCell = CreateCell(nRow, nCol);
+		if (!pCell) {
+			SetLastError(GRID_ERROR_OUT_OF_MEMORY);
+			SendGridNotification(NM_OUTOFMEMORY);
+			return;
+		}
+	}
+    pCell->fontInfo = fi;
+    op.newState = *pCell;
+
+    // Record undo operation
+    RecordUndoOperation(op);
+
+    // Redraw updated cell
+    RECT r;
+    GetCurrentCellRect(r);
+    Invalidate();
+    SetLastError(0);
+}
+
+
+
+
 void CGrid32Mgr::GetCellText(UINT nRow, UINT nCol, LPWSTR pText, UINT nLen)
 {
     auto key = std::make_pair(nRow, nCol);
@@ -904,57 +1014,106 @@ void CGrid32Mgr::SetCellText(const GRIDPOINT& gridPt, LPCWSTR newText)
     SetCellText(gridPt.nRow, gridPt.nCol, newText);
 }
 
-void CGrid32Mgr::SetCellText(UINT nRow, UINT nCol, LPCWSTR newText) 
+
+void CGrid32Mgr::SetCellText(UINT nRow, UINT nCol, LPCWSTR newText)
 {
     auto key = std::make_pair(nRow, nCol);
     auto it = mapCells.find(key);
 
-    GRIDCELL* pCell;
+    PGRIDCELL pCell = nullptr;
+    GridEditOperation op;
+    op.type = EditOperationType::SetText;
+    op.row = nRow;
+    op.col = nCol;
 
     if (it != mapCells.end()) {
         pCell = it->second;
+        op.oldState = *pCell;
     }
     else {
         pCell = new GRIDCELL(m_defaultGridCell);
-        if (!pCell)
-        {
+        if (!pCell) {
             SetLastError(GRID_ERROR_OUT_OF_MEMORY);
             SendGridNotification(NM_OUTOFMEMORY);
+            return;
         }
-        else
-        {
-            mapCells[key] = pCell;
-            SetLastError(0);
-        }
+        mapCells[key] = pCell;
+        op.oldState = m_defaultGridCell;
     }
 
-    if(pCell)
-        pCell->m_wsText = newText;
+    // Apply the new text
+    pCell->m_wsText = newText;
+    op.newState = *pCell;
 
+    // Record undo operation
+    RecordUndoOperation(op);
+
+    // Redraw the cell
     RECT r;
     GetCurrentCellRect(r);
     Invalidate();
+    SetLastError(0);
 }
 
-void CGrid32Mgr::ClearCellText(UINT nRow, UINT nCol) 
+
+// Clear the text of a cell and support undo
+void CGrid32Mgr::ClearCellText(UINT nRow, UINT nCol)
 {
     auto key = std::make_pair(nRow, nCol);
     auto it = mapCells.find(key);
 
     if (it != mapCells.end()) {
+        // Setup undo operation
+        GridEditOperation op;
+        op.type = EditOperationType::SetText;
+        op.row = nRow;
+        op.col = nCol;
+        // Capture old state
+        op.oldState = *it->second;
+
+        // Clear the text
         it->second->m_wsText.clear();
+        // Capture new state
+        op.newState = *it->second;
+
+        // Record undo operation
+        RecordUndoOperation(op);
+
+        // Redraw the cell
+        RECT r;
+        GetCurrentCellRect(r);
+        Invalidate();
+        SetLastError(0);
     }
 }
 
+// Delete a cell and support undo
 void CGrid32Mgr::DeleteCell(UINT nRow, UINT nCol)
 {
-    auto it = mapCells.find(std::make_pair(nRow, nCol));
+    auto key = std::make_pair(nRow, nCol);
+    auto it = mapCells.find(key);
     if (it != mapCells.end())
     {
+        // Setup undo operation
+        GridEditOperation op;
+        op.type = EditOperationType::Delete;
+        op.row = nRow;
+        op.col = nCol;
+        // Capture old state
+        op.oldState = *it->second;
+        // New state is default (no cell)
+        op.newState = m_defaultGridCell;
+
+        // Perform deletion
         delete it->second;
         mapCells.erase(it);
+
+        // Record undo operation
+        RecordUndoOperation(op);
+        SetLastError(0);
     }
 }
+
 
 void CGrid32Mgr::DeleteAllCells()
 {
@@ -2028,26 +2187,138 @@ void CGrid32Mgr::OnPaste()
     // You'll need to parse the clipboard data and insert it into the grid appropriately
 }
 
+// Undo the last edit operation
 void CGrid32Mgr::OnUndo()
 {
-    // Undo the last edit operation
-    // You'll need to implement an undo/redo stack to track changes
+    if (m_undoStack.empty())
+        return;
+
+    GridEditOperation op = m_undoStack.top();
+    m_undoStack.pop();
+
+    switch (op.type)
+    {
+    case EditOperationType::SetText:
+        // Revert text change
+        // Use SetCellText which records undo, so bypass recording here
+    {
+        // Temporary disable recording
+        bool record = m_bUndoRecordEnabled;
+        m_bUndoRecordEnabled = false;
+        SetCellText(op.row, op.col, op.oldState.m_wsText.c_str());
+        m_bUndoRecordEnabled = record;
+    }
+    break;
+
+    case EditOperationType::SetFormat:
+    {
+        bool record = m_bUndoRecordEnabled;
+        m_bUndoRecordEnabled = false;
+        SetCellFormat(op.row, op.col, op.oldState.fontInfo);
+        m_bUndoRecordEnabled = record;
+    }
+    break;
+
+    case EditOperationType::SetFullCell:
+    {
+        bool record = m_bUndoRecordEnabled;
+        m_bUndoRecordEnabled = false;
+        SetCell(op.row, op.col, op.oldState);
+        m_bUndoRecordEnabled = record;
+    }
+    break;
+
+    case EditOperationType::Delete:
+    {
+        // Undo delete: recreate the cell
+        bool record = m_bUndoRecordEnabled;
+        m_bUndoRecordEnabled = false;
+        SetCell(op.row, op.col, op.oldState);
+        m_bUndoRecordEnabled = record;
+    }
+    break;
+
+    case EditOperationType::Clipboard:
+        // TODO: implement clipboard undo
+        break;
+    }
+
+    // Push to redo stack
+    m_redoStack.push(op);
+    Invalidate();
+    SetLastError(0);
 }
 
+// Redo the last undone operation
 void CGrid32Mgr::OnRedo()
 {
-    // Undo the last edit operation
-    // You'll need to implement an undo/redo stack to track changes
+    if (m_redoStack.empty())
+        return;
+
+    GridEditOperation op = m_redoStack.top();
+    m_redoStack.pop();
+
+    switch (op.type)
+    {
+    case EditOperationType::SetText:
+    {
+        bool record = m_bUndoRecordEnabled;
+        m_bUndoRecordEnabled = false;
+        SetCellText(op.row, op.col, op.newState.m_wsText.c_str());
+        m_bUndoRecordEnabled = record;
+    }
+    break;
+
+    case EditOperationType::SetFormat:
+    {
+        bool record = m_bUndoRecordEnabled;
+        m_bUndoRecordEnabled = false;
+        SetCellFormat(op.row, op.col, op.newState.fontInfo);
+        m_bUndoRecordEnabled = record;
+    }
+    break;
+
+    case EditOperationType::SetFullCell:
+    {
+        bool record = m_bUndoRecordEnabled;
+        m_bUndoRecordEnabled = false;
+        SetCell(op.row, op.col, op.newState);
+        m_bUndoRecordEnabled = record;
+    }
+    break;
+
+    case EditOperationType::Delete:
+    {
+        bool record = m_bUndoRecordEnabled;
+        m_bUndoRecordEnabled = false;
+        // Redo delete: remove cell
+        DeleteCell(op.row, op.col);
+        m_bUndoRecordEnabled = record;
+    }
+    break;
+
+    case EditOperationType::Clipboard:
+        // TODO: implement clipboard redo
+        break;
+    }
+
+    // After redo, push back onto undo stack
+    m_undoStack.push(op);
+    Invalidate();
+    SetLastError(0);
 }
 
-void CGrid32Mgr::OnCanUndo()
+size_t CGrid32Mgr::OnCanUndo()
 {
-
+    // Enable or disable UI undo based on stack state
+    return m_undoStack.size();
 }
-void CGrid32Mgr::OnCanRedo()
+
+size_t CGrid32Mgr::OnCanRedo()
 {
-
+    return m_redoStack.size();
 }
+
 
 void CGrid32Mgr::OnSetSelection(GRIDSELECTION* pGridSel) 
 {
@@ -2586,6 +2857,18 @@ void CGrid32Mgr::OnSortCells(WPARAM wParam, const GCSORTSTRUCT& sortStruct)
 
 void CGrid32Mgr::OnFilterCells(WPARAM wParam, const GCFILTERSTRUCT& filterStruct)
 {
+}
+
+// Helper to record and apply edit operations
+void CGrid32Mgr::RecordUndoOperation(const GridEditOperation& op)
+{
+	if (!m_bUndoRecordEnabled)
+		return; // If recording is disabled, do not record the operation
+    m_undoStack.push(op);
+    // Clear redo stack
+    while (!m_redoStack.empty()) {
+        m_redoStack.pop();
+    }
 }
 
 

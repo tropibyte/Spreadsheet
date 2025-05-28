@@ -3,11 +3,27 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <stack>
 
 #include "grid32.h"
 
 #define ID_CELL_EDIT		8
 #define HOVER_TIMER			1
+
+enum class EditOperationType {
+	SetText,
+	SetFullCell,
+	SetFormat,
+	Delete,
+	Clipboard
+};
+
+struct GridEditOperation {
+	EditOperationType type;
+	UINT row, col;
+	GRIDCELL oldState;
+	GRIDCELL newState;
+};
 
 class CGrid32Mgr
 {
@@ -17,6 +33,7 @@ protected:
 	GRIDCELL m_defaultGridCell, m_cornerCell;
 	ROWINFO* pRowInfoArray;
 	COLINFO* pColInfoArray;
+
 	HWND m_hWndGrid, m_hWndEdit;
 	long nColHeaderHeight, nRowHeaderWidth;
 	RECT totalGridCellRect, m_clientRect;
@@ -25,7 +42,7 @@ protected:
 	}visibleGrid;
 	GRIDPOINT m_currentCell, m_visibleTopLeft, m_HoverCell;
 	POINT m_scrollDifference;
-	BOOL m_bRedraw, m_bResizable;
+	BOOL m_bRedraw, m_bResizable, m_bUndoRecordEnabled;
 	DWORD dwError;
 	GRIDSELECTION m_selectionRect;
 	BOOL m_bSelecting, m_bSizing;
@@ -39,6 +56,9 @@ protected:
 	COLORREF m_rgbSizingLine;
 	HFONT m_hDefaultFont;
 	POINT m_mouseDraggingStartPoint;
+	std::stack<GridEditOperation> m_undoStack;
+	std::stack<GridEditOperation> m_redoStack;
+
 	ULONG_PTR m_gdiplusToken;
 
 public:
@@ -60,7 +80,7 @@ public:
 	void DrawRowHeaders(HDC hDC);
 	void DrawColHeaders(HDC hDC);
 	void DrawGrid(HDC hDC);
-	void DrawSelectionOverlay(HDC hDC, RECT &gridCellRect);
+	void DrawSelectionOverlay(HDC hDC, RECT& gridCellRect);
 	void DrawCells(HDC hDC);
 	void DrawVoidSpace(HDC hDC);
 	void DrawSizingLine(HDC hDC);
@@ -73,12 +93,16 @@ public:
 	size_t CalculatedRowDistance(size_t start, size_t end);
 	void GetCurrentCellRect(RECT& rect);
 	PGRIDCELL GetCell(UINT nRow, UINT nCol);
-	auto GetCurrentCell() { return GetCell(m_currentCell.nRow, m_currentCell.nCol); }
+	PGRIDCELL GetCellOrDefault(UINT nRow, UINT nCol);
+	PGRIDCELL GetCellOrCreate(UINT nRow, UINT nCol, bool bRecord = false);
+	PGRIDCELL CreateCell(UINT nRow, UINT nCol);
+	auto GetCurrentCell() { return GetCellOrDefault(m_currentCell.nRow, m_currentCell.nCol); }
 	UINT GetCurrentCellTextLen();
 	UINT GetCellTextLen(const GRIDPOINT& gridPt);
 	UINT GetCellTextLen(UINT nRow, UINT nCol);
 	void GetCurrentCellText(LPWSTR pText, UINT nLen);
 	void GetCellText(const GRIDPOINT& gridPt, LPWSTR pText, UINT nLen);
+	void SetCellFormat(UINT nRow, UINT nCol, const FONTINFO& fontInfo);
 	void GetCellText(UINT nRow, UINT nCol, LPWSTR pText, UINT nLen);
 	void SetCell(UINT nRow, UINT nCol, const GRIDCELL& gc);
 	void SetCurrentCellText(LPCWSTR newText);
@@ -112,7 +136,7 @@ public:
 	void OnMouseHover(UINT nFlags, int x, int y);
 	void OnMouseLeave(UINT nFlags, int x, int y);
 	void OnNcMouseMove(UINT nFlags, int x, int y);
-	LRESULT OnNcHitTest(UINT nFlags, int x, int y, bool &bHitTested);
+	LRESULT OnNcHitTest(UINT nFlags, int x, int y, bool& bHitTested);
 	void OnMouseWheel(int zDelta, UINT nFlags, int x, int y);
 	void OnRButtonDown(UINT nFlags, int x, int y);
 	void OnRButtonUp(UINT nFlags, int x, int y);
@@ -124,8 +148,8 @@ public:
 	void OnPaste();
 	void OnUndo();
 	void OnRedo();
-	void OnCanUndo();
-	void OnCanRedo();
+	size_t OnCanUndo();
+	size_t OnCanRedo();
 	void OnSetSelection(GRIDSELECTION* pGridSel);
 	void OnGetSelection(GRIDSELECTION* pGridSel);
 	bool IsCellVisible(UINT nRow, UINT nCol);
@@ -137,7 +161,7 @@ public:
 	BOOL OnSetCurrentCell(LPCWSTR pwszRef, short nWhich);
 	BOOL OnSetCurrentCell(UINT nRow, UINT nCol);
 	DWORD GetLastError() { return dwError; }
-	void SetLastError(DWORD dwNewError) {	dwError = dwNewError;	}
+	void SetLastError(DWORD dwNewError) { dwError = dwNewError; }
 	std::wstring FormatCellReference(LPCWSTR pwszRef);
 	bool SetCurrentCell(UINT nRow, UINT nCol);
 	BOOL Invalidate(bool bErasebkgnd = false);
@@ -147,7 +171,7 @@ public:
 	size_t GetRowHeight(size_t nRow);
 	BOOL OnGetCellText(const GRIDPOINT& point, GRID_GETTEXT* text);
 	void ShowEditControl();
-	void SendGridNotification(INT code, GRIDNMHDR *pNMHDRInfo = nullptr);
+	void SendGridNotification(INT code, GRIDNMHDR* pNMHDRInfo = nullptr);
 	void GetMousePosition(POINT& pt);
 	void OnTimer(UINT_PTR idEvent);
 	bool IsOverColumnDivider(int x, int y);
@@ -165,6 +189,7 @@ public:
 	void OnFillCells(WPARAM wParam, const GCFILLSTRUCT& fillStruct);
 	void OnSortCells(WPARAM wParam, const GCSORTSTRUCT& sortStruct);
 	void OnFilterCells(WPARAM wParam, const GCFILTERSTRUCT& filterStruct);
+	void RecordUndoOperation(const GridEditOperation& op);
 	void CopyGridCell(GRIDCELL& dest, GRIDCELL& src);
 };
 

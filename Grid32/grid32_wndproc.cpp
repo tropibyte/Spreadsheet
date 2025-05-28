@@ -183,11 +183,11 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         pMgr->OnRedo();
         break;
     case GM_CANUNDO:
-        pMgr->OnCanUndo();
-        break;
+        return pMgr->OnCanUndo();
+        //break;
     case GM_CANREDO:
-        pMgr->OnCanRedo();
-        break;
+        return pMgr->OnCanRedo();
+        //break;
     case GM_SETCELL:
     {
         if (wParam)
