@@ -10,11 +10,13 @@ const std::set<char> allowedPunctuation = {
 '`', '~'
 };
 
-CGrid32Mgr::CGrid32Mgr() : pRowInfoArray(nullptr), pColInfoArray(nullptr), 
+CGrid32Mgr::CGrid32Mgr() : pRowInfoArray(nullptr), pColInfoArray(nullptr),
 m_hWndGrid(NULL), nColHeaderHeight(40), nRowHeaderWidth(70), m_editWndProc(nullptr),
-m_nMouseHoverDelay(400), m_npHoverDelaySet(0), m_nToBeSized(~0), 
+m_nMouseHoverDelay(400), m_npHoverDelaySet(0), m_nToBeSized(~0),
 m_rgbSizingLine(RGB(0, 0, 64)), m_nSizingLine(0), m_bResizable(true),
-m_bSizing(false), m_bSelecting(false), m_hDefaultFont(NULL)
+m_bSizing(false), m_bSelecting(false), m_hDefaultFont(NULL),
+m_clientRect{ 0, 0, 0, 0 }, m_gdiplusToken(0), m_gridHitTest(0),
+m_hWndEdit(NULL), m_lastClickTime(0), totalGridCellRect{ 0, 0, 0, 0 }
 {
     memset(&gcs, 0, sizeof(GRIDCREATESTRUCT));
     m_defaultGridCell.clrBackground = RGB(255, 255, 255);
