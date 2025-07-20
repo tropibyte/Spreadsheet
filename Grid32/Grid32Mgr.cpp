@@ -744,20 +744,70 @@ void CGrid32Mgr::DrawSelectionSurround(HDC hDC)
     hPen = NULL;
 }
 
-bool CGrid32Mgr::IsCellMerged(UINT row, UINT col) 
+bool CGrid32Mgr::IsCellMerged(UINT row, UINT col)
 {
-    return false;
+    PGRIDCELL cell = GetCell(row, col);
+    if (!cell)
+        return false;
+    return !(cell->mergeRange.start.nRow == cell->mergeRange.end.nRow &&
+             cell->mergeRange.start.nCol == cell->mergeRange.end.nCol);
 }
 
 void CGrid32Mgr::DrawMergedCell(HDC hDC, const MERGERANGE& mergeRange) {
-    // Calculate the combined rectangle of the merged cells
-    // Draw the cell content (only in the top-left cell)
-    // Handle borders and other visual elements
+    RECT rect;
+    rect.left = (long)GetColumnStartPos(mergeRange.start.nCol);
+    rect.top = (long)GetRowStartPos(mergeRange.start.nRow);
+    rect.right = (long)GetColumnStartPos(mergeRange.end.nCol) +
+                 (long)pColInfoArray[mergeRange.end.nCol].nWidth;
+    rect.bottom = (long)GetRowStartPos(mergeRange.end.nRow) +
+                  (long)pRowInfoArray[mergeRange.end.nRow].nHeight;
+
+    PGRIDCELL cell = GetCellOrDefault(mergeRange.start.nRow, mergeRange.start.nCol);
+
+    HBRUSH hBackgroundBrush = CreateSolidBrush(cell->clrBackground);
+    HPEN hBorderPen = CreatePen(cell->penStyle, cell->m_nBorderWidth, cell->m_clrBorderColor);
+    HPEN hOldPen = (HPEN)SelectObject(hDC, hBorderPen);
+    HBRUSH hOldBrush = (HBRUSH)SelectObject(hDC, hBackgroundBrush);
+    Rectangle(hDC, rect.left, rect.top, rect.right, rect.bottom);
+    SelectObject(hDC, hOldBrush);
+    SelectObject(hDC, hOldPen);
+    DeleteObject(hBackgroundBrush);
+    DeleteObject(hBorderPen);
+
+    SetBkMode(hDC, TRANSPARENT);
+    SetTextColor(hDC, cell->fontInfo.m_clrTextColor);
+    HFONT hFont = CreateFontW(
+        (int)(cell->fontInfo.m_fPointSize * GetDeviceCaps(hDC, LOGPIXELSY)) / -72,
+        0, 0, 0, cell->fontInfo.bWeight, cell->fontInfo.bItalic,
+        cell->fontInfo.bUnderline, 0, 0, 0, 0, 0, 0,
+        cell->fontInfo.m_wsFontFace.c_str());
+    HFONT hOldFont = (HFONT)SelectObject(hDC, hFont);
+    DrawTextW(hDC, cell->m_wsText.c_str(), -1, &rect, cell->justification | DT_SINGLELINE);
+    SelectObject(hDC, hOldFont);
+    DeleteObject(hFont);
 }
 
 void CGrid32Mgr::SelectMergedRange(UINT row, UINT col)
 {
-    // Find the merged range and select all cells within it
+    PGRIDCELL cell = GetCell(row, col);
+    if (!cell)
+    {
+        m_selectionRect.start = { row, col };
+        m_selectionRect.end = { row, col };
+        return;
+    }
+
+    if (IsCellMerged(row, col))
+    {
+        m_selectionRect.start = cell->mergeRange.start;
+        m_selectionRect.end = cell->mergeRange.end;
+    }
+    else
+    {
+        m_selectionRect.start = { row, col };
+        m_selectionRect.end = { row, col };
+    }
+    Invalidate();
 }
 
 size_t CGrid32Mgr::CalculatedColumnDistance(size_t start, size_t end)
@@ -2217,20 +2267,133 @@ void CGrid32Mgr::OnClear()
 
 void CGrid32Mgr::OnCopy()
 {
-    // Copy the selected cells to the clipboard
-    // You'll need to implement logic to determine the selected cells and format the data for the clipboard
+    GRIDSELECTION sel = m_selectionRect;
+    NormalizeSelectionRect(sel);
+
+    std::wstring data;
+    for (UINT r = sel.start.nRow; r <= sel.end.nRow && r < gcs.nHeight; ++r)
+    {
+        for (UINT c = sel.start.nCol; c <= sel.end.nCol && c < gcs.nWidth; ++c)
+        {
+            PGRIDCELL cell = GetCell(r, c);
+            if (cell)
+                data += cell->m_wsText;
+            if (c < sel.end.nCol)
+                data += L'\t';
+        }
+        if (r < sel.end.nRow)
+            data += L"\n";
+    }
+
+    if (OpenClipboard(m_hWndGrid))
+    {
+        EmptyClipboard();
+        HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, (data.size() + 1) * sizeof(wchar_t));
+        if (hMem)
+        {
+            LPWSTR p = (LPWSTR)GlobalLock(hMem);
+            wcscpy_s(p, data.size() + 1, data.c_str());
+            GlobalUnlock(hMem);
+            SetClipboardData(CF_UNICODETEXT, hMem);
+        }
+        CloseClipboard();
+    }
 }
 
 void CGrid32Mgr::OnCut()
 {
-    // Cut the selected cells to the clipboard
-    // Similar to OnCopy, but also remove the cells from the grid
+    GRIDSELECTION sel = m_selectionRect;
+    NormalizeSelectionRect(sel);
+
+    // Build undo information
+    GridEditOperation op;
+    op.type = EditOperationType::Clipboard;
+
+    for (UINT r = sel.start.nRow; r <= sel.end.nRow && r < gcs.nHeight; ++r)
+    {
+        for (UINT c = sel.start.nCol; c <= sel.end.nCol && c < gcs.nWidth; ++c)
+        {
+            GRIDPOINT pt{ r, c };
+            PGRIDCELL cell = GetCell(r, c);
+            if (cell)
+            {
+                op.oldCells.push_back({ pt, *cell });
+            }
+            else
+            {
+                op.oldCells.push_back({ pt, m_defaultGridCell });
+            }
+        }
+    }
+
+    OnCopy();
+
+    bool record = m_bUndoRecordEnabled;
+    m_bUndoRecordEnabled = false;
+    for (auto& entry : op.oldCells)
+    {
+        ClearCellText(entry.first.nRow, entry.first.nCol);
+        op.newCells.push_back({ entry.first, m_defaultGridCell });
+    }
+    m_bUndoRecordEnabled = record;
+
+    RecordUndoOperation(op);
+    Invalidate();
 }
 
 void CGrid32Mgr::OnPaste()
 {
-    // Paste the clipboard content into the grid
-    // You'll need to parse the clipboard data and insert it into the grid appropriately
+    if (!OpenClipboard(m_hWndGrid))
+        return;
+
+    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+    if (!hData)
+    {
+        CloseClipboard();
+        return;
+    }
+
+    LPCWSTR pText = (LPCWSTR)GlobalLock(hData);
+    if (!pText)
+    {
+        CloseClipboard();
+        return;
+    }
+    std::wstring data(pText);
+    GlobalUnlock(hData);
+    CloseClipboard();
+
+    GRIDSELECTION sel = m_selectionRect;
+    NormalizeSelectionRect(sel);
+
+    GridEditOperation op;
+    op.type = EditOperationType::Clipboard;
+
+    std::wistringstream rows(data);
+    std::wstring line;
+    UINT rOffset = 0;
+    bool record = m_bUndoRecordEnabled;
+    m_bUndoRecordEnabled = false;
+    while (std::getline(rows, line) && sel.start.nRow + rOffset < gcs.nHeight)
+    {
+        std::wistringstream cols(line);
+        std::wstring cellText;
+        UINT cOffset = 0;
+        while (std::getline(cols, cellText, L'\t') && sel.start.nCol + cOffset < gcs.nWidth)
+        {
+            GRIDPOINT pt{ sel.start.nRow + rOffset, sel.start.nCol + cOffset };
+            PGRIDCELL cell = GetCellOrCreate(pt.nRow, pt.nCol, false);
+            op.oldCells.push_back({ pt, *cell });
+            SetCellText(pt.nRow, pt.nCol, cellText.c_str());
+            cell = GetCellOrDefault(pt.nRow, pt.nCol);
+            op.newCells.push_back({ pt, *cell });
+            ++cOffset;
+        }
+        ++rOffset;
+    }
+    m_bUndoRecordEnabled = record;
+    RecordUndoOperation(op);
+    Invalidate();
 }
 
 // Undo the last edit operation
@@ -2285,8 +2448,17 @@ void CGrid32Mgr::OnUndo()
     break;
 
     case EditOperationType::Clipboard:
-        // TODO: implement clipboard undo
-        break;
+    {
+        bool record = m_bUndoRecordEnabled;
+        m_bUndoRecordEnabled = false;
+        for (auto& entry : op.oldCells)
+        {
+            const GRIDPOINT& pt = entry.first;
+            SetCell(pt.nRow, pt.nCol, entry.second);
+        }
+        m_bUndoRecordEnabled = record;
+    }
+    break;
     }
 
     // Push to redo stack
@@ -2344,8 +2516,17 @@ void CGrid32Mgr::OnRedo()
     break;
 
     case EditOperationType::Clipboard:
-        // TODO: implement clipboard redo
-        break;
+    {
+        bool record = m_bUndoRecordEnabled;
+        m_bUndoRecordEnabled = false;
+        for (auto& entry : op.newCells)
+        {
+            const GRIDPOINT& pt = entry.first;
+            SetCell(pt.nRow, pt.nCol, entry.second);
+        }
+        m_bUndoRecordEnabled = record;
+    }
+    break;
     }
 
     // After redo, push back onto undo stack
@@ -2895,14 +3076,154 @@ size_t CGrid32Mgr::OnEnumCells(GRIDCELL* gcArray, UINT numElements)
 
 void CGrid32Mgr::OnFillCells(WPARAM wParam, const GCFILLSTRUCT& fillStruct)
 {
+    if (fillStruct.m_cbSize != sizeof(GCFILLSTRUCT))
+        return;
+
+    GRIDCELL srcCell;
+    if (fillStruct.m_dwFillHow == FILLBYGCS)
+        srcCell = fillStruct.refGC;
+    else if (fillStruct.m_dwFillHow == FILLBYTEXT)
+    {
+        srcCell = m_defaultGridCell;
+        srcCell.m_wsText = fillStruct.m_wsText;
+    }
+    else // FILLBYREFCELL
+    {
+        PGRIDCELL c = GetCellOrDefault(fillStruct.m_refCell.nRow, fillStruct.m_refCell.nCol);
+        srcCell = *c;
+    }
+
+    GRIDSELECTION sel = m_selectionRect;
+    NormalizeSelectionRect(sel);
+
+    bool record = m_bUndoRecordEnabled;
+    m_bUndoRecordEnabled = false;
+    for (UINT r = sel.start.nRow; r <= sel.end.nRow && r < gcs.nHeight; ++r)
+    {
+        for (UINT c = sel.start.nCol; c <= sel.end.nCol && c < gcs.nWidth; ++c)
+        {
+            GRIDPOINT pt{ r, c };
+            PGRIDCELL cell = GetCellOrCreate(r, c, false);
+            GridEditOperation op;
+            op.type = EditOperationType::SetFullCell;
+            op.row = r;
+            op.col = c;
+            op.oldState = *cell;
+
+            if (fillStruct.m_dwFillWhat & FILL_TEXT)
+                cell->m_wsText = srcCell.m_wsText;
+            if (fillStruct.m_dwFillWhat & FILL_COLOR)
+                cell->clrBackground = srcCell.clrBackground;
+            if (fillStruct.m_dwFillWhat & FILL_FONT)
+                cell->fontInfo.m_wsFontFace = srcCell.fontInfo.m_wsFontFace;
+            if (fillStruct.m_dwFillWhat & FILL_POINTSIZE)
+                cell->fontInfo.m_fPointSize = srcCell.fontInfo.m_fPointSize;
+            if (fillStruct.m_dwFillWhat & FILL_EFFECTS)
+            {
+                cell->fontInfo.bItalic = srcCell.fontInfo.bItalic;
+                cell->fontInfo.bUnderline = srcCell.fontInfo.bUnderline;
+                cell->fontInfo.bStrikeThrough = srcCell.fontInfo.bStrikeThrough;
+                cell->fontInfo.bWeight = srcCell.fontInfo.bWeight;
+            }
+
+            op.newState = *cell;
+            RecordUndoOperation(op);
+        }
+    }
+    m_bUndoRecordEnabled = record;
+    Invalidate();
+    SetLastError(0);
 }
 
 void CGrid32Mgr::OnSortCells(WPARAM wParam, const GCSORTSTRUCT& sortStruct)
 {
+    if (sortStruct.m_cbSize != sizeof(GCSORTSTRUCT))
+        return;
+
+    GRIDSELECTION sel = sortStruct.m_sortSel;
+    NormalizeSelectionRect(sel);
+    UINT col = sel.start.nCol;
+    std::vector<std::pair<std::wstring, std::vector<GRIDCELL>>> rows;
+    for (UINT r = sel.start.nRow; r <= sel.end.nRow && r < gcs.nHeight; ++r)
+    {
+        std::vector<GRIDCELL> rowCells;
+        std::wstring key;
+        for (UINT c = 0; c < gcs.nWidth; ++c)
+        {
+            PGRIDCELL cell = GetCellOrDefault(r, c);
+            rowCells.push_back(*cell);
+            if (c == col)
+                key = cell->m_wsText;
+        }
+        rows.push_back({ key, rowCells });
+    }
+
+    std::sort(rows.begin(), rows.end(), [asc=sortStruct.m_bAscending](const auto& a, const auto& b){
+        if (asc)
+            return a.first < b.first;
+        return a.first > b.first;
+    });
+
+    bool record = m_bUndoRecordEnabled;
+    m_bUndoRecordEnabled = false;
+    UINT rIndex = sel.start.nRow;
+    for (auto& row : rows)
+    {
+        for (UINT c = 0; c < gcs.nWidth && c < row.second.size(); ++c)
+        {
+            SetCell(rIndex, c, row.second[c]);
+        }
+        ++rIndex;
+    }
+    m_bUndoRecordEnabled = record;
+    Invalidate();
+    SetLastError(0);
 }
 
 void CGrid32Mgr::OnFilterCells(WPARAM wParam, const GCFILTERSTRUCT& filterStruct)
 {
+    if (filterStruct.m_cbSize != sizeof(GCFILTERSTRUCT))
+        return;
+
+    std::vector<UINT> matchedRows;
+    for (UINT r = 0; r < gcs.nHeight; ++r)
+    {
+        PGRIDCELL cell = GetCell(r, filterStruct.m_filterColumn.nCol);
+        std::wstring text = cell ? cell->m_wsText : L"";
+        bool match = false;
+        switch (filterStruct.m_dwFilterType)
+        {
+        case FILTER_CONTAINS:
+            match = text.find(filterStruct.m_wsFilterText) != std::wstring::npos;
+            break;
+        case FILTER_EQUALS:
+            match = text == filterStruct.m_wsFilterText;
+            break;
+        case FILTER_STARTS_WITH:
+            match = text.rfind(filterStruct.m_wsFilterText, 0) == 0;
+            break;
+        case FILTER_ENDS_WITH:
+            if (text.size() >= filterStruct.m_wsFilterText.size())
+                match = text.compare(text.size() - filterStruct.m_wsFilterText.size(),
+                                     filterStruct.m_wsFilterText.size(),
+                                     filterStruct.m_wsFilterText) == 0;
+            break;
+        default:
+            break;
+        }
+        if (match)
+            matchedRows.push_back(r);
+    }
+
+    if (!matchedRows.empty())
+    {
+        m_selectionRect.start.nRow = matchedRows.front();
+        m_selectionRect.end.nRow = matchedRows.back();
+        m_selectionRect.start.nCol = filterStruct.m_filterColumn.nCol;
+        m_selectionRect.end.nCol = filterStruct.m_filterColumn.nCol;
+        Invalidate();
+    }
+    SetLastError(0);
 }
 
 // Helper to record and apply edit operations
@@ -2956,6 +3277,26 @@ static std::wstring EscapeXML(const std::wstring& text)
         case L'\'': out += L"&apos;"; break;
         default: out.push_back(ch); break;
         }
+    }
+    return out;
+}
+
+static std::wstring UnescapeXML(const std::wstring& text)
+{
+    std::wstring out;
+    for (size_t i = 0; i < text.size(); ++i)
+    {
+        if (text[i] == L'&')
+        {
+            if (text.compare(i, 5, L"&amp;") == 0) { out.push_back(L'&'); i += 4; }
+            else if (text.compare(i, 4, L"&lt;") == 0) { out.push_back(L'<'); i += 3; }
+            else if (text.compare(i, 4, L"&gt;") == 0) { out.push_back(L'>'); i += 3; }
+            else if (text.compare(i, 6, L"&quot;") == 0) { out.push_back(L'\"'); i += 5; }
+            else if (text.compare(i, 6, L"&apos;") == 0) { out.push_back(L'\''); i += 5; }
+            else out.push_back(text[i]);
+        }
+        else
+            out.push_back(text[i]);
     }
     return out;
 }
@@ -3088,7 +3429,8 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
         return;
 
     if (pStream->m_dwFormat != SF_CSV && pStream->m_dwFormat != SF_TSV &&
-        pStream->m_dwFormat != SF_SSF)
+        pStream->m_dwFormat != SF_SSF && pStream->m_dwFormat != SF_ODF &&
+        pStream->m_dwFormat != SF_XLSX)
     {
         pStream->m_dwError = GRID_ERROR_NOT_IMPLEMENTED;
         if (pStream->m_pfnCallback)
@@ -3124,6 +3466,68 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
         }
         if (!cellText.empty() && row < gcs.nHeight && col < gcs.nWidth)
             SetCellText((UINT)row, (UINT)col, cellText.c_str());
+
+        pStream->m_dwError = 0;
+        if (pStream->m_pfnCallback)
+            pStream->m_pfnCallback(pStream);
+        return;
+    }
+
+    if (pStream->m_dwFormat == SF_ODF || pStream->m_dwFormat == SF_XLSX)
+    {
+        std::wstring_view xml(pStream->m_pwszBuff, pStream->m_cbBuffSize / sizeof(wchar_t));
+        UINT row = 0;
+        size_t pos = 0;
+        if (pStream->m_dwFormat == SF_ODF)
+        {
+            while ((pos = xml.find(L"<table:table-row", pos)) != std::wstring::npos && row < gcs.nHeight)
+            {
+                size_t rowEnd = xml.find(L"</table:table-row>", pos);
+                UINT col = 0;
+                size_t cpos = pos;
+                while ((cpos = xml.find(L"<table:table-cell", cpos)) != std::wstring::npos && cpos < rowEnd && col < gcs.nWidth)
+                {
+                    size_t start = xml.find(L"<text:p>", cpos);
+                    size_t end = xml.find(L"</text:p>", start);
+                    std::wstring text;
+                    if (start != std::wstring::npos && end != std::wstring::npos && end > start)
+                        text = UnescapeXML(std::wstring(xml.substr(start + 8, end - (start + 8))));
+                    SetCellText(row, col, text.c_str());
+                    ++col;
+                    cpos = xml.find(L"</table:table-cell>", cpos);
+                    if (cpos == std::wstring::npos || cpos > rowEnd) break;
+                    cpos += 19;
+                }
+                ++row;
+                if (rowEnd == std::wstring::npos) break;
+                pos = rowEnd + 17;
+            }
+        }
+        else
+        {
+            while ((pos = xml.find(L"<row", pos)) != std::wstring::npos && row < gcs.nHeight)
+            {
+                size_t rowEnd = xml.find(L"</row>", pos);
+                UINT col = 0;
+                size_t cpos = pos;
+                while ((cpos = xml.find(L"<c", cpos)) != std::wstring::npos && cpos < rowEnd && col < gcs.nWidth)
+                {
+                    size_t start = xml.find(L"<t>", cpos);
+                    size_t end = xml.find(L"</t>", start);
+                    std::wstring text;
+                    if (start != std::wstring::npos && end != std::wstring::npos && end > start)
+                        text = UnescapeXML(std::wstring(xml.substr(start + 3, end - (start + 3))));
+                    SetCellText(row, col, text.c_str());
+                    ++col;
+                    cpos = xml.find(L"</c>", cpos);
+                    if (cpos == std::wstring::npos || cpos > rowEnd) break;
+                    cpos += 4;
+                }
+                ++row;
+                if (rowEnd == std::wstring::npos) break;
+                pos = rowEnd + 6;
+            }
+        }
 
         pStream->m_dwError = 0;
         if (pStream->m_pfnCallback)
