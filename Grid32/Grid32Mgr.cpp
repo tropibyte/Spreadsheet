@@ -73,7 +73,7 @@ bool IsRectInside(const RECT& r1, const RECT& r2) {
 std::wstring CGrid32Mgr::GetColumnLabel(size_t index, size_t maxWidth)
 {
     std::wstring label;
-    while (index >= 0 && index < maxWidth)
+    while (index < maxWidth)
     {
         label.insert(label.begin(), L'A' + (index % 26));
         index = index / 26 - 1;
@@ -2720,9 +2720,9 @@ BOOL CGrid32Mgr::Invalidate(bool bErasebkgnd)
     return 0;
 }
 
-bool CGrid32Mgr::SetColumnWidth(size_t nCol, size_t newWidth) 
+bool CGrid32Mgr::SetColumnWidth(size_t nCol, size_t newWidth)
 {
-    if (nCol >= 0 && nCol < gcs.nWidth) {
+    if (nCol < gcs.nWidth) {
         pColInfoArray[nCol].nWidth = newWidth;
         Invalidate();
         return true;
@@ -2734,16 +2734,16 @@ bool CGrid32Mgr::SetColumnWidth(size_t nCol, size_t newWidth)
 
 size_t CGrid32Mgr::GetColumnWidth(size_t nCol)
 {
-    if (nCol >= 0 && nCol < gcs.nWidth)
+    if (nCol < gcs.nWidth)
         return pColInfoArray[nCol].nWidth;
 
     SetLastError(GRID_ERROR_OUT_OF_RANGE);
     return 0;
 }
 
-bool CGrid32Mgr::SetRowHeight(size_t nRow, size_t newHeight) 
+bool CGrid32Mgr::SetRowHeight(size_t nRow, size_t newHeight)
 {
-    if (nRow >= 0 && nRow < gcs.nHeight) {
+    if (nRow < gcs.nHeight) {
         pRowInfoArray[nRow].nHeight = newHeight;
         Invalidate();
         return true;
@@ -2756,7 +2756,7 @@ bool CGrid32Mgr::SetRowHeight(size_t nRow, size_t newHeight)
 
 size_t CGrid32Mgr::GetRowHeight(size_t nRow)
 {
-    if (nRow >= 0 && nRow < gcs.nHeight)
+    if (nRow < gcs.nHeight)
         return pRowInfoArray[nRow].nHeight;
 
     SetLastError(GRID_ERROR_OUT_OF_RANGE);
