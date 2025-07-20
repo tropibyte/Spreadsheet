@@ -990,18 +990,22 @@ void CGrid32Mgr::SetCellFormat(UINT nRow, UINT nCol, const FONTINFO& fi)
 
     // Capture old state
     PGRIDCELL pCell = GetCell(nRow, nCol);
-    op.oldState = *pCell;
+    if (pCell)
+    {
+        op.oldState = *pCell;
+    }
+    else
+    {
+        op.oldState = m_defaultGridCell;
+        pCell = CreateCell(nRow, nCol);
+        if (!pCell) {
+            SetLastError(GRID_ERROR_OUT_OF_MEMORY);
+            SendGridNotification(NM_OUTOFMEMORY);
+            return;
+        }
+    }
 
     // Apply new formatting
-	if (!pCell)
-	{
-		pCell = CreateCell(nRow, nCol);
-		if (!pCell) {
-			SetLastError(GRID_ERROR_OUT_OF_MEMORY);
-			SendGridNotification(NM_OUTOFMEMORY);
-			return;
-		}
-	}
     pCell->fontInfo = fi;
     op.newState = *pCell;
 
