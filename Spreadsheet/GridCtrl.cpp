@@ -53,6 +53,11 @@ BOOL CGridCtrl::SetCell(UINT nRow, UINT nCol)
     return ::SendMessage(m_hWnd, GM_SETCELL, 0, MAKELPARAM(nRow, nCol)) != 0;
 }
 
+BOOL CGridCtrl::SetCurrentCellFormat(const FONTINFO& fi)
+{
+    return ::SendMessage(m_hWnd, GM_SETCHARFORMAT, 0, (LPARAM)&fi) != 0;
+}
+
 DWORD CGridCtrl::GetLastError()
 {
     return (DWORD)::SendMessage(m_hWnd, GM_GETLASTERROR, 0, 0);

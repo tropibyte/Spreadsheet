@@ -206,3 +206,8 @@ void CGridView::OnSysKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
     }
     CView::OnSysKeyDown(nChar, nRepCnt, nFlags);
 }
+
+void CGridView::ApplyFont(const FONTINFO& fi)
+{
+    m_wndGridCtrl.SetCurrentCellFormat(fi);
+}

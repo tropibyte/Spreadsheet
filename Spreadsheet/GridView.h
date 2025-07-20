@@ -15,7 +15,7 @@ protected:
 	CGridCtrl m_wndGridCtrl;
 
 public:
-	virtual void OnDraw(CDC* pDC);      // overridden to draw this view
+        virtual void OnDraw(CDC* pDC);      // overridden to draw this view
 #ifdef _DEBUG
 	virtual void AssertValid() const;
 #ifndef _WIN32_WCE
@@ -50,7 +50,8 @@ public:
 	afx_msg void OnKeyUp(UINT nChar, UINT nRepCnt, UINT nFlags);
 	afx_msg void OnRawInput(UINT nInputcode, HRAWINPUT hRawInput);
 	afx_msg void OnSysKeyUp(UINT nChar, UINT nRepCnt, UINT nFlags);
-	afx_msg void OnSysKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags);
+        afx_msg void OnSysKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags);
+        void ApplyFont(const FONTINFO& fi);
 };
 
 

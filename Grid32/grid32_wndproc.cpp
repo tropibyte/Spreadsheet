@@ -230,6 +230,14 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         pMgr->OnGetSelection(reinterpret_cast<GRIDSELECTION*>(lParam));
         break;
 
+    case GM_SETCHARFORMAT:
+        if (lParam)
+        {
+            PFONTINFO pInfo = reinterpret_cast<PFONTINFO>(lParam);
+            pMgr->SetCellFormat(pMgr->m_currentCell.nRow, pMgr->m_currentCell.nCol, *pInfo);
+        }
+        break;
+
     case GM_SETCELLTEXT:
         pMgr->SetCellText(MakeGridPointFromWPARAM(wParam), reinterpret_cast<LPCWSTR>(lParam));
         break;
