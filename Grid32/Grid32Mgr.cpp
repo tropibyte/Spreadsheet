@@ -35,7 +35,7 @@ m_hWndEdit(NULL), m_lastClickTime(0), totalGridCellRect{ 0, 0, 0, 0 }
     m_cornerCell.m_nBorderWidth = 1;
     m_cornerCell.penStyle = PS_SOLID;
     m_cornerCell.fontInfo.m_wsFontFace = L"Arial";         // Font face
-    m_cornerCell.fontInfo.m_fPointSize = 11.0f;            // Point size
+    m_cornerCell.fontInfo.m_fPointSize = 11.50f;            // Point size
     m_cornerCell.fontInfo.m_clrTextColor = RGB(0, 0, 0);   // Black text color
     m_cornerCell.fontInfo.bItalic = FALSE;                 // No italic
     m_cornerCell.fontInfo.bUnderline = FALSE;              // No underline
@@ -96,7 +96,7 @@ bool CGrid32Mgr::Create(PGRIDCREATESTRUCT pGCS)
         return false;
     }
 
-
+	nColHeaderHeight = (gcs.style & GS_COLHEADER) ? gcs.nDefRowHeight : 0;
     for (size_t idx = 0; idx < gcs.nWidth; ++idx)
     {
         pColInfoArray[idx].nWidth = gcs.nDefColWidth;

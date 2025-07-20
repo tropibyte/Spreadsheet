@@ -128,8 +128,8 @@ int CGridView::OnCreate(LPCREATESTRUCT lpCreateStruct)
     gcs.cbSize = sizeof(GRIDCREATESTRUCT);
     gcs.nWidth = 702;
     gcs.nHeight = 4096;
-    gcs.nDefColWidth = 150;
-    gcs.nDefRowHeight = 40;
+    gcs.nDefColWidth = 135;
+    gcs.nDefRowHeight = 30;
     gcs.clrCurrentCellHighlightBox = RGB(255, 0, 0);
 
     if (CView::OnCreate(lpCreateStruct) == -1)
