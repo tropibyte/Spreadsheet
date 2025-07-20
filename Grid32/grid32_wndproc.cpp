@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "grid32.h"
 #include "grid32_internal.h"
+#include <new>
+#include <exception>
 
 GRIDPOINT MakeGridPointFromWPARAM(WPARAM wParam)
 {
@@ -21,8 +23,10 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         return -1; // or an appropriate error code
     }
 
-    switch (uMsg)
+    try
     {
+        switch (uMsg)
+        {
     case WM_NCCREATE:
     {
         pMgr = new CGrid32Mgr();
@@ -290,6 +294,19 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         break;
 
 
+    }
+    }
+    catch (const std::bad_alloc&)
+    {
+        if (pMgr)
+            pMgr->SetLastError(GRID_ERROR_OUT_OF_MEMORY);
+        return -1;
+    }
+    catch (const std::exception&)
+    {
+        if (pMgr)
+            pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
+        return -1;
     }
 
     return DefWindowProc(hWnd, uMsg, wParam, lParam);

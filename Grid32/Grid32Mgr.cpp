@@ -1,6 +1,7 @@
 #include "pch.h"
 #include <CommCtrl.h>
 #include "Grid32Mgr.h"
+#include <new>
 
 
 const std::set<char> allowedPunctuation = {
@@ -86,10 +87,12 @@ bool CGrid32Mgr::Create(PGRIDCREATESTRUCT pGCS)
     if (gcs.nWidth == 0 || gcs.nHeight == 0)
         return false;
     // Perform any other initialization needed for your grid
-    pColInfoArray = new COLINFO[gcs.nWidth];
-    pRowInfoArray = new ROWINFO[gcs.nHeight];
-
-    if (!pRowInfoArray || !pColInfoArray)
+    try
+    {
+        pColInfoArray = new COLINFO[gcs.nWidth];
+        pRowInfoArray = new ROWINFO[gcs.nHeight];
+    }
+    catch (const std::bad_alloc&)
     {
         SetLastError(GRID_ERROR_OUT_OF_MEMORY);
         SendGridNotification(NM_OUTOFMEMORY);
@@ -173,6 +176,9 @@ void CGrid32Mgr::OnPaint(PAINTSTRUCT& ps)
 {
     HDC hDC = ps.hdc;
 
+    try
+    {
+
     // Retrieve client area dimensions
     int width = m_clientRect.right - m_clientRect.left;
     int height = m_clientRect.bottom - m_clientRect.top;
@@ -207,6 +213,11 @@ void CGrid32Mgr::OnPaint(PAINTSTRUCT& ps)
     SelectObject(memDC, oldBitmap);
     DeleteObject(memBitmap);
     DeleteDC(memDC);
+    }
+    catch (const std::exception&)
+    {
+        SetLastError(GRID_ERROR_INVALID_PARAMETER);
+    }
 }
 
 void CGrid32Mgr::CalculateTotalGridRect()
@@ -827,8 +838,13 @@ PGRIDCELL CGrid32Mgr::GetCellOrCreate(UINT nRow, UINT nCol, bool bRecord)
         return it->second;
 
     // Create new cell
-    PGRIDCELL pCell = new GRIDCELL(m_defaultGridCell);
-    if (!pCell) {
+    PGRIDCELL pCell = nullptr;
+    try
+    {
+        pCell = new GRIDCELL(m_defaultGridCell);
+    }
+    catch (const std::bad_alloc&)
+    {
         SetLastError(GRID_ERROR_OUT_OF_MEMORY);
         SendGridNotification(NM_OUTOFMEMORY);
         return &m_defaultGridCell;
@@ -859,15 +875,20 @@ PGRIDCELL CGrid32Mgr::CreateCell(UINT nRow, UINT nCol)
 		delete it->second;
 		mapCells.erase(it); // Remove the existing cell
 	}
-	// Create new cell
-	PGRIDCELL pCell = new GRIDCELL(m_defaultGridCell);
-	if (!pCell) {
-		SetLastError(GRID_ERROR_OUT_OF_MEMORY);
-		SendGridNotification(NM_OUTOFMEMORY);
-		return nullptr;
-	}
-	mapCells[key] = pCell;
-	return pCell;
+        // Create new cell
+        PGRIDCELL pCell = nullptr;
+        try
+        {
+                pCell = new GRIDCELL(m_defaultGridCell);
+        }
+        catch (const std::bad_alloc&)
+        {
+                SetLastError(GRID_ERROR_OUT_OF_MEMORY);
+                SendGridNotification(NM_OUTOFMEMORY);
+                return nullptr;
+        }
+        mapCells[key] = pCell;
+        return pCell;
 }
 
 // Refactored SetCell method with clean undo/redo handling
@@ -888,8 +909,12 @@ void CGrid32Mgr::SetCell(UINT nRow, UINT nCol, const GRIDCELL& gc)
 
         // Replace cell
         delete it->second;
-        it->second = new GRIDCELL(gc);
-        if (!it->second) {
+        try
+        {
+            it->second = new GRIDCELL(gc);
+        }
+        catch (const std::bad_alloc&)
+        {
             SetLastError(GRID_ERROR_OUT_OF_MEMORY);
             SendGridNotification(NM_OUTOFMEMORY);
             return;
@@ -900,8 +925,13 @@ void CGrid32Mgr::SetCell(UINT nRow, UINT nCol, const GRIDCELL& gc)
         op.oldState = m_defaultGridCell;
 
         // Create cell
-        PGRIDCELL pCell = new GRIDCELL(gc);
-        if (!pCell) {
+        PGRIDCELL pCell = nullptr;
+        try
+        {
+            pCell = new GRIDCELL(gc);
+        }
+        catch (const std::bad_alloc&)
+        {
             SetLastError(GRID_ERROR_OUT_OF_MEMORY);
             SendGridNotification(NM_OUTOFMEMORY);
             return;
@@ -1031,8 +1061,12 @@ void CGrid32Mgr::SetCellText(UINT nRow, UINT nCol, LPCWSTR newText)
         op.oldState = *pCell;
     }
     else {
-        pCell = new GRIDCELL(m_defaultGridCell);
-        if (!pCell) {
+        try
+        {
+            pCell = new GRIDCELL(m_defaultGridCell);
+        }
+        catch (const std::bad_alloc&)
+        {
             SetLastError(GRID_ERROR_OUT_OF_MEMORY);
             SendGridNotification(NM_OUTOFMEMORY);
             return;
