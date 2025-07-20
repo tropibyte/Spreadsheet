@@ -19,10 +19,12 @@ enum class EditOperationType {
 };
 
 struct GridEditOperation {
-	EditOperationType type;
-	UINT row, col;
-	GRIDCELL oldState;
-	GRIDCELL newState;
+        EditOperationType type;
+        UINT row, col;
+        GRIDCELL oldState;
+        GRIDCELL newState;
+        std::vector<std::pair<GRIDPOINT, GRIDCELL>> oldCells;
+        std::vector<std::pair<GRIDPOINT, GRIDCELL>> newCells;
 };
 
 class CGrid32Mgr
