@@ -15,6 +15,7 @@
 #pragma once
 #include "CalendarBar.h"
 #include "Resource.h"
+#include "../Grid32/grid32.h"
 
 
 class COutlookBar : public CMFCOutlookBar
@@ -29,7 +30,8 @@ class CMainFrame : public CFrameWndEx
 protected: // create from serialization only
 	CMainFrame() noexcept;
 	DECLARE_DYNCREATE(CMainFrame)
-	void SetupFontPanel();
+        void SetupFontPanel();
+        void ApplyCurrentFont();
 
 // Attributes
 public:
@@ -57,7 +59,9 @@ protected:  // control bar embedded members
 	COutlookBar       m_wndNavigationBar;
 	CMFCShellTreeCtrl m_wndTree;
 	CCalendarBar      m_wndCalendar;
-	CMFCCaptionBar    m_wndCaptionBar;
+        CMFCCaptionBar    m_wndCaptionBar;
+        FONTINFO          m_currFontInfo;
+        COLORREF          m_cellBkg;
 
 // Generated message map functions
 protected:
