@@ -58,6 +58,20 @@ BOOL CGridCtrl::SetCurrentCellFormat(const FONTINFO& fi)
     return ::SendMessage(m_hWnd, GM_SETCHARFORMAT, 0, (LPARAM)&fi) != 0;
 }
 
+BOOL CGridCtrl::SetSelectionFormat(const FONTINFO& fi)
+{
+    return ::SendMessage(m_hWnd, GM_SETCHARFORMAT, SCF_SELECTION, (LPARAM)&fi) != 0;
+}
+
+BOOL CGridCtrl::SetRangeFormat(const GRIDSELECTION& sel, const FONTINFO& fi)
+{
+    GCCELLCHARFORMAT cf{};
+    cf.m_cbSize = sizeof(GCCELLCHARFORMAT);
+    cf.m_range = sel;
+    cf.m_format = fi;
+    return ::SendMessage(m_hWnd, GM_SETCHARFORMAT, SCF_RANGE, (LPARAM)&cf) != 0;
+}
+
 DWORD CGridCtrl::GetLastError()
 {
     return (DWORD)::SendMessage(m_hWnd, GM_GETLASTERROR, 0, 0);

@@ -223,8 +223,22 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         case GM_SETCHARFORMAT:
             if (lParam)
             {
-                PFONTINFO pInfo = reinterpret_cast<PFONTINFO>(lParam);
-                pMgr->SetCellFormat(pMgr->m_currentCell.nRow, pMgr->m_currentCell.nCol, *pInfo);
+                if (wParam == SCF_RANGE)
+                {
+                    LPGCCELLCHARFORMAT pCF = reinterpret_cast<LPGCCELLCHARFORMAT>(lParam);
+                    if (pCF->m_cbSize == sizeof(GCCELLCHARFORMAT))
+                        pMgr->SetRangeFormat(pCF->m_range, pCF->m_format);
+                }
+                else if (wParam == SCF_SELECTION)
+                {
+                    PFONTINFO pInfo = reinterpret_cast<PFONTINFO>(lParam);
+                    pMgr->SetSelectionFormat(*pInfo);
+                }
+                else
+                {
+                    PFONTINFO pInfo = reinterpret_cast<PFONTINFO>(lParam);
+                    pMgr->SetCellFormat(pMgr->m_currentCell.nRow, pMgr->m_currentCell.nCol, *pInfo);
+                }
             }
             break;
 

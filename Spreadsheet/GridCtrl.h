@@ -16,6 +16,8 @@ public:
 	BOOL SetCurrentCell(LPCWSTR pwszRef, short nWhich);
     BOOL SetCurrentCell(UINT nRow, UINT nCol);
     BOOL SetCurrentCellFormat(const FONTINFO& fi);
+    BOOL SetSelectionFormat(const FONTINFO& fi);
+    BOOL SetRangeFormat(const GRIDSELECTION& sel, const FONTINFO& fi);
     DWORD GetLastError();
 
 protected:
