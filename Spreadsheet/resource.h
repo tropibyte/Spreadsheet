@@ -66,6 +66,8 @@
 #define IDB_BITMAP1                     316
 #define IDB_UNDERLINE                   319
 #define IDD_DLG_GOTOCELL                321
+#define ID_FONT_GROW					322
+#define ID_FONT_SHRINK					323
 #define IDC_EDIT_WHERE                  1000
 #define IDC_RADIO_COORDINATES           1001
 #define IDC_RADIO_NAME                  1002
@@ -86,7 +88,7 @@
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        323
+#define _APS_NEXT_RESOURCE_VALUE        325
 #define _APS_NEXT_COMMAND_VALUE         32796
 #define _APS_NEXT_CONTROL_VALUE         1002
 #define _APS_NEXT_SYMED_VALUE           316
