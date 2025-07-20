@@ -169,7 +169,7 @@ void CGridView::OnKeyUp(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
     if (m_wndGridCtrl.GetSafeHwnd() != NULL)
     {
-        // Forward the WM_KEYDOWN message to the grid control
+        // Forward the WM_KEYUP message to the grid control
         m_wndGridCtrl.SendMessage(WM_KEYUP, nChar, MAKELPARAM(nRepCnt, nFlags));
     }
     CView::OnKeyUp(nChar, nRepCnt, nFlags);
@@ -190,7 +190,7 @@ void CGridView::OnSysKeyUp(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
     if (m_wndGridCtrl.GetSafeHwnd() != NULL)
     {
-        // Forward the WM_KEYDOWN message to the grid control
+        // Forward the WM_SYSKEYUP message to the grid control
         m_wndGridCtrl.SendMessage(WM_SYSKEYUP, nChar, MAKELPARAM(nRepCnt, nFlags));
     }
     CView::OnSysKeyUp(nChar, nRepCnt, nFlags);
@@ -201,7 +201,7 @@ void CGridView::OnSysKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 {
     if (m_wndGridCtrl.GetSafeHwnd() != NULL)
     {
-        // Forward the WM_KEYDOWN message to the grid control
+        // Forward the WM_SYSKEYDOWN message to the grid control
         m_wndGridCtrl.SendMessage(WM_SYSKEYDOWN, nChar, MAKELPARAM(nRepCnt, nFlags));
     }
     CView::OnSysKeyDown(nChar, nRepCnt, nFlags);
