@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "grid32.h"
 #include "grid32_internal.h"
+#include <new>
 
 
 LRESULT CALLBACK CGrid32Mgr::EditCtrl_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -10,15 +11,24 @@ LRESULT CALLBACK CGrid32Mgr::EditCtrl_WndProc(HWND hWnd, UINT message, WPARAM wP
 
     auto setcurcelltext = [&]() {
         int len = GetWindowTextLength(hWnd);
-        WCHAR* wsBuff = new WCHAR[(size_t)len + 10];
-        memset(wsBuff, 0, ((size_t)len + 10) * sizeof(WCHAR));
-        GetWindowText(hWnd, wsBuff, (len + 10));
-        pMgr->SetCurrentCellText(wsBuff);
-        delete[] wsBuff;
-        pMgr->Invalidate();
+        try {
+            WCHAR* wsBuff = new WCHAR[(size_t)len + 10];
+            memset(wsBuff, 0, ((size_t)len + 10) * sizeof(WCHAR));
+            GetWindowText(hWnd, wsBuff, (len + 10));
+            pMgr->SetCurrentCellText(wsBuff);
+            delete[] wsBuff;
+            pMgr->Invalidate();
+        }
+        catch (const std::bad_alloc&) {
+            pMgr->SetLastError(GRID_ERROR_OUT_OF_MEMORY);
+        }
+        catch (...) {
+            pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
+        }
     };
 
-    switch (message) {
+    try {
+        switch (message) {
     case WM_KEYDOWN:
         // Handle keydown events
         switch (wParam)
@@ -100,6 +110,11 @@ LRESULT CALLBACK CGrid32Mgr::EditCtrl_WndProc(HWND hWnd, UINT message, WPARAM wP
         // Pass other messages to the original edit control window procedure
         return CallWindowProc(pMgr->m_editWndProc, hWnd, message, wParam, lParam);
     }
+    }
+    catch (const std::exception&)
+    {
+        pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
+    }
 
-    return CallWindowProc(pMgr->m_editWndProc, hWnd, message, wParam, lParam); 
+    return CallWindowProc(pMgr->m_editWndProc, hWnd, message, wParam, lParam);
 }
