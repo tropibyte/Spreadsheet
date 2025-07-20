@@ -615,8 +615,10 @@ void CGrid32Mgr::DrawVoidSpace(HDC hDC)
 
         Rectangle(hDC, nMaxWidth + GetActualRowHeaderWidth(), m_clientRect.top, m_clientRect.right, m_clientRect.bottom);
 
-        DeleteObject(SelectObject(hDC, oldPen));
-        DeleteObject(SelectObject(hDC, oldBrush));
+        SelectObject(hDC, oldPen);
+        SelectObject(hDC, oldBrush);
+        DeleteObject(hPen);
+        DeleteObject(hBrush);
 
         bDrawBorder = true;
     }
@@ -630,8 +632,10 @@ void CGrid32Mgr::DrawVoidSpace(HDC hDC)
 
         Rectangle(hDC, 0, nMaxHeight + GetActualColHeaderHeight(), m_clientRect.right, m_clientRect.bottom);
 
-        DeleteObject(SelectObject(hDC, oldPen));
-        DeleteObject(SelectObject(hDC, oldBrush));
+        SelectObject(hDC, oldPen);
+        SelectObject(hDC, oldBrush);
+        DeleteObject(hPen);
+        DeleteObject(hBrush);
 
         bDrawBorder = true;
     }
@@ -660,7 +664,8 @@ void CGrid32Mgr::DrawVoidSpace(HDC hDC)
         }
 
 
-        DeleteObject(SelectObject(hDC, oldPen));
+        SelectObject(hDC, oldPen);
+        DeleteObject(hPen);
     }
 }
 
@@ -734,7 +739,8 @@ void CGrid32Mgr::DrawSelectionSurround(HDC hDC)
     hOldBrush = (HBRUSH)SelectObject(hDC, GetStockObject(NULL_BRUSH));
     Rectangle(hDC, startPt.x, startPt.y, endPt.x, endPt.y);
     SelectObject(hDC, hOldBrush);
-    DeleteObject(SelectObject(hDC, hOldPen));
+    SelectObject(hDC, hOldPen);
+    DeleteObject(hPen);
     hPen = NULL;
 }
 
