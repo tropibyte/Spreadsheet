@@ -104,7 +104,9 @@ public:
 	UINT GetCellTextLen(UINT nRow, UINT nCol);
 	void GetCurrentCellText(LPWSTR pText, UINT nLen);
 	void GetCellText(const GRIDPOINT& gridPt, LPWSTR pText, UINT nLen);
-	void SetCellFormat(UINT nRow, UINT nCol, const FONTINFO& fontInfo);
+        void SetCellFormat(UINT nRow, UINT nCol, const FONTINFO& fontInfo);
+        void SetSelectionFormat(const FONTINFO& fontInfo);
+        void SetRangeFormat(const GRIDSELECTION& sel, const FONTINFO& fontInfo);
 	void GetCellText(UINT nRow, UINT nCol, LPWSTR pText, UINT nLen);
 	void SetCell(UINT nRow, UINT nCol, const GRIDCELL& gc);
 	void SetCurrentCellText(LPCWSTR newText);

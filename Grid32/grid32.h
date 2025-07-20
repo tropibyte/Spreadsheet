@@ -112,6 +112,11 @@ struct tagGCSTREAM;
 #define GM_SETCHARFORMAT			(WM_USER + 23)
 #define GM_STREAMIN					(WM_USER + 24)
 #define GM_STREAMOUT				(WM_USER + 25)
+// GM_SETCHARFORMAT wParam flags
+#define SCF_CURRENTCELL 0x0000
+#define SCF_SELECTION 0x0001
+#define SCF_RANGE 0x0002
+
 
 // Grid32 Error
 
@@ -199,6 +204,13 @@ typedef struct {
 	LPWSTR wszBuff;
 	UINT nLen;
 }GRID_GETTEXT;
+typedef struct tagGCCELLCHARFORMAT
+{
+    UINT m_cbSize;
+    GRIDSELECTION m_range;
+    FONTINFO m_format;
+} GCCELLCHARFORMAT, *LPGCCELLCHARFORMAT;
+
 
 typedef struct tagGRIDNMHDR : tagNMHDR {
 	// Add custom members for your notification data

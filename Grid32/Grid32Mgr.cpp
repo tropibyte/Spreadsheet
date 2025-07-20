@@ -1080,6 +1080,40 @@ void CGrid32Mgr::SetCellFormat(UINT nRow, UINT nCol, const FONTINFO& fi)
     SetLastError(0);
 }
 
+void CGrid32Mgr::SetSelectionFormat(const FONTINFO& fi)
+{
+    GRIDSELECTION sel = m_selectionRect;
+    NormalizeSelectionRect(sel);
+    SetRangeFormat(sel, fi);
+}
+
+void CGrid32Mgr::SetRangeFormat(const GRIDSELECTION& selRange, const FONTINFO& fi)
+{
+    GRIDSELECTION sel = selRange;
+    NormalizeSelectionRect(sel);
+
+    bool record = m_bUndoRecordEnabled;
+    m_bUndoRecordEnabled = false;
+    for (UINT r = sel.start.nRow; r <= sel.end.nRow && r < gcs.nHeight; ++r)
+    {
+        for (UINT c = sel.start.nCol; c <= sel.end.nCol && c < gcs.nWidth; ++c)
+        {
+            PGRIDCELL cell = GetCellOrCreate(r, c, false);
+            GridEditOperation op;
+            op.type = EditOperationType::SetFormat;
+            op.row = r;
+            op.col = c;
+            op.oldState = *cell;
+            cell->fontInfo = fi;
+            op.newState = *cell;
+            RecordUndoOperation(op);
+        }
+    }
+    m_bUndoRecordEnabled = record;
+    Invalidate();
+    SetLastError(0);
+}
+
 
 
 
