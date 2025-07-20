@@ -2,15 +2,16 @@
 #include <CommCtrl.h>
 #include <sstream>
 #include <cwchar>
+#include <cwctype>
 #include "Grid32Mgr.h"
 #include <new>
 
 
-const std::set<char> allowedPunctuation = {
-'!', '@', '#', '$', '%', '^', '&', '*', '(', ')',
-'-', '_', '=', '+', '[', ']', '{', '}', '\\', '|',
-';', ':', '\'', '\"', ',', '.', '/', '<', '>', '?',
-'`', '~'
+const std::set<wchar_t> allowedPunctuation = {
+L'!', L'@', L'#', L'$', L'%', L'^', L'&', L'*', L'(', L')',
+L'-', L'_', L'=', L'+', L'[', L']', L'{', L'}', L'\\', L'|',
+L';', L':', L'\'', L'\"', L',', L'.', L'/', L'<', L'>', L'?',
+L'`', L'~'
 };
 
 CGrid32Mgr::CGrid32Mgr() : pRowInfoArray(nullptr), pColInfoArray(nullptr),
@@ -1719,7 +1720,7 @@ bool CGrid32Mgr::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
         break;
     default:
         // Handle alphanumeric characters, space, and specific punctuation
-        if (VK_BACK == nChar || std::isalnum(nChar) || std::isspace(nChar) || allowedPunctuation.count(nChar))
+        if (VK_BACK == nChar || std::iswalnum(static_cast<wint_t>(nChar)) || std::iswspace(static_cast<wint_t>(nChar)) || allowedPunctuation.count(static_cast<wchar_t>(nChar)))
         {
             // Show edit control at current cell position
             UINT nLen = GetCurrentCellTextLen();
@@ -2675,14 +2676,14 @@ std::wstring CGrid32Mgr::FormatCellReference(LPCWSTR pwszRef)
     // Parse the input to separate column and row
     bool foundColumn = false;
     for (wchar_t ch : input) {
-        if (isalpha(ch)) {
+        if (iswalpha(ch)) {
             if (foundColumn) {
                 SetLastError(GRID_ERROR_INVALID_CELL_REFERENCE);
                 return std::wstring();
             }
-            column += toupper(ch);
+            column += towupper(ch);
         }
-        else if (isdigit(ch)) {
+        else if (iswdigit(ch)) {
             foundColumn = true;
             row += ch;
         }
