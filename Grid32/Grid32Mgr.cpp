@@ -2916,6 +2916,12 @@ static std::wstring EscapeXML(const std::wstring& text)
     return out;
 }
 
+static void AppendTLV(std::wstringstream& out, const std::wstring& tag,
+                      const std::wstring& value)
+{
+    out << L';' << tag << L":" << value.size() << L":" << value;
+}
+
 void CGrid32Mgr::OnStreamOut(LPGCSTREAM pStream)
 {
     if (!pStream || !pStream->m_pwszBuff || pStream->m_cbSize != sizeof(GCSTREAM))
@@ -2944,36 +2950,79 @@ void CGrid32Mgr::OnStreamOut(LPGCSTREAM pStream)
     }
     else if (fmt == SF_SSF)
     {
-        ss << L"SSF\n";
+        ss << L"SSF,1\n"; // version header
+        ss << gcs.nHeight << L"," << gcs.nWidth << L"\n";
         for (size_t r = 0; r < gcs.nHeight; ++r)
         {
             for (size_t c = 0; c < gcs.nWidth; ++c)
             {
-                PGRIDCELL cell = GetCell(r, c);
-                if (cell && !cell->m_wsText.empty())
-                    ss << r << L"," << c << L"=" << cell->m_wsText << L"\n";
+                PGRIDCELL cell = GetCellOrDefault((UINT)r, (UINT)c);
+                ss << r << L"," << c;
+                AppendTLV(ss, L"T", cell->m_wsText);
+                AppendTLV(ss, L"FF", cell->fontInfo.m_wsFontFace);
+                AppendTLV(ss, L"FS", std::to_wstring(cell->fontInfo.m_fPointSize));
+                AppendTLV(ss, L"FC", std::to_wstring(cell->fontInfo.m_clrTextColor));
+                AppendTLV(ss, L"IT", std::to_wstring(cell->fontInfo.bItalic));
+                AppendTLV(ss, L"UN", std::to_wstring(cell->fontInfo.bUnderline));
+                AppendTLV(ss, L"ST", std::to_wstring(cell->fontInfo.bStrikeThrough));
+                AppendTLV(ss, L"WT", std::to_wstring(cell->fontInfo.bWeight));
+                AppendTLV(ss, L"BG", std::to_wstring(cell->clrBackground));
+                AppendTLV(ss, L"BC", std::to_wstring(cell->m_clrBorderColor));
+                AppendTLV(ss, L"BW", std::to_wstring(cell->m_nBorderWidth));
+                AppendTLV(ss, L"PS", std::to_wstring(cell->penStyle));
+                AppendTLV(ss, L"J", std::to_wstring(cell->justification));
+                AppendTLV(ss, L"NM", cell->m_wsName);
+                AppendTLV(ss, L"MR", std::to_wstring(cell->mergeRange.start.nRow) + L"," +
+                              std::to_wstring(cell->mergeRange.start.nCol) + L"," +
+                              std::to_wstring(cell->mergeRange.end.nRow) + L"," +
+                              std::to_wstring(cell->mergeRange.end.nCol));
+                ss << L"\n";
             }
         }
     }
     else if (fmt == SF_XML || fmt == SF_ODF || fmt == SF_XLSX)
     {
-        const wchar_t* root = (fmt == SF_ODF) ? L"office:spreadsheet" :
-                              (fmt == SF_XLSX) ? L"worksheet" : L"grid";
-        ss << L"<" << root << L" rows=\"" << gcs.nHeight << L"\" cols=\"" << gcs.nWidth << L"\">";
-        for (size_t r = 0; r < gcs.nHeight; ++r)
+        ss << L"<?xml version=\"1.0\" encoding=\"UTF-8\"?>";
+        if (fmt == SF_ODF)
         {
-            ss << L"<row index=\"" << r << L"\">";
-            for (size_t c = 0; c < gcs.nWidth; ++c)
+            ss << L"<office:document-content xmlns:office=\"urn:oasis:names:tc:opendocument:xmlns:office:1.0\" "
+                  "xmlns:table=\"urn:oasis:names:tc:opendocument:xmlns:table:1.0\">";
+            ss << L"<office:body><office:spreadsheet><table:table>";
+            for (size_t r = 0; r < gcs.nHeight; ++r)
             {
-                PGRIDCELL cell = GetCell(r, c);
-                ss << L"<cell index=\"" << c << L"\">";
-                if (cell)
-                    ss << EscapeXML(cell->m_wsText);
-                ss << L"</cell>";
+                ss << L"<table:table-row>";
+                for (size_t c = 0; c < gcs.nWidth; ++c)
+                {
+                    PGRIDCELL cell = GetCell(r, c);
+                    ss << L"<table:table-cell office:value-type=\"string\"><text:p>";
+                    if (cell)
+                        ss << EscapeXML(cell->m_wsText);
+                    ss << L"</text:p></table:table-cell>";
+                }
+                ss << L"</table:table-row>";
             }
-            ss << L"</row>";
+            ss << L"</table:table></office:spreadsheet></office:body></office:document-content>";
         }
-        ss << L"</" << root << L">";
+        else
+        {
+            // Basic XLSX-like XML
+            ss << L"<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">";
+            ss << L"<sheetData>";
+            for (size_t r = 0; r < gcs.nHeight; ++r)
+            {
+                ss << L"<row r=\"" << r + 1 << L"\">";
+                for (size_t c = 0; c < gcs.nWidth; ++c)
+                {
+                    PGRIDCELL cell = GetCell(r, c);
+                    ss << L"<c r=\"" << r + 1 << L"" << (wchar_t)(L'A' + c) << L"\" t=\"inlineStr\"><is><t>";
+                    if (cell)
+                        ss << EscapeXML(cell->m_wsText);
+                    ss << L"</t></is></c>";
+                }
+                ss << L"</row>";
+            }
+            ss << L"</sheetData></worksheet>";
+        }
     }
 
     std::wstring data = ss.str();
@@ -2994,7 +3043,8 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
     if (!pStream || !pStream->m_pwszBuff || pStream->m_cbSize != sizeof(GCSTREAM))
         return;
 
-    if (pStream->m_dwFormat != SF_CSV && pStream->m_dwFormat != SF_TSV)
+    if (pStream->m_dwFormat != SF_CSV && pStream->m_dwFormat != SF_TSV &&
+        pStream->m_dwFormat != SF_SSF)
     {
         pStream->m_dwError = GRID_ERROR_NOT_IMPLEMENTED;
         if (pStream->m_pfnCallback)
@@ -3002,32 +3052,130 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
         return;
     }
 
-    wchar_t delim = (pStream->m_dwFormat == SF_TSV) ? L'\t' : L',';
-
-    std::wstring_view input(pStream->m_pwszBuff, pStream->m_cbBuffSize / sizeof(wchar_t));
-    size_t row = 0, col = 0;
-    std::wstring cellText;
-    for (size_t i = 0; i < input.size() && row < gcs.nHeight; ++i)
+    if (pStream->m_dwFormat == SF_CSV || pStream->m_dwFormat == SF_TSV)
     {
-        wchar_t ch = input[i];
-        if (ch == delim || ch == L'\n')
+        wchar_t delim = (pStream->m_dwFormat == SF_TSV) ? L'\t' : L',';
+
+        std::wstring_view input(pStream->m_pwszBuff, pStream->m_cbBuffSize / sizeof(wchar_t));
+        size_t row = 0, col = 0;
+        std::wstring cellText;
+        for (size_t i = 0; i < input.size() && row < gcs.nHeight; ++i)
         {
-            SetCellText((UINT)row, (UINT)col, cellText.c_str());
-            cellText.clear();
-            ++col;
-            if (ch == L'\n' || col >= gcs.nWidth)
+            wchar_t ch = input[i];
+            if (ch == delim || ch == L'\n')
             {
-                col = 0;
-                ++row;
+                SetCellText((UINT)row, (UINT)col, cellText.c_str());
+                cellText.clear();
+                ++col;
+                if (ch == L'\n' || col >= gcs.nWidth)
+                {
+                    col = 0;
+                    ++row;
+                }
+            }
+            else
+            {
+                cellText.push_back(ch);
             }
         }
-        else
+        if (!cellText.empty() && row < gcs.nHeight && col < gcs.nWidth)
+            SetCellText((UINT)row, (UINT)col, cellText.c_str());
+
+        pStream->m_dwError = 0;
+        if (pStream->m_pfnCallback)
+            pStream->m_pfnCallback(pStream);
+        return;
+    }
+
+    // SSF format
+    std::wistringstream in(std::wstring(pStream->m_pwszBuff, pStream->m_cbBuffSize / sizeof(wchar_t)));
+    std::wstring line;
+    std::getline(in, line);
+    if (line.rfind(L"SSF", 0) != 0)
+    {
+        pStream->m_dwError = GRID_ERROR_INVALID_PARAMETER;
+        if (pStream->m_pfnCallback)
+            pStream->m_pfnCallback(pStream);
+        return;
+    }
+    // Skip version, assume valid
+    std::getline(in, line); // dimensions line
+    while (std::getline(in, line))
+    {
+        if (line.empty())
+            continue;
+        size_t pos = line.find(L';');
+        if (pos == std::wstring::npos)
+            continue;
+        std::wstring coords = line.substr(0, pos);
+        size_t comma = coords.find(L',');
+        if (comma == std::wstring::npos)
+            continue;
+        UINT r = (UINT)std::stoul(coords.substr(0, comma));
+        UINT c = (UINT)std::stoul(coords.substr(comma + 1));
+        PGRIDCELL cell = GetCellOrCreate(r, c);
+        size_t p = pos + 1;
+        while (p < line.size())
         {
-            cellText.push_back(ch);
+            size_t tagEnd = line.find(L':', p);
+            if (tagEnd == std::wstring::npos) break;
+            std::wstring tag = line.substr(p, tagEnd - p);
+            size_t lenEnd = line.find(L':', tagEnd + 1);
+            if (lenEnd == std::wstring::npos) break;
+            size_t len = std::stoul(line.substr(tagEnd + 1, lenEnd - tagEnd - 1));
+            std::wstring value = line.substr(lenEnd + 1, len);
+            p = lenEnd + 1 + len;
+            if (p < line.size() && line[p] == L';') ++p;
+
+            if (tag == L"T")
+                cell->m_wsText = value;
+            else if (tag == L"FF")
+                cell->fontInfo.m_wsFontFace = value;
+            else if (tag == L"FS")
+                cell->fontInfo.m_fPointSize = (float)std::wcstod(value.c_str(), nullptr);
+            else if (tag == L"FC")
+                cell->fontInfo.m_clrTextColor = (COLORREF)std::stoul(value);
+            else if (tag == L"IT")
+                cell->fontInfo.bItalic = (BOOL)std::stoul(value);
+            else if (tag == L"UN")
+                cell->fontInfo.bUnderline = (BOOL)std::stoul(value);
+            else if (tag == L"ST")
+                cell->fontInfo.bStrikeThrough = (BOOL)std::stoul(value);
+            else if (tag == L"WT")
+                cell->fontInfo.bWeight = (UINT)std::stoul(value);
+            else if (tag == L"BG")
+                cell->clrBackground = (COLORREF)std::stoul(value);
+            else if (tag == L"BC")
+                cell->m_clrBorderColor = (COLORREF)std::stoul(value);
+            else if (tag == L"BW")
+                cell->m_nBorderWidth = (UINT)std::stoul(value);
+            else if (tag == L"PS")
+                cell->penStyle = std::stoi(value);
+            else if (tag == L"J")
+                cell->justification = (UINT)std::stoul(value);
+            else if (tag == L"NM")
+                cell->m_wsName = value;
+            else if (tag == L"MR")
+            {
+                size_t p1 = 0, p2 = value.find(L',', p1);
+                if (p2 != std::wstring::npos)
+                {
+                    cell->mergeRange.start.nRow = (UINT)std::stoul(value.substr(p1, p2 - p1));
+                    p1 = p2 + 1; p2 = value.find(L',', p1);
+                    if (p2 != std::wstring::npos)
+                    {
+                        cell->mergeRange.start.nCol = (UINT)std::stoul(value.substr(p1, p2 - p1));
+                        p1 = p2 + 1; p2 = value.find(L',', p1);
+                        if (p2 != std::wstring::npos)
+                        {
+                            cell->mergeRange.end.nRow = (UINT)std::stoul(value.substr(p1, p2 - p1));
+                            cell->mergeRange.end.nCol = (UINT)std::stoul(value.substr(p2 + 1));
+                        }
+                    }
+                }
+            }
         }
     }
-    if (!cellText.empty() && row < gcs.nHeight && col < gcs.nWidth)
-        SetCellText((UINT)row, (UINT)col, cellText.c_str());
 
     pStream->m_dwError = 0;
     if (pStream->m_pfnCallback)
