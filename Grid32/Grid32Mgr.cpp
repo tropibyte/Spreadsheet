@@ -1,5 +1,7 @@
 #include "pch.h"
 #include <CommCtrl.h>
+#include <sstream>
+#include <cwchar>
 #include "Grid32Mgr.h"
 
 
@@ -2893,4 +2895,141 @@ void CGrid32Mgr::CopyGridCell(GRIDCELL& dest, GRIDCELL& src)
     // Copy the specific GRIDCELL attributes
     dest.m_wsText = src.m_wsText;
     dest.mergeRange = src.mergeRange;
+}
+
+// Stream the grid contents out in various formats
+static std::wstring EscapeXML(const std::wstring& text)
+{
+    std::wstring out;
+    for (wchar_t ch : text)
+    {
+        switch (ch)
+        {
+        case L'&': out += L"&amp;"; break;
+        case L'<': out += L"&lt;"; break;
+        case L'>': out += L"&gt;"; break;
+        case L'\"': out += L"&quot;"; break;
+        case L'\'': out += L"&apos;"; break;
+        default: out.push_back(ch); break;
+        }
+    }
+    return out;
+}
+
+void CGrid32Mgr::OnStreamOut(LPGCSTREAM pStream)
+{
+    if (!pStream || !pStream->m_pwszBuff || pStream->m_cbSize != sizeof(GCSTREAM))
+        return;
+
+    std::wstringstream ss;
+    DWORD fmt = pStream->m_dwFormat;
+    if (fmt == 0) fmt = SF_CSV; // default
+
+    if (fmt == SF_CSV || fmt == SF_TSV)
+    {
+        wchar_t delim = (fmt == SF_TSV) ? L'\t' : L',';
+        for (size_t r = 0; r < gcs.nHeight; ++r)
+        {
+            for (size_t c = 0; c < gcs.nWidth; ++c)
+            {
+                PGRIDCELL cell = GetCell(r, c);
+                if (cell)
+                    ss << cell->m_wsText;
+                if (c + 1 < gcs.nWidth)
+                    ss << delim;
+            }
+            if (r + 1 < gcs.nHeight)
+                ss << L"\n";
+        }
+    }
+    else if (fmt == SF_SSF)
+    {
+        ss << L"SSF\n";
+        for (size_t r = 0; r < gcs.nHeight; ++r)
+        {
+            for (size_t c = 0; c < gcs.nWidth; ++c)
+            {
+                PGRIDCELL cell = GetCell(r, c);
+                if (cell && !cell->m_wsText.empty())
+                    ss << r << L"," << c << L"=" << cell->m_wsText << L"\n";
+            }
+        }
+    }
+    else if (fmt == SF_XML || fmt == SF_ODF || fmt == SF_XLSX)
+    {
+        const wchar_t* root = (fmt == SF_ODF) ? L"office:spreadsheet" :
+                              (fmt == SF_XLSX) ? L"worksheet" : L"grid";
+        ss << L"<" << root << L" rows=\"" << gcs.nHeight << L"\" cols=\"" << gcs.nWidth << L"\">";
+        for (size_t r = 0; r < gcs.nHeight; ++r)
+        {
+            ss << L"<row index=\"" << r << L"\">";
+            for (size_t c = 0; c < gcs.nWidth; ++c)
+            {
+                PGRIDCELL cell = GetCell(r, c);
+                ss << L"<cell index=\"" << c << L"\">";
+                if (cell)
+                    ss << EscapeXML(cell->m_wsText);
+                ss << L"</cell>";
+            }
+            ss << L"</row>";
+        }
+        ss << L"</" << root << L">";
+    }
+
+    std::wstring data = ss.str();
+    size_t toCopy = std::min(data.size(), static_cast<size_t>(pStream->m_cbBuffSize / sizeof(wchar_t)));
+    wmemcpy(const_cast<LPWSTR>(pStream->m_pwszBuff), data.c_str(), toCopy);
+    if (toCopy < data.size())
+        pStream->m_dwError = GRID_ERROR_OUT_OF_RANGE;
+    else
+        pStream->m_dwError = 0;
+    pStream->m_cbBuffOut = static_cast<UINT>(toCopy * sizeof(wchar_t));
+    if (pStream->m_pfnCallback)
+        pStream->m_pfnCallback(pStream);
+}
+
+// Load grid contents from CSV or TSV text
+void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
+{
+    if (!pStream || !pStream->m_pwszBuff || pStream->m_cbSize != sizeof(GCSTREAM))
+        return;
+
+    if (pStream->m_dwFormat != SF_CSV && pStream->m_dwFormat != SF_TSV)
+    {
+        pStream->m_dwError = GRID_ERROR_NOT_IMPLEMENTED;
+        if (pStream->m_pfnCallback)
+            pStream->m_pfnCallback(pStream);
+        return;
+    }
+
+    wchar_t delim = (pStream->m_dwFormat == SF_TSV) ? L'\t' : L',';
+
+    std::wstring_view input(pStream->m_pwszBuff, pStream->m_cbBuffSize / sizeof(wchar_t));
+    size_t row = 0, col = 0;
+    std::wstring cellText;
+    for (size_t i = 0; i < input.size() && row < gcs.nHeight; ++i)
+    {
+        wchar_t ch = input[i];
+        if (ch == delim || ch == L'\n')
+        {
+            SetCellText((UINT)row, (UINT)col, cellText.c_str());
+            cellText.clear();
+            ++col;
+            if (ch == L'\n' || col >= gcs.nWidth)
+            {
+                col = 0;
+                ++row;
+            }
+        }
+        else
+        {
+            cellText.push_back(ch);
+        }
+    }
+    if (!cellText.empty() && row < gcs.nHeight && col < gcs.nWidth)
+        SetCellText((UINT)row, (UINT)col, cellText.c_str());
+
+    pStream->m_dwError = 0;
+    if (pStream->m_pfnCallback)
+        pStream->m_pfnCallback(pStream);
 }

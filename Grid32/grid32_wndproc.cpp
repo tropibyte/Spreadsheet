@@ -282,11 +282,13 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         break;
 
     case GM_STREAMIN:
-        // Handle GM_STREAMIN
+        if (lParam)
+            pMgr->OnStreamIn(reinterpret_cast<LPGCSTREAM>(lParam));
         break;
 
     case GM_STREAMOUT:
-        // Handle GM_STREAMOUT
+        if (lParam)
+            pMgr->OnStreamOut(reinterpret_cast<LPGCSTREAM>(lParam));
         break;
 
 

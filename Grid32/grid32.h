@@ -36,7 +36,13 @@ struct tagGCSTREAM;
 
 // Stream format
 #define SF_TEXT 					0x0001
-#define SF_RTF						0x0002
+#define SF_RTF                                          0x0002
+#define SF_CSV                                          0x0004
+#define SF_TSV                                          0x0008
+#define SF_SSF                                          0x0010
+#define SF_XML                                          0x0020
+#define SF_ODF                                          0x0040
+#define SF_XLSX                                         0x0080
 
 //Fill constants
 #define FILL_UP						0x0001
@@ -210,6 +216,7 @@ typedef struct tagGCSTREAM {
 	LPCWSTR			   m_pwszBuff;
 	UINT			   m_cbSize, m_cbBuffSize, m_cbBuffOut;
 	GCSTREAMCALLBACK   m_pfnCallback;
+        DWORD             m_dwFormat;
 } GCSTREAM, *LPGCSTREAM;
 
 typedef struct tagGCFILLSTRUCT
