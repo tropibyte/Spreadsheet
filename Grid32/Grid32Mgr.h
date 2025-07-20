@@ -190,6 +190,8 @@ public:
 	void OnSortCells(WPARAM wParam, const GCSORTSTRUCT& sortStruct);
 	void OnFilterCells(WPARAM wParam, const GCFILTERSTRUCT& filterStruct);
 	void RecordUndoOperation(const GridEditOperation& op);
-	void CopyGridCell(GRIDCELL& dest, GRIDCELL& src);
+        void CopyGridCell(GRIDCELL& dest, GRIDCELL& src);
+        void OnStreamOut(LPGCSTREAM pStream);
+        void OnStreamIn(LPGCSTREAM pStream);
 };
 
