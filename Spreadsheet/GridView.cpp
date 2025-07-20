@@ -54,14 +54,14 @@ void CGridView::Dump(CDumpContext& dc) const
 	CView::Dump(dc);
 }
 
-BOOL CGridView::SetCell(LPCWSTR pwszRef, short nWhich)
+BOOL CGridView::SetCurrentCell(LPCWSTR pwszRef, short nWhich)
 {
-    return m_wndGridCtrl.SetCell(pwszRef, nWhich);
+    return m_wndGridCtrl.SetCurrentCell(pwszRef, nWhich);
 }
 
-BOOL CGridView::SetCell(UINT nRow, UINT nCol)
+BOOL CGridView::SetCurrentCell(UINT nRow, UINT nCol)
 {
-    return m_wndGridCtrl.SetCell(nRow, nCol);
+    return m_wndGridCtrl.SetCurrentCell(nRow, nCol);
 }
 
 #endif

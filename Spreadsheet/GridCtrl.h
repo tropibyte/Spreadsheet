@@ -13,10 +13,10 @@ public:
 	virtual ~CGridCtrl();
 	static HMODULE InitGridControl();
 	BOOL Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT nID, GRIDCREATESTRUCT &gcs);
-	BOOL SetCell(LPCWSTR pwszRef, short nWhich);
-        BOOL SetCell(UINT nRow, UINT nCol);
-        BOOL SetCurrentCellFormat(const FONTINFO& fi);
-        DWORD GetLastError();
+	BOOL SetCurrentCell(LPCWSTR pwszRef, short nWhich);
+    BOOL SetCurrentCell(UINT nRow, UINT nCol);
+    BOOL SetCurrentCellFormat(const FONTINFO& fi);
+    DWORD GetLastError();
 
 protected:
 	DECLARE_MESSAGE_MAP()

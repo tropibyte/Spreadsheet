@@ -149,7 +149,7 @@ typedef struct __FONTINFO {
 	BOOL bItalic, bUnderline, bStrikeThrough;
 	UINT bWeight;
 	__FONTINFO();
-}FONTINFO;
+}FONTINFO, *PFONTINFO;
 
 struct cell_base
 {

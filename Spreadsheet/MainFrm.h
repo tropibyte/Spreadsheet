@@ -59,9 +59,9 @@ protected:  // control bar embedded members
 	COutlookBar       m_wndNavigationBar;
 	CMFCShellTreeCtrl m_wndTree;
 	CCalendarBar      m_wndCalendar;
-        CMFCCaptionBar    m_wndCaptionBar;
-        FONTINFO          m_currFontInfo;
-        COLORREF          m_cellBkg;
+    CMFCCaptionBar    m_wndCaptionBar;
+    //FONTINFO          m_currFontInfo;
+    COLORREF          m_cellBkg;
 
 // Generated message map functions
 protected:
@@ -86,8 +86,17 @@ protected:
 	CMFCOutlookBarPane*    m_pCurrOutlookPage;
 public:
 	afx_msg void OnCellGoto();
+	afx_msg void OnFontName();
+	afx_msg void OnFontSize();
+	afx_msg void OnFontGrow();
+	afx_msg void OnFontShrink();
+	afx_msg void OnFontBold();
+	afx_msg void OnFontItalic();
+	afx_msg void OnFontUnderline();
+	afx_msg void OnFontStrikethrough();
+	afx_msg void OnFontColor();
+	afx_msg void OnFontBackground();
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	virtual BOOL LoadFrame(UINT nIDResource, DWORD dwDefaultStyle = WS_OVERLAPPEDWINDOW | FWS_ADDTOTITLE, CWnd* pParentWnd = NULL, CCreateContext* pContext = NULL);
 };
-
 

@@ -43,14 +43,14 @@ BOOL CGridCtrl::Create(DWORD dwStyle, const RECT& rect, CWnd* pParentWnd, UINT n
     );
 }
 
-BOOL CGridCtrl::SetCell(LPCWSTR pwszRef, short nWhich)
+BOOL CGridCtrl::SetCurrentCell(LPCWSTR pwszRef, short nWhich)
 {
-    return ::SendMessage(m_hWnd, GM_SETCELL, nWhich, (LPARAM)pwszRef) != 0;
+    return ::SendMessage(m_hWnd, GM_SETCURRENTCELL, nWhich, (LPARAM)pwszRef) != 0;
 }
 
-BOOL CGridCtrl::SetCell(UINT nRow, UINT nCol)
+BOOL CGridCtrl::SetCurrentCell(UINT nRow, UINT nCol)
 {
-    return ::SendMessage(m_hWnd, GM_SETCELL, 0, MAKELPARAM(nRow, nCol)) != 0;
+    return ::SendMessage(m_hWnd, GM_SETCURRENTCELL, 0, MAKELPARAM(nRow, nCol)) != 0;
 }
 
 BOOL CGridCtrl::SetCurrentCellFormat(const FONTINFO& fi)

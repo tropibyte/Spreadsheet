@@ -23,8 +23,8 @@ public:
 #endif
 #endif
 protected:
-	virtual BOOL SetCell(LPCWSTR pwszRef, short nWhich);
-	virtual BOOL SetCell(UINT nRow, UINT nCol);
+	virtual BOOL SetCurrentCell(LPCWSTR pwszRef, short nWhich);
+	virtual BOOL SetCurrentCell(UINT nRow, UINT nCol);
 	virtual void OnFindNext(LPCTSTR lpszFind, BOOL bNext, BOOL bCase);
 	virtual void OnReplaceSel(LPCTSTR lpszFind, BOOL bNext, BOOL bCase,
 		LPCTSTR lpszReplace);

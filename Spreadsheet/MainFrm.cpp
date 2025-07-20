@@ -56,14 +56,6 @@ CMainFrame::CMainFrame() noexcept : m_pCurrOutlookPage(nullptr), m_pCurrOutlookW
 {
         // TODO: add member initialization code here
         theApp.m_nAppLook = theApp.GetInt(_T("ApplicationLook"), ID_VIEW_APPLOOK_OFF_2007_SILVER);
-        m_currFontInfo = FONTINFO();
-        m_currFontInfo.m_wsFontFace = L"Arial";
-        m_currFontInfo.m_fPointSize = 12.f;
-        m_currFontInfo.m_clrTextColor = RGB(0,0,0);
-        m_currFontInfo.bItalic = FALSE;
-        m_currFontInfo.bUnderline = FALSE;
-        m_currFontInfo.bStrikeThrough = FALSE;
-        m_currFontInfo.bWeight = 400;
         m_cellBkg = RGB(255,255,255);
 }
 
@@ -227,6 +219,16 @@ BOOL CMainFrame::CreateCaptionBar()
 	return TRUE;
 }
 
+int CMainFrame::FindFocusedOutlookWnd(CMFCOutlookBarTabCtrl** ppOutlookWnd)
+{
+	return 0;
+}
+
+CMFCOutlookBarTabCtrl* CMainFrame::FindOutlookParent(CWnd* pWnd)
+{
+	return nullptr;
+}
+
 // CMainFrame diagnostics
 
 #ifdef _DEBUG
@@ -380,8 +382,8 @@ void CMainFrame::OnFontName()
         CMFCRibbonFontComboBox* pCombo = DYNAMIC_DOWNCAST(CMFCRibbonFontComboBox, m_wndRibbonBar.FindByID(ID_FONT_NAME));
         if (pCombo)
         {
-                m_currFontInfo.m_wsFontFace = pCombo->GetEditText().GetString();
-                ApplyCurrentFont();
+                //m_currFontInfo.m_wsFontFace = pCombo->GetEditText().GetString();
+                //ApplyCurrentFont();
         }
 }
 
@@ -393,49 +395,49 @@ void CMainFrame::OnFontSize()
                 int size = _ttoi(pCombo->GetEditText());
                 if (size > 0)
                 {
-                        m_currFontInfo.m_fPointSize = (float)size;
-                        ApplyCurrentFont();
+                        //m_currFontInfo.m_fPointSize = (float)size;
+                        //ApplyCurrentFont();
                 }
         }
 }
 
 void CMainFrame::OnFontGrow()
 {
-        m_currFontInfo.m_fPointSize += 1.0f;
-        ApplyCurrentFont();
+        //m_currFontInfo.m_fPointSize += 1.0f;
+        //ApplyCurrentFont();
 }
 
 void CMainFrame::OnFontShrink()
 {
-        if (m_currFontInfo.m_fPointSize > 1.0f)
-        {
-                m_currFontInfo.m_fPointSize -= 1.0f;
-                ApplyCurrentFont();
-        }
+        //if (m_currFontInfo.m_fPointSize > 1.0f)
+        //{
+        //        m_currFontInfo.m_fPointSize -= 1.0f;
+        //        ApplyCurrentFont();
+        //}
 }
 
 void CMainFrame::OnFontBold()
 {
-        m_currFontInfo.bWeight = (m_currFontInfo.bWeight == 400 ? 700 : 400);
-        ApplyCurrentFont();
+        //m_currFontInfo.bWeight = (m_currFontInfo.bWeight == 400 ? 700 : 400);
+        //ApplyCurrentFont();
 }
 
 void CMainFrame::OnFontItalic()
 {
-        m_currFontInfo.bItalic = !m_currFontInfo.bItalic;
-        ApplyCurrentFont();
+        //m_currFontInfo.bItalic = !m_currFontInfo.bItalic;
+        //ApplyCurrentFont();
 }
 
 void CMainFrame::OnFontUnderline()
 {
-        m_currFontInfo.bUnderline = !m_currFontInfo.bUnderline;
-        ApplyCurrentFont();
+        //m_currFontInfo.bUnderline = !m_currFontInfo.bUnderline;
+        //ApplyCurrentFont();
 }
 
 void CMainFrame::OnFontStrikethrough()
 {
-        m_currFontInfo.bStrikeThrough = !m_currFontInfo.bStrikeThrough;
-        ApplyCurrentFont();
+        //m_currFontInfo.bStrikeThrough = !m_currFontInfo.bStrikeThrough;
+        //ApplyCurrentFont();
 }
 
 void CMainFrame::OnFontColor()
@@ -443,8 +445,8 @@ void CMainFrame::OnFontColor()
         CMFCRibbonColorButton* pBtn = DYNAMIC_DOWNCAST(CMFCRibbonColorButton, m_wndRibbonBar.FindByID(ID_FONT_COLOR));
         if (pBtn)
         {
-                m_currFontInfo.m_clrTextColor = pBtn->GetColor();
-                ApplyCurrentFont();
+                //m_currFontInfo.m_clrTextColor = pBtn->GetColor();
+                //ApplyCurrentFont();
         }
 }
 
@@ -463,7 +465,7 @@ void CMainFrame::ApplyCurrentFont()
         CGridView* pView = DYNAMIC_DOWNCAST(CGridView, GetActiveView());
         if (pView != nullptr)
         {
-                pView->ApplyFont(m_currFontInfo);
+                //pView->ApplyFont(m_currFontInfo);
         }
 }
 

@@ -1,9 +1,13 @@
 #include "pch.h"
+#include <algorithm> 
 #include <CommCtrl.h>
 #include <sstream>
 #include <cwchar>
 #include "Grid32Mgr.h"
 #include <new>
+#include <string_view>
+
+
 
 
 const std::set<char> allowedPunctuation = {
@@ -3411,7 +3415,7 @@ void CGrid32Mgr::OnStreamOut(LPGCSTREAM pStream)
     }
 
     std::wstring data = ss.str();
-    size_t toCopy = std::min(data.size(), static_cast<size_t>(pStream->m_cbBuffSize / sizeof(wchar_t)));
+    size_t toCopy = min(data.size(), static_cast<size_t>(pStream->m_cbBuffSize / sizeof(wchar_t)));
     wmemcpy(const_cast<LPWSTR>(pStream->m_pwszBuff), data.c_str(), toCopy);
     if (toCopy < data.size())
         pStream->m_dwError = GRID_ERROR_OUT_OF_RANGE;
