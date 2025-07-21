@@ -197,5 +197,7 @@ public:
         void CopyGridCell(GRIDCELL& dest, GRIDCELL& src);
         void OnStreamOut(LPGCSTREAM pStream);
         void OnStreamIn(LPGCSTREAM pStream);
+        void RecalculateFormulas();
+        std::wstring EvaluateFormula(const std::wstring& expr);
 };
 

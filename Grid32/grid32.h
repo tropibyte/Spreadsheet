@@ -178,8 +178,11 @@ typedef struct __COLINFO : public cell_base {
 }COLINFO;
 
 typedef struct __GRIDCELL : public cell_base {
-	std::wstring m_wsText;
-	MERGERANGE mergeRange;
+        std::wstring m_wsText;
+        std::wstring m_wsFormula;
+        bool m_bFormula;
+        MERGERANGE mergeRange;
+        __GRIDCELL() : m_bFormula(false) {}
 }GRIDCELL, *PGRIDCELL;
 
 typedef struct{

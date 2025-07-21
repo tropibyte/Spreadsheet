@@ -4,6 +4,7 @@
 #include <sstream>
 #include <cwchar>
 #include <cwctype>
+#include <set>
 #include "Grid32Mgr.h"
 #include <new>
 #include <string_view>
@@ -1004,6 +1005,7 @@ void CGrid32Mgr::SetCell(UINT nRow, UINT nCol, const GRIDCELL& gc)
 
     // Record undo/redo
     RecordUndoOperation(op);
+    RecalculateFormulas();
     SetLastError(0);
 }
 
@@ -1069,6 +1071,8 @@ void CGrid32Mgr::SetCellFormat(UINT nRow, UINT nCol, const FONTINFO& fi)
     // Apply new formatting
     pCell->fontInfo = fi;
     op.newState = *pCell;
+
+    RecalculateFormulas();
 
     // Record undo operation
     RecordUndoOperation(op);
@@ -1176,8 +1180,16 @@ void CGrid32Mgr::SetCellText(UINT nRow, UINT nCol, LPCWSTR newText)
         op.oldState = m_defaultGridCell;
     }
 
-    // Apply the new text
-    pCell->m_wsText = newText;
+    // Apply the new text or formula
+    if (newText && newText[0] == L'=') {
+        pCell->m_bFormula = true;
+        pCell->m_wsFormula = newText + 1;
+        pCell->m_wsText = EvaluateFormula(pCell->m_wsFormula);
+    } else {
+        pCell->m_bFormula = false;
+        pCell->m_wsFormula.clear();
+        pCell->m_wsText = newText ? newText : L"";
+    }
     op.newState = *pCell;
 
     // Record undo operation
@@ -1206,13 +1218,16 @@ void CGrid32Mgr::ClearCellText(UINT nRow, UINT nCol)
         // Capture old state
         op.oldState = *it->second;
 
-        // Clear the text
+        // Clear the text and any formula
         it->second->m_wsText.clear();
+        it->second->m_wsFormula.clear();
+        it->second->m_bFormula = false;
         // Capture new state
         op.newState = *it->second;
 
         // Record undo operation
         RecordUndoOperation(op);
+        RecalculateFormulas();
 
         // Redraw the cell
         RECT r;
@@ -1245,6 +1260,7 @@ void CGrid32Mgr::DeleteCell(UINT nRow, UINT nCol)
 
         // Record undo operation
         RecordUndoOperation(op);
+        RecalculateFormulas();
         SetLastError(0);
     }
 }
@@ -1257,6 +1273,7 @@ void CGrid32Mgr::DeleteAllCells()
         delete cellPair.second;
     }
     mapCells.clear();
+    RecalculateFormulas();
 }
 
 void CGrid32Mgr::OnHScroll(UINT nSBCode, UINT nPos, HWND hScrollBar)
@@ -1762,7 +1779,14 @@ bool CGrid32Mgr::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
         {
             // Show edit control at current cell position
             UINT nLen = GetCurrentCellTextLen();
-            if (nLen)
+            PGRIDCELL pCell = GetCurrentCell();
+            if (pCell && pCell->m_bFormula)
+            {
+                std::wstring display = L"=" + pCell->m_wsFormula;
+                SetWindowText(m_hWndEdit, display.c_str());
+                PostMessage(m_hWndEdit, EM_SETSEL, display.length(), display.length());
+            }
+            else if (nLen)
             {
                 TCHAR* buff = new TCHAR[(size_t)nLen + 2];
                 GetCurrentCellText(buff, nLen);
@@ -3667,4 +3691,142 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
     pStream->m_dwError = 0;
     if (pStream->m_pfnCallback)
         pStream->m_pfnCallback(pStream);
+}
+
+// --- Formula evaluation helpers ---
+
+namespace {
+    void SkipSpaces(const std::wstring& s, size_t& pos) {
+        while (pos < s.size() && iswspace(s[pos])) ++pos;
+    }
+
+    bool ParseCellRef(const std::wstring& token, UINT& row, UINT& col) {
+        size_t i = 0;
+        col = 0;
+        while (i < token.size() && iswalpha(token[i])) {
+            col = col * 26 + (towupper(token[i]) - L'A' + 1);
+            ++i;
+        }
+        if (i == 0 || i >= token.size()) return false;
+        try {
+            row = (UINT)std::stoul(token.substr(i)) - 1;
+        } catch (...) {
+            return false;
+        }
+        col -= 1;
+        return true;
+    }
+
+    double GetCellValue(CGrid32Mgr* mgr, UINT row, UINT col,
+                        std::set<std::pair<UINT, UINT>>& visited);
+
+    double ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos,
+                       std::set<std::pair<UINT, UINT>>& visited);
+
+    double ParseTerm(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos,
+                     std::set<std::pair<UINT, UINT>>& visited) {
+        double value = ParseFactor(mgr, expr, pos, visited);
+        while (true) {
+            SkipSpaces(expr, pos);
+            if (pos >= expr.size()) break;
+            wchar_t op = expr[pos];
+            if (op != L'*' && op != L'/') break;
+            ++pos;
+            double rhs = ParseFactor(mgr, expr, pos, visited);
+            if (op == L'*') value *= rhs; else if (rhs != 0) value /= rhs;
+        }
+        return value;
+    }
+
+    double ParseExpression(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos,
+                           std::set<std::pair<UINT, UINT>>& visited) {
+        double value = ParseTerm(mgr, expr, pos, visited);
+        while (true) {
+            SkipSpaces(expr, pos);
+            if (pos >= expr.size()) break;
+            wchar_t op = expr[pos];
+            if (op != L'+' && op != L'-') break;
+            ++pos;
+            double rhs = ParseTerm(mgr, expr, pos, visited);
+            if (op == L'+') value += rhs; else value -= rhs;
+        }
+        return value;
+    }
+
+    double ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos,
+                       std::set<std::pair<UINT, UINT>>& visited) {
+        SkipSpaces(expr, pos);
+        if (pos >= expr.size()) return 0.0;
+        if (expr[pos] == L'(') {
+            ++pos;
+            double val = ParseExpression(mgr, expr, pos, visited);
+            if (pos < expr.size() && expr[pos] == L')') ++pos;
+            return val;
+        }
+        if (expr[pos] == L'+' || expr[pos] == L'-') {
+            bool neg = (expr[pos] == L'-');
+            ++pos;
+            double val = ParseFactor(mgr, expr, pos, visited);
+            return neg ? -val : val;
+        }
+
+        size_t start = pos;
+        while (pos < expr.size() && (iswalnum(expr[pos]) || expr[pos]==L'.')) ++pos;
+        std::wstring token = expr.substr(start, pos - start);
+        if (token.empty()) return 0.0;
+
+        UINT row=0,col=0;
+        if (ParseCellRef(token, row, col)) {
+            return GetCellValue(mgr, row, col, visited);
+        }
+
+        try {
+            return std::stod(token);
+        } catch (...) {
+            return 0.0;
+        }
+    }
+
+    double GetCellValue(CGrid32Mgr* mgr, UINT row, UINT col,
+                        std::set<std::pair<UINT, UINT>>& visited) {
+        auto key = std::make_pair(row, col);
+        if (visited.count(key)) return 0.0;
+        visited.insert(key);
+        PGRIDCELL cell = mgr->GetCell(row, col);
+        if (!cell) return 0.0;
+        if (cell->m_bFormula) {
+            size_t p = 0;
+            return ParseExpression(mgr, cell->m_wsFormula, p, visited);
+        }
+        try {
+            return std::stod(cell->m_wsText);
+        } catch (...) {
+            return 0.0;
+        }
+    }
+}
+
+std::wstring CGrid32Mgr::EvaluateFormula(const std::wstring& expr)
+{
+    std::wstring clean = expr;
+    if (!clean.empty() && clean[0] == L'=')
+        clean = clean.substr(1);
+    size_t pos = 0;
+    std::set<std::pair<UINT, UINT>> visited;
+    double val = ParseExpression(this, clean, pos, visited);
+    std::wstringstream ss;
+    ss << val;
+    return ss.str();
+}
+
+void CGrid32Mgr::RecalculateFormulas()
+{
+    for (auto& entry : mapCells)
+    {
+        PGRIDCELL cell = entry.second;
+        if (cell && cell->m_bFormula)
+        {
+            cell->m_wsText = EvaluateFormula(cell->m_wsFormula);
+        }
+    }
 }
