@@ -1281,10 +1281,11 @@ void CGrid32Mgr::OnHScroll(UINT nSBCode, UINT nPos, HWND hScrollBar)
     switch (nSBCode)
     {
     case SB_LINELEFT:
-        IncrementSelectedCell(-1, 0);
+        // Horizontal scroll should adjust the column
+        IncrementSelectedCell(0, -1);
         break;
     case SB_LINERIGHT:
-        IncrementSelectedCell(1, 0);
+        IncrementSelectedCell(0, 1);
         break;
     case SB_PAGELEFT:
         // Handle left page scroll
@@ -1320,10 +1321,11 @@ void CGrid32Mgr::OnVScroll(UINT nSBCode, UINT nPos, HWND hScrollBar)
     switch (nSBCode)
     {
     case SB_LINEUP:
-        IncrementSelectedCell(0, -1);
+        // Vertical scroll should adjust the row
+        IncrementSelectedCell(-1, 0);
         break;
     case SB_LINEDOWN:
-        IncrementSelectedCell(0, 1);
+        IncrementSelectedCell(1, 0);
         break;
     case SB_PAGEUP:
         // Handle page scroll up
@@ -1332,13 +1334,13 @@ void CGrid32Mgr::OnVScroll(UINT nSBCode, UINT nPos, HWND hScrollBar)
         // Handle page scroll down
         break;
     case SB_THUMBTRACK:
-        m_visibleTopLeft.nCol = (LONG)nPos;
+        m_visibleTopLeft.nRow = (LONG)nPos;
         break;
     case SB_THUMBPOSITION:
-        m_visibleTopLeft.nCol = (LONG)nPos;
+        m_visibleTopLeft.nRow = (LONG)nPos;
         break;
     case SB_TOP:
-        m_visibleTopLeft.nCol = 0;
+        m_visibleTopLeft.nRow = 0;
         break;
     case SB_BOTTOM:
         // Handle scroll to bottom
@@ -1355,26 +1357,28 @@ void CGrid32Mgr::OnVScroll(UINT nSBCode, UINT nPos, HWND hScrollBar)
 
 void CGrid32Mgr::SetScrollRanges()
 {
+    PAGESTAT pageStat;
+    CalculatePageStats(pageStat);
+
     if (gcs.style & WS_HSCROLL)
     {
-        // Set the horizontal scroll range
         SCROLLINFO siH = { sizeof(SCROLLINFO) };
         siH.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
         siH.nMin = 0;
-        siH.nMax = static_cast<int>(gcs.nWidth); 
-        siH.nPage = 25; // Page size can be the width of one column or more
-        siH.nPos = 0;
+        siH.nMax = static_cast<int>(gcs.nWidth - 1);
+        siH.nPage = pageStat.end.nCol - pageStat.start.nCol + 1;
+        siH.nPos = m_visibleTopLeft.nCol;
         SetScrollInfo(m_hWndGrid, SB_HORZ, &siH, TRUE);
     }
+
     if (gcs.style & WS_VSCROLL)
     {
-        // Set the vertical scroll range
         SCROLLINFO siV = { sizeof(SCROLLINFO) };
         siV.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
         siV.nMin = 0;
-        siV.nMax = static_cast<int>(gcs.nHeight); // Assuming each row is of uniform height
-        siV.nPage = 25; // Page size can be the height of one row or more
-        siV.nPos = 0;
+        siV.nMax = static_cast<int>(gcs.nHeight - 1);
+        siV.nPage = pageStat.end.nRow - pageStat.start.nRow + 1;
+        siV.nPos = m_visibleTopLeft.nRow;
         SetScrollInfo(m_hWndGrid, SB_VERT, &siV, TRUE);
     }
 }
