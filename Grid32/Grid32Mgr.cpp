@@ -3390,7 +3390,7 @@ void CGrid32Mgr::OnStreamOut(LPGCSTREAM pStream)
         {
             for (size_t c = 0; c < gcs.nWidth; ++c)
             {
-                PGRIDCELL cell = GetCell(r, c);
+                PGRIDCELL cell = GetCell(static_cast<UINT>(r), static_cast<UINT>(c));
                 if (cell)
                     ss << cell->m_wsText;
                 if (c + 1 < gcs.nWidth)
@@ -3445,7 +3445,7 @@ void CGrid32Mgr::OnStreamOut(LPGCSTREAM pStream)
                 ss << L"<table:table-row>";
                 for (size_t c = 0; c < gcs.nWidth; ++c)
                 {
-                    PGRIDCELL cell = GetCell(r, c);
+                    PGRIDCELL cell = GetCell(static_cast<UINT>(r), static_cast<UINT>(c));
                     ss << L"<table:table-cell office:value-type=\"string\"><text:p>";
                     if (cell)
                         ss << EscapeXML(cell->m_wsText);
@@ -3465,7 +3465,7 @@ void CGrid32Mgr::OnStreamOut(LPGCSTREAM pStream)
                 ss << L"<row r=\"" << r + 1 << L"\">";
                 for (size_t c = 0; c < gcs.nWidth; ++c)
                 {
-                    PGRIDCELL cell = GetCell(r, c);
+                    PGRIDCELL cell = GetCell(static_cast<UINT>(r), static_cast<UINT>(c));
                     ss << L"<c r=\"" << r + 1 << L"" << (wchar_t)(L'A' + c) << L"\" t=\"inlineStr\"><is><t>";
                     if (cell)
                         ss << EscapeXML(cell->m_wsText);
