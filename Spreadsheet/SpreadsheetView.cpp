@@ -180,7 +180,7 @@ void CSpreadsheetView::OnCellGoto()
 	CGotoDlg dlg;
 	if (dlg.DoModal() == IDOK)
 	{
-		if (SetCell(dlg.m_cellRef.GetString(), dlg.nWhich))
+		if (SetCurrentCell(dlg.m_cellRef.GetString(), dlg.nWhich))
 		{
 			//  handle error
 		}
