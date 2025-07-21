@@ -194,7 +194,15 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
             //break;
         case GM_SETCELL:
         {
-            //GenAI: how can I implement this
+            if (lParam)
+            {
+                GRIDPOINT pt = MakeGridPointFromWPARAM(wParam);
+                pMgr->SetCell(pt.nRow, pt.nCol, *reinterpret_cast<PGRIDCELL>(lParam));
+            }
+            else
+            {
+                pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
+            }
             break;
         }
         case GM_GETLASTERROR:

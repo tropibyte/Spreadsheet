@@ -86,7 +86,10 @@ LRESULT CALLBACK CGrid32Mgr::EditCtrl_WndProc(HWND hWnd, UINT message, WPARAM wP
                 if (!pMgr->IsCellFontDefault(*pCell))
                 {
                     wcscpy_s(lf.lfFaceName, pCell->fontInfo.m_wsFontFace.c_str());
-                    lf.lfHeight = (LONG)(pCell->fontInfo.m_fPointSize * GetDeviceCaps(GetDC(hWnd), LOGPIXELSY) / -72.0);
+                    HDC hdc = GetDC(hWnd);
+                    int logPixels = GetDeviceCaps(hdc, LOGPIXELSY);
+                    ReleaseDC(hWnd, hdc);
+                    lf.lfHeight = (LONG)(pCell->fontInfo.m_fPointSize * logPixels / -72.0);
                     lf.lfItalic = pCell->fontInfo.bItalic;
                     lf.lfUnderline = pCell->fontInfo.bUnderline;
                     lf.lfStrikeOut = pCell->fontInfo.bStrikeThrough;
