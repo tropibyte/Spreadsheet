@@ -18,6 +18,9 @@ public:
     BOOL SetCurrentCellFormat(const FONTINFO& fi);
     BOOL SetSelectionFormat(const FONTINFO& fi);
     BOOL SetRangeFormat(const GRIDSELECTION& sel, const FONTINFO& fi);
+    BOOL FindText(const GCFINDSTRUCT& fs);
+    BOOL ReplaceText(const GCREPLACESTRUCT& rs);
+    BOOL GetCurrentCell(GRIDPOINT& pt) const;
     DWORD GetLastError();
 
 protected:

@@ -192,8 +192,10 @@ public:
 	size_t OnEnumCells(GRIDCELL* gcArray, UINT numElements);
 	void OnFillCells(WPARAM wParam, const GCFILLSTRUCT& fillStruct);
 	void OnSortCells(WPARAM wParam, const GCSORTSTRUCT& sortStruct);
-	void OnFilterCells(WPARAM wParam, const GCFILTERSTRUCT& filterStruct);
-	void RecordUndoOperation(const GridEditOperation& op);
+        void OnFilterCells(WPARAM wParam, const GCFILTERSTRUCT& filterStruct);
+        bool OnFindText(const GCFINDSTRUCT& findStruct);
+        bool OnReplaceText(const GCREPLACESTRUCT& replaceStruct);
+        void RecordUndoOperation(const GridEditOperation& op);
         void CopyGridCell(GRIDCELL& dest, GRIDCELL& src);
         void OnStreamOut(LPGCSTREAM pStream);
         void OnStreamIn(LPGCSTREAM pStream);

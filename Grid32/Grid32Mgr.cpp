@@ -3293,6 +3293,113 @@ void CGrid32Mgr::OnFilterCells(WPARAM wParam, const GCFILTERSTRUCT& filterStruct
     SetLastError(0);
 }
 
+bool CGrid32Mgr::OnFindText(const GCFINDSTRUCT& findStruct)
+{
+    if (findStruct.m_cbSize != sizeof(GCFINDSTRUCT))
+        return false;
+
+    auto toComparable = [&](const std::wstring& s) {
+        if (findStruct.m_bMatchCase)
+            return s;
+        std::wstring tmp = s;
+        std::transform(tmp.begin(), tmp.end(), tmp.begin(), ::towlower);
+        return tmp;
+    };
+
+    std::wstring target = toComparable(findStruct.m_wsFindText);
+    GRIDPOINT found{ 0,0 };
+    bool bFound = false;
+
+    if (findStruct.m_bSearchForward)
+    {
+        for (UINT r = findStruct.m_startCell.nRow; r < gcs.nHeight && !bFound; ++r)
+        {
+            UINT cStart = (r == findStruct.m_startCell.nRow) ? findStruct.m_startCell.nCol : 0;
+            for (UINT c = cStart; c < gcs.nWidth; ++c)
+            {
+                PGRIDCELL cell = GetCellOrDefault(r, c);
+                std::wstring cellText = toComparable(cell->m_wsText);
+                if (cellText.find(target) != std::wstring::npos)
+                {
+                    found = { r, c };
+                    bFound = true;
+                    break;
+                }
+            }
+        }
+    }
+    else
+    {
+        for (int r = (int)findStruct.m_startCell.nRow; r >= 0 && !bFound; --r)
+        {
+            int cStart = (r == (int)findStruct.m_startCell.nRow) ? (int)findStruct.m_startCell.nCol : (int)gcs.nWidth - 1;
+            for (int c = cStart; c >= 0; --c)
+            {
+                PGRIDCELL cell = GetCellOrDefault((UINT)r, (UINT)c);
+                std::wstring cellText = toComparable(cell->m_wsText);
+                if (cellText.find(target) != std::wstring::npos)
+                {
+                    found = { (UINT)r, (UINT)c };
+                    bFound = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (bFound)
+    {
+        m_selectionRect.start = m_selectionRect.end = found;
+        OnSetCurrentCell(found.nRow, found.nCol);
+        Invalidate();
+        SetLastError(0);
+        return true;
+    }
+
+    SetLastError(GRID_ERROR_NOT_EXIST);
+    return false;
+}
+
+bool CGrid32Mgr::OnReplaceText(const GCREPLACESTRUCT& replaceStruct)
+{
+    if (replaceStruct.m_cbSize != sizeof(GCREPLACESTRUCT))
+        return false;
+
+    GCFINDSTRUCT fs{};
+    fs.m_cbSize = sizeof(GCFINDSTRUCT);
+    fs.m_wsFindText = replaceStruct.m_wsFindText;
+    fs.m_startCell = replaceStruct.m_startCell;
+    fs.m_bMatchCase = replaceStruct.m_bMatchCase;
+    fs.m_bSearchForward = replaceStruct.m_bSearchForward;
+
+    if (!OnFindText(fs))
+        return false;
+
+    GRIDPOINT pt = m_selectionRect.start;
+    PGRIDCELL cell = GetCellOrCreate(pt.nRow, pt.nCol, true);
+
+    auto toComparable = [&](const std::wstring& s) {
+        if (replaceStruct.m_bMatchCase)
+            return s;
+        std::wstring tmp = s;
+        std::transform(tmp.begin(), tmp.end(), tmp.begin(), ::towlower);
+        return tmp;
+    };
+
+    std::wstring cellText = cell->m_wsText;
+    std::wstring searchText = toComparable(replaceStruct.m_wsFindText);
+    std::wstring compCell = toComparable(cellText);
+    size_t pos = compCell.find(searchText);
+    if (pos != std::wstring::npos)
+    {
+        cellText.replace(pos, replaceStruct.m_wsFindText.length(), replaceStruct.m_wsReplaceText);
+        SetCellText(pt.nRow, pt.nCol, cellText.c_str());
+        return true;
+    }
+
+    return false;
+}
+
 // Helper to record and apply edit operations
 void CGrid32Mgr::RecordUndoOperation(const GridEditOperation& op)
 {
