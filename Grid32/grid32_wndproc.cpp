@@ -306,7 +306,12 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
                 pMgr->OnFilterCells(wParam, *(GCFILTERSTRUCT*)lParam);
             break;
         case GM_FINDTEXT:
-            // Handle GM_FINDTEXT
+            if (lParam)
+                return pMgr->OnFindText(*(LPGCFINDSTRUCT)lParam);
+            break;
+        case GM_REPLACETEXT:
+            if (lParam)
+                return pMgr->OnReplaceText(*(LPGCREPLACESTRUCT)lParam);
             break;
 
         case GM_ENUMCELLS:

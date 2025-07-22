@@ -69,12 +69,50 @@ BOOL CGridView::SetCurrentCell(UINT nRow, UINT nCol)
 
 void CGridView::OnFindNext(LPCTSTR lpszFind, BOOL bNext, BOOL bCase)
 {
+    if (!lpszFind)
+        return;
+    GCFINDSTRUCT fs{};
+    fs.m_cbSize = sizeof(GCFINDSTRUCT);
+    fs.m_wsFindText = lpszFind;
+    fs.m_bMatchCase = bCase;
+    fs.m_bSearchForward = bNext;
+    m_wndGridCtrl.GetCurrentCell(fs.m_startCell);
+    if (!m_wndGridCtrl.FindText(fs))
+        OnTextNotFound(lpszFind);
 }
 void CGridView::OnReplaceSel(LPCTSTR lpszFind, BOOL bNext, BOOL bCase, LPCTSTR lpszReplace)
 {
+    if (!lpszFind || !lpszReplace)
+        return;
+    GCREPLACESTRUCT rs{};
+    rs.m_cbSize = sizeof(GCREPLACESTRUCT);
+    rs.m_wsFindText = lpszFind;
+    rs.m_wsReplaceText = lpszReplace;
+    rs.m_bMatchCase = bCase;
+    rs.m_bSearchForward = bNext;
+    m_wndGridCtrl.GetCurrentCell(rs.m_startCell);
+    if (!m_wndGridCtrl.ReplaceText(rs))
+        OnTextNotFound(lpszFind);
 }
 void CGridView::OnReplaceAll(LPCTSTR lpszFind, LPCTSTR lpszReplace, BOOL bCase)
 {
+    if (!lpszFind || !lpszReplace)
+        return;
+    GCREPLACESTRUCT rs{};
+    rs.m_cbSize = sizeof(GCREPLACESTRUCT);
+    rs.m_wsFindText = lpszFind;
+    rs.m_wsReplaceText = lpszReplace;
+    rs.m_bMatchCase = bCase;
+    rs.m_bSearchForward = TRUE;
+    rs.m_startCell = {0,0};
+    bool replaced = false;
+    while (m_wndGridCtrl.ReplaceText(rs))
+    {
+        replaced = true;
+        m_wndGridCtrl.GetCurrentCell(rs.m_startCell);
+    }
+    if (!replaced)
+        OnTextNotFound(lpszFind);
 }
 
 void CGridView::OnTextNotFound(LPCTSTR lpszFind)
@@ -107,10 +145,12 @@ void CGridView::OnEditUndo()
 
 void CGridView::OnEditFind()
 {
+    OnFindNext(_T(""), TRUE, FALSE);
 }
 
 void CGridView::OnEditReplace()
 {
+    OnReplaceSel(_T(""), TRUE, FALSE, _T(""));
 }
 
 void CGridView::OnEditRepeat()

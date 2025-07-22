@@ -72,6 +72,24 @@ BOOL CGridCtrl::SetRangeFormat(const GRIDSELECTION& sel, const FONTINFO& fi)
     return ::SendMessage(m_hWnd, GM_SETCHARFORMAT, SCF_RANGE, (LPARAM)&cf) != 0;
 }
 
+BOOL CGridCtrl::FindText(const GCFINDSTRUCT& fs)
+{
+    return ::SendMessage(m_hWnd, GM_FINDTEXT, 0, (LPARAM)&fs) != 0;
+}
+
+BOOL CGridCtrl::ReplaceText(const GCREPLACESTRUCT& rs)
+{
+    return ::SendMessage(m_hWnd, GM_REPLACETEXT, 0, (LPARAM)&rs) != 0;
+}
+
+BOOL CGridCtrl::GetCurrentCell(GRIDPOINT& pt) const
+{
+    LRESULT res = ::SendMessage(m_hWnd, GM_GETCURRENTCELL, 0, 0);
+    pt.nCol = LOWORD(res);
+    pt.nRow = HIWORD(res);
+    return TRUE;
+}
+
 DWORD CGridCtrl::GetLastError()
 {
     return (DWORD)::SendMessage(m_hWnd, GM_GETLASTERROR, 0, 0);

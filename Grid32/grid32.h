@@ -111,7 +111,8 @@ struct tagGCSTREAM;
 #define GM_ENUMCELLS				(WM_USER + 22)
 #define GM_SETCHARFORMAT			(WM_USER + 23)
 #define GM_STREAMIN					(WM_USER + 24)
-#define GM_STREAMOUT				(WM_USER + 25)
+#define GM_STREAMOUT                            (WM_USER + 25)
+#define GM_REPLACETEXT                          (WM_USER + 26)
 // GM_SETCHARFORMAT wParam flags
 #define SCF_CURRENTCELL 0x0000
 #define SCF_SELECTION 0x0001
@@ -254,11 +255,30 @@ typedef struct tagGCSORTSTRUCT
 
 typedef struct tagGCFILTERSTRUCT
 {
-	UINT m_cbSize;         // Size of this structure
-	GRIDPOINT m_filterColumn;  // Column to apply the filter
-	std::wstring m_wsFilterText; // Text to filter by
-	DWORD m_dwFilterType;        // Type of filtering
+        UINT m_cbSize;         // Size of this structure
+        GRIDPOINT m_filterColumn;  // Column to apply the filter
+        std::wstring m_wsFilterText; // Text to filter by
+        DWORD m_dwFilterType;        // Type of filtering
 } GCFILTERSTRUCT, *LPGCFILTERSTRUCT;
+
+typedef struct tagGCFINDSTRUCT
+{
+        UINT m_cbSize;                // Size of this structure
+        std::wstring m_wsFindText;    // Text to search for
+        GRIDPOINT m_startCell;        // Starting cell for the search
+        BOOL m_bMatchCase;            // Case sensitive search flag
+        BOOL m_bSearchForward;        // Direction flag: TRUE=forward, FALSE=backward
+} GCFINDSTRUCT, *LPGCFINDSTRUCT;
+
+typedef struct tagGCREPLACESTRUCT
+{
+        UINT m_cbSize;                // Size of this structure
+        std::wstring m_wsFindText;    // Text to search for
+        std::wstring m_wsReplaceText; // Replacement text
+        GRIDPOINT m_startCell;        // Starting cell for the search
+        BOOL m_bMatchCase;            // Case sensitive search flag
+        BOOL m_bSearchForward;        // Direction flag
+} GCREPLACESTRUCT, *LPGCREPLACESTRUCT;
 
 #endif // !_GRID32
 
