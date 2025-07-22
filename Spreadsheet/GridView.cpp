@@ -121,26 +121,38 @@ void CGridView::OnTextNotFound(LPCTSTR lpszFind)
 
 void CGridView::OnEditCut()
 {
+    if (m_wndGridCtrl.GetSafeHwnd() != NULL)
+        m_wndGridCtrl.SendMessage(WM_CUT);
 }
 
 void CGridView::OnEditCopy()
 {
+    if (m_wndGridCtrl.GetSafeHwnd() != NULL)
+        m_wndGridCtrl.SendMessage(WM_COPY);
 }
 
 void CGridView::OnEditPaste()
 {
+    if (m_wndGridCtrl.GetSafeHwnd() != NULL)
+        m_wndGridCtrl.SendMessage(WM_PASTE);
 }
 
 void CGridView::OnEditSelectAll()
 {
+    GRIDSELECTION sel{ {0,0}, { (UINT)-1, (UINT)-1 } };
+    m_wndGridCtrl.SetRangeFormat(sel, FONTINFO());
 }
 
 void CGridView::OnEditClear()
 {
+    if (m_wndGridCtrl.GetSafeHwnd() != NULL)
+        m_wndGridCtrl.SendMessage(WM_CLEAR);
 }
 
 void CGridView::OnEditUndo()
 {
+    if (m_wndGridCtrl.GetSafeHwnd() != NULL)
+        m_wndGridCtrl.SendMessage(WM_UNDO);
 }
 
 void CGridView::OnEditFind()
@@ -155,6 +167,8 @@ void CGridView::OnEditReplace()
 
 void CGridView::OnEditRepeat()
 {
+    if (m_wndGridCtrl.GetSafeHwnd() != NULL)
+        m_wndGridCtrl.SendMessage(GM_REDO);
 }
 
 
