@@ -146,6 +146,7 @@ typedef struct __GRIDPOINT
 
 typedef struct __MergeRange {
 	GRIDPOINT start, end;
+	__MergeRange() : start{ 0, 0 }, end{ 0, 0 } {}
 }MERGERANGE;
 
 typedef struct __FONTINFO {

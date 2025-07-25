@@ -155,13 +155,16 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="Formulator.h" />
     <ClInclude Include="framework.h" />
     <ClInclude Include="grid32.h" />
     <ClInclude Include="Grid32Mgr.h" />
     <ClInclude Include="grid32_internal.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="resource.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Formulator.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="EditWndProc.cpp" />
     <ClCompile Include="grid32.cpp" />
@@ -173,6 +176,9 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="Grid32.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
