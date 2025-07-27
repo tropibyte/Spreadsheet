@@ -35,11 +35,3 @@ bool UnInitializeGridLibrary(HMODULE hModule)
 {
     return UnregisterClass(GRID_WNDCLASS_NAME, hModule) != NULL;
 }
-
-cell_base::cell_base() : clrBackground(0), m_clrBorderColor(0), m_nBorderWidth(0), penStyle(0)
-{
-}
-
-__FONTINFO::__FONTINFO() : m_fPointSize(0), m_clrTextColor(0), bItalic(false), bUnderline(false), bWeight(0), bStrikeThrough(false)
-{
-}

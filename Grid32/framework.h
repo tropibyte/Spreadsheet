@@ -9,6 +9,9 @@
 #include <sstream>
 #include <cctype>
 #include <set>
+#include <cmath>
+#include <limits>
+#include <algorithm>
 #include <objidl.h>
 #include <gdiplus.h>
 using namespace Gdiplus;

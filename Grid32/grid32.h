@@ -155,7 +155,8 @@ typedef struct __FONTINFO {
 	COLORREF m_clrTextColor;
 	BOOL bItalic, bUnderline, bStrikeThrough;
 	UINT bWeight;
-	__FONTINFO();
+	__FONTINFO() : m_fPointSize(0), m_clrTextColor(0), bItalic(false), bUnderline(false), bWeight(0), bStrikeThrough(false)
+	{}
 }FONTINFO, *PFONTINFO;
 
 struct cell_base
@@ -166,7 +167,8 @@ struct cell_base
 	int penStyle;
 	UINT justification;
 	std::wstring m_wsName;
-	cell_base();
+	cell_base() : clrBackground(0), m_clrBorderColor(0), m_nBorderWidth(0), penStyle(0), justification(0)
+	{}
 };
 
 typedef struct __ROWINFO : public cell_base {

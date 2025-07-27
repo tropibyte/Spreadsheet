@@ -17,7 +17,10 @@ class CFormulator
 
 	static double SumRange(CGrid32Mgr* mgr, const std::wstring& arg,
 		std::set<std::pair<UINT, UINT>>& visited);
+	static double MinMaxRange(CGrid32Mgr* mgr, const std::wstring& arg,
+		std::set<std::pair<UINT, UINT>>& visited, bool bMax);
+	static double CountRange(CGrid32Mgr* mgr, const std::wstring& arg,
+		std::set<std::pair<UINT, UINT>>& visited);
 	static double ParseTerm(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos, std::set<std::pair<UINT, UINT>>& visited);
 	static double ParseExpression(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos, std::set<std::pair<UINT, UINT>>& visited);
 };
-

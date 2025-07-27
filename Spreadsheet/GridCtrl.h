@@ -21,6 +21,8 @@ public:
     BOOL FindText(const GCFINDSTRUCT& fs);
     BOOL ReplaceText(const GCREPLACESTRUCT& rs);
     BOOL GetCurrentCell(GRIDPOINT& pt) const;
+    BOOL StreamIn(GCSTREAM& stream);
+    BOOL StreamOut(GCSTREAM& stream);
     DWORD GetLastError();
 
 protected:

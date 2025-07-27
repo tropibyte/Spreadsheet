@@ -90,6 +90,16 @@ BOOL CGridCtrl::GetCurrentCell(GRIDPOINT& pt) const
     return TRUE;
 }
 
+BOOL CGridCtrl::StreamIn(GCSTREAM& stream)
+{
+    return ::SendMessage(m_hWnd, GM_STREAMIN, 0, (LPARAM)&stream) != 0;
+}
+
+BOOL CGridCtrl::StreamOut(GCSTREAM& stream)
+{
+    return ::SendMessage(m_hWnd, GM_STREAMOUT, 0, (LPARAM)&stream) != 0;
+}
+
 DWORD CGridCtrl::GetLastError()
 {
     return (DWORD)::SendMessage(m_hWnd, GM_GETLASTERROR, 0, 0);

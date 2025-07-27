@@ -109,6 +109,7 @@ bool CGrid32Mgr::Create(PGRIDCREATESTRUCT pGCS)
     }
 
 	nColHeaderHeight = static_cast<long>((gcs.style & GS_COLHEADER) ? gcs.nDefRowHeight : 0);
+
     for (size_t idx = 0; idx < gcs.nWidth; ++idx)
     {
         pColInfoArray[idx].nWidth = gcs.nDefColWidth;
