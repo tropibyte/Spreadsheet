@@ -199,48 +199,46 @@ void CGrid32Mgr::OnPaint(PAINTSTRUCT& ps)
 {
     HDC hDC = ps.hdc;
 
+    // Resources declared outside try so cleanup is guaranteed even on throw.
+    HDC memDC = NULL;
+    HBITMAP memBitmap = NULL;
+    HBITMAP oldBitmap = NULL;
+
     try
     {
+        int width = m_clientRect.right - m_clientRect.left;
+        int height = m_clientRect.bottom - m_clientRect.top;
 
-    // Retrieve client area dimensions
-    int width = m_clientRect.right - m_clientRect.left;
-    int height = m_clientRect.bottom - m_clientRect.top;
+        memDC = CreateCompatibleDC(hDC);
+        memBitmap = CreateCompatibleBitmap(hDC, width, height);
+        oldBitmap = (HBITMAP)SelectObject(memDC, memBitmap);
 
-    // Create a memory DC compatible with the screen DC
-    HDC memDC = CreateCompatibleDC(hDC);
+        HBRUSH hBrush = CreateSolidBrush(m_defaultGridCell.clrBackground);
+        FillRect(memDC, &m_clientRect, hBrush);
+        DeleteObject(hBrush);
 
-    // Create a bitmap compatible with the screen DC
-    HBITMAP memBitmap = CreateCompatibleBitmap(hDC, width, height);
+        DrawGrid(memDC);
+        DrawCells(memDC);
+        DrawSelectionSurround(memDC);
+        DrawCurrentCellBox(memDC);
+        DrawHeader(memDC);
+        DrawVoidSpace(memDC);
+        DrawSizingLine(memDC);
 
-    // Select the bitmap into the memory DC
-    HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, memBitmap);
-
-    // Fill the background with white (or any desired background color)
-    HBRUSH hBrush = CreateSolidBrush(m_defaultGridCell.clrBackground);
-    FillRect(memDC, &m_clientRect, hBrush);
-    DeleteObject(hBrush);
-
-    // Perform all drawing operations on the memory DC
-    DrawGrid(memDC);
-    DrawCells(memDC);
-    DrawSelectionSurround(memDC); 
-    DrawCurrentCellBox(memDC);
-    DrawHeader(memDC);
-    DrawVoidSpace(memDC);
-    DrawSizingLine(memDC);
-
-    // Copy the contents of the memory DC to the screen
-    BitBlt(hDC, 0, 0, width, height, memDC, 0, 0, SRCCOPY);
-
-    // Clean up
-    SelectObject(memDC, oldBitmap);
-    DeleteObject(memBitmap);
-    DeleteDC(memDC);
+        BitBlt(hDC, 0, 0, width, height, memDC, 0, 0, SRCCOPY);
     }
     catch (const std::exception&)
     {
         SetLastError(GRID_ERROR_INVALID_PARAMETER);
     }
+
+    // Unconditional cleanup — exception or not.
+    if (memDC != NULL && oldBitmap != NULL)
+        SelectObject(memDC, oldBitmap);
+    if (memBitmap != NULL)
+        DeleteObject(memBitmap);
+    if (memDC != NULL)
+        DeleteDC(memDC);
 }
 
 void CGrid32Mgr::CalculateTotalGridRect()
