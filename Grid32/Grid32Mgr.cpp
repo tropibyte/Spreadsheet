@@ -3233,16 +3233,23 @@ void CGrid32Mgr::NormalizeSelectionRect(GRIDSELECTION& selection)
 
 void CGrid32Mgr::OnIncrementCell(UINT direction, GRIDPOINT* pGridPoint)
 {
+    if (!pGridPoint) return;
+    // GRIDPOINT carries UINT fields, but the Increment* APIs take signed
+    // long deltas. The host signals negative direction by writing a UINT
+    // whose bit-pattern is a negative int (e.g. (UINT)-1). Cast through
+    // int first so sign-extension into long is explicit and portable.
+    long nRow = (long)(int)pGridPoint->nRow;
+    long nCol = (long)(int)pGridPoint->nCol;
     switch (direction)
     {
     case INCREMENT_SINGLE:
-        IncrementSelectedCell(pGridPoint->nRow, pGridPoint->nCol);
+        IncrementSelectedCell(nRow, nCol);
         break;
     case INCREMENT_PAGE:
-        IncrementSelectedPage(pGridPoint->nRow, pGridPoint->nCol);
+        IncrementSelectedPage(nRow, nCol);
         break;
     case INCREMENT_EDGE:
-        IncrementSelectEdge(pGridPoint->nRow, pGridPoint->nCol);
+        IncrementSelectEdge(nRow, nCol);
         break;
     }
 }
