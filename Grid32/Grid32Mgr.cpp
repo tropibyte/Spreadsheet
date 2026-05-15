@@ -2808,7 +2808,16 @@ BOOL CGrid32Mgr::OnSetCurrentCell(LPCWSTR pwszRef, short nWhich)
         {
             nCol = nCol * 26 + (ch - L'A' + 1);
         }
-        UINT nRow = std::stoi(rowName);
+        UINT nRow = 0;
+        try
+        {
+            nRow = (UINT)std::stoi(rowName);
+        }
+        catch (...)
+        {
+            SetLastError(GRID_ERROR_INVALID_PARAMETER);
+            return FALSE;
+        }
 
         auto it = mapCells.find({ nRow, nCol });
         if (it != mapCells.end() && it->second != nullptr)
