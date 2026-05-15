@@ -1139,11 +1139,15 @@ void CGrid32Mgr::GetCellText(UINT nRow, UINT nCol, LPWSTR pText, UINT nLen)
     auto key = std::make_pair(nRow, nCol);
     auto it = mapCells.find(key);
 
-    if (pText)
+    if (pText && nLen > 0)
     {
         if (it != mapCells.end()) {
-            _tcsncpy_s(pText, nLen, 
-                it->second->m_wsText.c_str(), it->second->m_wsText.length()); 
+            // _TRUNCATE: write up to nLen-1 chars and always null-terminate.
+            // Passing src.length() invokes the invalid-parameter handler
+            // (debug abort / release crash) when the source is too long for
+            // the buffer; _TRUNCATE silently truncates instead.
+            _tcsncpy_s(pText, nLen,
+                it->second->m_wsText.c_str(), _TRUNCATE);
             return;
         }
 
