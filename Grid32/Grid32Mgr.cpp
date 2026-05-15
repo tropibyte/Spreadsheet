@@ -1039,7 +1039,7 @@ UINT CGrid32Mgr::GetCellTextLen(UINT nRow, UINT nCol)
     auto it = mapCells.find(key);
 
     if (it != mapCells.end()) {
-        return (UINT)(it->second->m_wsText.length() + 2);
+        return (UINT)it->second->m_wsText.length();
     }
 
     return 0;
@@ -1809,8 +1809,9 @@ bool CGrid32Mgr::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
             }
             else if (nLen)
             {
-                TCHAR* buff = new TCHAR[(size_t)nLen + 2];
-                GetCurrentCellText(buff, nLen);
+                UINT bufSize = nLen + 1;  // +1 for null terminator
+                TCHAR* buff = new TCHAR[bufSize];
+                GetCurrentCellText(buff, bufSize);
                 SetWindowText(m_hWndEdit, buff);
                 PostMessage(m_hWndEdit, EM_SETSEL, nLen, nLen);
                 delete[] buff;
