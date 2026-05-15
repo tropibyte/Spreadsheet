@@ -2533,6 +2533,7 @@ void CGrid32Mgr::OnPaste()
     UINT rOffset = 0;
     bool record = m_bUndoRecordEnabled;
     m_bUndoRecordEnabled = false;
+    m_bDeferRecalc = TRUE;
     while (std::getline(rows, line) && sel.start.nRow + rOffset < gcs.nHeight)
     {
         std::wistringstream cols(line);
@@ -2550,6 +2551,8 @@ void CGrid32Mgr::OnPaste()
         }
         ++rOffset;
     }
+    m_bDeferRecalc = FALSE;
+    RecalculateFormulas();
     m_bUndoRecordEnabled = record;
     RecordUndoOperation(op);
     Invalidate();
