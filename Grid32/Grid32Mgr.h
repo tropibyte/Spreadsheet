@@ -131,6 +131,7 @@ public:
 	void SetCellByPoint(int x, int y, GRIDPOINT& gridPt);
 	void StartMouseTracking();
 	void CancelMouseTracking();
+	void CancelDragState();
 	void ConstrainMouseToClientArea();
 	void CalcSelectionCoordinatesWithMouse(int x, int y, bool& bChangeX, bool bChangeY);
 	void GetCurrentMouseCoordinates(int& x, int& y);

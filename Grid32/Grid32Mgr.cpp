@@ -1935,6 +1935,18 @@ void CGrid32Mgr::StartMouseTracking()
     TrackMouseEvent(&tme);
 }
 
+void CGrid32Mgr::CancelDragState()
+{
+    // Called when capture is lost or a drag is canceled by external means
+    // (Alt+Tab, modal dialog, WM_CANCELMODE, debugger break, etc.).
+    m_bSelecting = FALSE;
+    m_bSizing = FALSE;
+    m_gridHitTest = 0;
+    m_mouseDraggingStartPoint = { ~0, ~0 };
+    ClipCursor(NULL);
+    CancelMouseTracking();
+}
+
 void CGrid32Mgr::CancelMouseTracking()
 {
     // Set up the TRACKMOUSEEVENT structure to cancel tracking

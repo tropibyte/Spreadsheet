@@ -148,6 +148,10 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         case WM_TIMER:
             pMgr->OnTimer((UINT_PTR)wParam);
             break;
+        case WM_CAPTURECHANGED:
+        case WM_CANCELMODE:
+            pMgr->CancelDragState();
+            break;
         case WM_NCPAINT:
             // Handle non-client area painting
             break;
