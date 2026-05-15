@@ -64,6 +64,9 @@ m_hWndEdit(NULL), m_lastClickTime(0), totalGridCellRect{ 0, 0, 0, 0 }
 
 CGrid32Mgr::~CGrid32Mgr()
 {
+    // OnDestroy is idempotent — covers the WM_CREATE-fail path where the
+    // window never received WM_DESTROY so OnDestroy was never called.
+    OnDestroy();
     DeleteAllCells();
     delete[] pRowInfoArray;
     delete[] pColInfoArray;
@@ -176,10 +179,20 @@ bool CGrid32Mgr::Create(PGRIDCREATESTRUCT pGCS)
 
 void CGrid32Mgr::OnDestroy()
 {
-    SendMessage(m_hWndEdit, WM_SETFONT, 0, 0);
-    DeleteObject(m_hDefaultFont);
-    m_hDefaultFont = NULL;
-    GdiplusShutdown(m_gdiplusToken);
+    if (m_hWndEdit != NULL && IsWindow(m_hWndEdit))
+    {
+        SendMessage(m_hWndEdit, WM_SETFONT, 0, 0);
+    }
+    if (m_hDefaultFont != NULL)
+    {
+        DeleteObject(m_hDefaultFont);
+        m_hDefaultFont = NULL;
+    }
+    if (m_gdiplusToken != 0)
+    {
+        GdiplusShutdown(m_gdiplusToken);
+        m_gdiplusToken = 0;
+    }
 }
 
 void CGrid32Mgr::OnPaint(PAINTSTRUCT& ps)
