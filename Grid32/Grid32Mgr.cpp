@@ -24,6 +24,7 @@ CGrid32Mgr::CGrid32Mgr() : pRowInfoArray(nullptr), pColInfoArray(nullptr),
 m_hWndGrid(NULL), nColHeaderHeight(40), nRowHeaderWidth(70), m_editWndProc(nullptr),
 m_nMouseHoverDelay(400), m_npHoverDelaySet(0), m_nToBeSized(~0),
 m_rgbSizingLine(RGB(0, 0, 64)), m_nSizingLine(0), m_bResizable(true), m_bUndoRecordEnabled(TRUE),
+m_bDeferRecalc(FALSE),
 m_bSizing(false), m_bSelecting(false), m_hDefaultFont(NULL),
 m_clientRect{ 0, 0, 0, 0 }, m_gdiplusToken(0), m_gridHitTest(0),
 m_hWndEdit(NULL), m_lastClickTime(0), totalGridCellRect{ 0, 0, 0, 0 }
@@ -3351,6 +3352,7 @@ void CGrid32Mgr::OnSortCells(WPARAM wParam, const GCSORTSTRUCT& sortStruct)
 
     bool record = m_bUndoRecordEnabled;
     m_bUndoRecordEnabled = false;
+    m_bDeferRecalc = TRUE;
     UINT rIndex = sel.start.nRow;
     for (auto& row : rows)
     {
@@ -3360,6 +3362,8 @@ void CGrid32Mgr::OnSortCells(WPARAM wParam, const GCSORTSTRUCT& sortStruct)
         }
         ++rIndex;
     }
+    m_bDeferRecalc = FALSE;
+    RecalculateFormulas();
     m_bUndoRecordEnabled = record;
     Invalidate();
     SetLastError(0);
@@ -3996,6 +4000,11 @@ std::wstring CGrid32Mgr::EvaluateFormula(const std::wstring& expr)
 
 void CGrid32Mgr::RecalculateFormulas()
 {
+    // Bulk operations (sort, paste, stream-in) set m_bDeferRecalc to avoid
+    // O(N) recalc per SetCell; they invoke RecalculateFormulas() themselves
+    // once at the end with the flag cleared.
+    if (m_bDeferRecalc)
+        return;
     for (auto& entry : mapCells)
     {
         PGRIDCELL cell = entry.second;

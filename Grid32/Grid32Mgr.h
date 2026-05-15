@@ -45,6 +45,7 @@ protected:
 	GRIDPOINT m_currentCell, m_visibleTopLeft, m_HoverCell;
 	POINT m_scrollDifference;
 	BOOL m_bRedraw, m_bResizable, m_bUndoRecordEnabled;
+	BOOL m_bDeferRecalc;
 	DWORD dwError;
 	GRIDSELECTION m_selectionRect;
 	BOOL m_bSelecting, m_bSizing;

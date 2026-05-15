@@ -25,7 +25,7 @@ Findings from the audit performed on 2026-05-15. Each item carries a checkbox; c
 - [x] **H10** SSF stream-in doesn't recognize `=` prefix as formulas (`Grid32Mgr.cpp:3796-3811`) — round-trip loses formulas.
 - [x] **H11** `GetCellText` buffer size: `_tcsncpy_s(..., src.length())` invokes invalid-parameter handler on overflow (`Grid32Mgr.cpp:1126-1142`).
 - [x] **H12** Formulator has no recursion-depth limit; `CountRange`/`SumRange` don't bail on visited cells (`Formulator.cpp:115-134`).
-- [ ] **H13** Sort recalculates all formulas O(N) times during a single sort (`Grid32Mgr.cpp:3263-3306`, root cause `SetCell` at `1010`).
+- [x] **H13** Sort recalculates all formulas O(N) times during a single sort (`Grid32Mgr.cpp:3263-3306`, root cause `SetCell` at `1010`).
 
 ## Medium
 
