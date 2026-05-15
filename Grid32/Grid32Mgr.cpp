@@ -1682,29 +1682,24 @@ void CGrid32Mgr::CalculatePageStats(PAGESTAT& pageStat)
 
 bool CGrid32Mgr::IsCellVisible(UINT nRow, UINT nCol)
 {
-    RECT cell = { 0, 0, 0, 0 };
-    RECT visibleGridRect = { GetActualRowHeaderWidth(), GetActualColHeaderHeight(), m_clientRect.right, m_clientRect.bottom };
-
+    if (nRow >= (UINT)gcs.nHeight || nCol >= (UINT)gcs.nWidth)
+        return false;
     if (m_visibleTopLeft.nRow > nRow ||
         m_visibleTopLeft.nCol > nCol)
         return false;
 
-    if (m_visibleTopLeft.nRow == nRow &&
-        m_visibleTopLeft.nCol == nCol)
-        return true;
-
-    GRIDSIZE cellPos = { 0,0 };
-    cell = { GetActualRowHeaderWidth(), GetActualColHeaderHeight(), (long)pColInfoArray[m_visibleTopLeft.nCol].nWidth, (long)pRowInfoArray[m_visibleTopLeft.nRow].nHeight };
-
-    for (UINT idx = m_visibleTopLeft.nRow; idx < nRow; ++idx)
-       OffsetRect(&cell, 0, (int)pRowInfoArray[idx].nHeight);
+    long x = GetActualRowHeaderWidth();
     for (UINT idx = m_visibleTopLeft.nCol; idx < nCol; ++idx)
-        OffsetRect(&cell, (int)pColInfoArray[idx].nWidth, 0);
+        x += (long)pColInfoArray[idx].nWidth;
 
-    if (cellPos.width < m_clientRect.right && cellPos.height < m_clientRect.bottom)
-        return true;
+    long y = GetActualColHeaderHeight();
+    for (UINT idx = m_visibleTopLeft.nRow; idx < nRow; ++idx)
+        y += (long)pRowInfoArray[idx].nHeight;
 
-    return false;
+    long w = (long)pColInfoArray[nCol].nWidth;
+    long h = (long)pRowInfoArray[nRow].nHeight;
+
+    return (x + w <= m_clientRect.right) && (y + h <= m_clientRect.bottom);
 }
 
 void CGrid32Mgr::ScrollToCell(size_t row, size_t col, int scrollFlags)
