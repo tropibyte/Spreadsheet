@@ -1413,9 +1413,10 @@ void Nop(){}
 
 bool CGrid32Mgr::IsCellIncrementWithinCurrentPage(long nRow, long nCol, PAGESTAT& pageStat)
 {
-    if (nRow < 0 && (size_t)abs(nRow) > m_currentCell.nRow)
+    // abs(LONG_MIN) is undefined behavior; use unsigned negation.
+    if (nRow < 0 && (size_t)(0u - (unsigned long)nRow) > m_currentCell.nRow)
         return false;
-    if (nCol < 0 && (size_t)abs(nCol) > m_currentCell.nCol)
+    if (nCol < 0 && (size_t)(0u - (unsigned long)nCol) > m_currentCell.nCol)
         return false;
 
     return((m_currentCell.nCol + nCol) <= pageStat.end.nCol &&
