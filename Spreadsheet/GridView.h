@@ -15,6 +15,7 @@ protected:
 	CGridCtrl m_wndGridCtrl;
 
 public:
+        CGridCtrl& GetGridCtrl() { return m_wndGridCtrl; }
         virtual void OnDraw(CDC* pDC);      // overridden to draw this view
 #ifdef _DEBUG
 	virtual void AssertValid() const;
