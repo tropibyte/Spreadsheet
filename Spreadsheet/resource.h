@@ -68,6 +68,8 @@
 #define IDD_DLG_GOTOCELL                321
 #define ID_FONT_GROW					322
 #define ID_FONT_SHRINK					323
+#define IDB_FLUENT_SMALL                325
+#define IDB_FLUENT_LARGE                326
 #define IDC_EDIT_WHERE                  1000
 #define IDC_RADIO_COORDINATES           1001
 #define IDC_RADIO_NAME                  1002
@@ -83,13 +85,25 @@
 #define ID_BUTTON_ITALIC                32792
 #define ID_BUTTON_UNDERLINE             32793
 #define ID_BUTTON_STRIKETHROUGH         32794
+#define ID_FONT_SUBSCRIPT               32796
+#define ID_FONT_SUPERSCRIPT             32797
+#define ID_INSERT_PICTURE               32798
+#define ID_INSERT_DATETIME              32799
+#define ID_ALIGN_LEFT                   32800
+#define ID_ALIGN_CENTER                 32801
+#define ID_ALIGN_RIGHT                  32802
+#define ID_ALIGN_TOP                    32803
+#define ID_ALIGN_MIDDLE                 32804
+#define ID_ALIGN_BOTTOM                 32805
+#define ID_ALIGN_WRAP                   32806
+#define ID_ALIGN_MERGE                  32807
 
 // Next default values for new objects
-// 
+//
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        325
-#define _APS_NEXT_COMMAND_VALUE         32796
+#define _APS_NEXT_RESOURCE_VALUE        327
+#define _APS_NEXT_COMMAND_VALUE         32808
 #define _APS_NEXT_CONTROL_VALUE         1002
 #define _APS_NEXT_SYMED_VALUE           316
 #endif

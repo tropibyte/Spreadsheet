@@ -48,6 +48,11 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWndEx)
         ON_COMMAND(ID_FONT_STRIKETHROUGH, &CMainFrame::OnFontStrikethrough)
         ON_COMMAND(ID_FONT_COLOR, &CMainFrame::OnFontColor)
         ON_COMMAND(ID_FONT_CELL_BKGND, &CMainFrame::OnFontBackground)
+        ON_COMMAND(ID_FONT_SUBSCRIPT, &CMainFrame::OnFontSubscript)
+        ON_COMMAND(ID_FONT_SUPERSCRIPT, &CMainFrame::OnFontSuperscript)
+        ON_COMMAND(ID_INSERT_PICTURE, &CMainFrame::OnInsertPicture)
+        ON_COMMAND(ID_INSERT_DATETIME, &CMainFrame::OnInsertDateTime)
+        ON_COMMAND_RANGE(ID_ALIGN_LEFT, ID_ALIGN_MERGE, &CMainFrame::OnAlignCmd)
 END_MESSAGE_MAP()
 
 // CMainFrame construction/destruction
@@ -55,7 +60,7 @@ END_MESSAGE_MAP()
 CMainFrame::CMainFrame() noexcept : m_pCurrOutlookPage(nullptr), m_pCurrOutlookWnd(nullptr)
 {
         // TODO: add member initialization code here
-        theApp.m_nAppLook = theApp.GetInt(_T("ApplicationLook"), ID_VIEW_APPLOOK_OFF_2007_SILVER);
+        theApp.m_nAppLook = theApp.GetInt(_T("ApplicationLook"), ID_VIEW_APPLOOK_WINDOWS_7);
         m_cellBkg = RGB(255,255,255);
 }
 
@@ -73,6 +78,7 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	m_wndRibbonBar.Create(this);
 	m_wndRibbonBar.LoadFromResource(IDR_RIBBON);
 	SetupFontPanel();
+	SetupAlignmentPanel();
 
 	if (!m_wndStatusBar.Create(this))
 	{
@@ -496,60 +502,173 @@ BOOL CMainFrame::LoadFrame(UINT nIDResource, DWORD dwDefaultStyle, CWnd* pParent
 
 	return FALSE;
 }
-void CMainFrame::SetupFontPanel()
+// Fluent strip index map — keep in sync with res/fluent_small.bmp + fluent_large.bmp.
+// Order: paste(0) cut(1) copy(2) select_all(3) bold(4) italic(5) underline(6) strike(7)
+//        subscript(8) superscript(9) font_color(10) highlight(11) font_inc(12) font_dec(13)
+//        align_left(14) align_center(15) align_right(16) align_top(17) align_middle(18)
+//        align_bottom(19) text_wrap(20) merge(21) picture(22) date(23) object(24)
+//        find(25) replace(26) goto(27)
+namespace FluentIdx {
+        constexpr int Bold        = 4;
+        constexpr int Italic      = 5;
+        constexpr int Underline   = 6;
+        constexpr int Strike      = 7;
+        constexpr int Subscript   = 8;
+        constexpr int Superscript = 9;
+        constexpr int FontColor   = 10;
+        constexpr int Highlight   = 11;
+        constexpr int FontInc     = 12;
+        constexpr int FontDec     = 13;
+        constexpr int AlignLeft   = 14;
+        constexpr int AlignCenter = 15;
+        constexpr int AlignRight  = 16;
+        constexpr int AlignTop    = 17;
+        constexpr int AlignMiddle = 18;
+        constexpr int AlignBottom = 19;
+        constexpr int TextWrap    = 20;
+        constexpr int Merge       = 21;
+}
+
+static CMFCRibbonPanel* FindHomePanel(CMFCRibbonBar& bar, LPCTSTR pszName)
 {
         CMFCRibbonCategory* pCategory = nullptr;
-        for (int i = 0; i < m_wndRibbonBar.GetCategoryCount(); ++i)
+        for (int i = 0; i < bar.GetCategoryCount(); ++i)
         {
-                if (0 == _tcsicmp(m_wndRibbonBar.GetCategory(i)->GetName(), _T("Home")))
+                if (0 == _tcsicmp(bar.GetCategory(i)->GetName(), _T("Home")))
                 {
-                        pCategory = m_wndRibbonBar.GetCategory(i);
+                        pCategory = bar.GetCategory(i);
                         break;
                 }
         }
         if (!pCategory)
-                return;
+                return nullptr;
 
-        CMFCRibbonPanel* pFontPanel = nullptr;
         for (int i = 0; i < pCategory->GetPanelCount(); ++i)
         {
-                if (0 == _tcsicmp(pCategory->GetPanel(i)->GetName(), _T("Font")))
-                {
-                        pFontPanel = pCategory->GetPanel(i);
-                        break;
-                }
+                if (0 == _tcsicmp(pCategory->GetPanel(i)->GetName(), pszName))
+                        return pCategory->GetPanel(i);
         }
-        if (!pFontPanel)
-                pFontPanel = pCategory->AddPanel(_T("Font"));
+        return nullptr;
+}
+
+void CMainFrame::SetupFontPanel()
+{
+        CMFCRibbonPanel* pFontPanel = FindHomePanel(m_wndRibbonBar, _T("Font"));
         if (!pFontPanel)
                 return;
 
         pFontPanel->RemoveAll();
-        pFontPanel->SetCenterColumnVert(0);
 
-        CMFCRibbonFontComboBox* pFontComboBox = new CMFCRibbonFontComboBox(ID_FONT_NAME, TRUE, 120);
-        pFontPanel->Add(pFontComboBox);
+        // Top row: Font name, Font size, A+, A-
+        CMFCRibbonButtonsGroup* pTopRow = new CMFCRibbonButtonsGroup();
 
-        CMFCRibbonComboBox* pFontSizeComboBox = new CMFCRibbonComboBox(ID_FONT_SIZE, TRUE, 45);
-        for (int i = 8; i <= 72; i += (i < 24 ? 2 : 6))
+        CMFCRibbonFontComboBox* pFontComboBox = new CMFCRibbonFontComboBox(ID_FONT_NAME,
+                DEVICE_FONTTYPE | RASTER_FONTTYPE | TRUETYPE_FONTTYPE, DEFAULT_CHARSET, DEFAULT_PITCH, 120);
+        pTopRow->AddButton(pFontComboBox);
+
+        CMFCRibbonComboBox* pFontSizeComboBox = new CMFCRibbonComboBox(ID_FONT_SIZE, TRUE, 40);
+        int fontSizes[] = { 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72 };
+        for (int i = 0; i < _countof(fontSizes); ++i)
         {
-                if (i == 22)
-                        continue;
-                CString strSize; strSize.Format(_T("%d"), i);
+                CString strSize;
+                strSize.Format(_T("%d"), fontSizes[i]);
                 pFontSizeComboBox->AddItem(strSize);
         }
-        pFontPanel->Add(pFontSizeComboBox);
-        pFontPanel->Add(new CMFCRibbonButton(ID_FONT_GROW, _T("A+")));
-        pFontPanel->Add(new CMFCRibbonButton(ID_FONT_SHRINK, _T("A-")));
-        pFontPanel->Add(new CMFCRibbonSeparator(TRUE));
+        pFontSizeComboBox->SelectItem(4);
+        pTopRow->AddButton(pFontSizeComboBox);
 
-        pFontPanel->Add(new CMFCRibbonButton(ID_FONT_BOLD, _T("B")));
-        pFontPanel->Add(new CMFCRibbonButton(ID_FONT_ITALIC, _T("I")));
-        pFontPanel->Add(new CMFCRibbonButton(ID_FONT_UNDERLINE, _T("U")));
-        pFontPanel->Add(new CMFCRibbonButton(ID_FONT_STRIKETHROUGH, _T("S")));
+        pTopRow->AddButton(new CMFCRibbonButton(ID_FONT_GROW,   _T("Grow font"),   FluentIdx::FontInc));
+        pTopRow->AddButton(new CMFCRibbonButton(ID_FONT_SHRINK, _T("Shrink font"), FluentIdx::FontDec));
 
-        pFontPanel->Add(new CMFCRibbonSeparator(TRUE));
-        pFontPanel->Add(new CMFCRibbonColorButton(ID_FONT_COLOR, _T("Font Color"), TRUE));
-        pFontPanel->Add(new CMFCRibbonColorButton(ID_FONT_CELL_BKGND, _T("Fill"), TRUE));
+        pFontPanel->Add(pTopRow);
+
+        // Bottom row: B I U S x2 x^ + Highlight + Color
+        CMFCRibbonButtonsGroup* pBottomRow = new CMFCRibbonButtonsGroup();
+
+        pBottomRow->AddButton(new CMFCRibbonButton(ID_FONT_BOLD,          _T("Bold"),          FluentIdx::Bold));
+        pBottomRow->AddButton(new CMFCRibbonButton(ID_FONT_ITALIC,        _T("Italic"),        FluentIdx::Italic));
+        pBottomRow->AddButton(new CMFCRibbonButton(ID_FONT_UNDERLINE,     _T("Underline"),     FluentIdx::Underline));
+        pBottomRow->AddButton(new CMFCRibbonButton(ID_FONT_STRIKETHROUGH, _T("Strikethrough"), FluentIdx::Strike));
+        pBottomRow->AddButton(new CMFCRibbonButton(ID_FONT_SUBSCRIPT,     _T("Subscript"),     FluentIdx::Subscript));
+        pBottomRow->AddButton(new CMFCRibbonButton(ID_FONT_SUPERSCRIPT,   _T("Superscript"),   FluentIdx::Superscript));
+
+        CMFCRibbonColorButton* pHighlight = new CMFCRibbonColorButton(ID_FONT_CELL_BKGND, _T("Highlight"), TRUE, FluentIdx::Highlight);
+        pHighlight->EnableAutomaticButton(_T("No Color"), (COLORREF)-1);
+        pHighlight->EnableOtherButton(_T("More Colors..."));
+        pHighlight->SetColumns(10);
+        pHighlight->SetColor(RGB(255, 255, 0));
+        pHighlight->SetDefaultCommand(FALSE);
+        pBottomRow->AddButton(pHighlight);
+
+        CMFCRibbonColorButton* pFontColor = new CMFCRibbonColorButton(ID_FONT_COLOR, _T("Font color"), TRUE, FluentIdx::FontColor);
+        pFontColor->EnableAutomaticButton(_T("Automatic"), RGB(0, 0, 0));
+        pFontColor->EnableOtherButton(_T("More Colors..."));
+        pFontColor->SetColumns(10);
+        pFontColor->SetColor(RGB(255, 0, 0));
+        pFontColor->SetDefaultCommand(FALSE);
+        pBottomRow->AddButton(pFontColor);
+
+        pFontPanel->Add(pBottomRow);
+}
+
+void CMainFrame::SetupAlignmentPanel()
+{
+        CMFCRibbonPanel* pPanel = FindHomePanel(m_wndRibbonBar, _T("Alignment"));
+        if (!pPanel)
+                return;
+
+        pPanel->RemoveAll();
+
+        // Top row: horizontal alignment + wrap text
+        CMFCRibbonButtonsGroup* pTopRow = new CMFCRibbonButtonsGroup();
+        pTopRow->AddButton(new CMFCRibbonButton(ID_ALIGN_LEFT,   _T("Align left"),   FluentIdx::AlignLeft));
+        pTopRow->AddButton(new CMFCRibbonButton(ID_ALIGN_CENTER, _T("Center"),       FluentIdx::AlignCenter));
+        pTopRow->AddButton(new CMFCRibbonButton(ID_ALIGN_RIGHT,  _T("Align right"),  FluentIdx::AlignRight));
+        pTopRow->AddButton(new CMFCRibbonButton(ID_ALIGN_WRAP,   _T("Wrap text"),    FluentIdx::TextWrap));
+        pPanel->Add(pTopRow);
+
+        // Bottom row: vertical alignment + merge cells
+        CMFCRibbonButtonsGroup* pBottomRow = new CMFCRibbonButtonsGroup();
+        pBottomRow->AddButton(new CMFCRibbonButton(ID_ALIGN_TOP,    _T("Align top"),    FluentIdx::AlignTop));
+        pBottomRow->AddButton(new CMFCRibbonButton(ID_ALIGN_MIDDLE, _T("Align middle"), FluentIdx::AlignMiddle));
+        pBottomRow->AddButton(new CMFCRibbonButton(ID_ALIGN_BOTTOM, _T("Align bottom"), FluentIdx::AlignBottom));
+        pBottomRow->AddButton(new CMFCRibbonButton(ID_ALIGN_MERGE,  _T("Merge cells"),  FluentIdx::Merge));
+        pPanel->Add(pBottomRow);
+}
+
+void CMainFrame::OnFontSubscript()
+{
+        // Subscript toggle — depends on a richer FONTINFO model in Grid32. Stubbed for now.
+}
+
+void CMainFrame::OnFontSuperscript()
+{
+        // Superscript toggle — depends on a richer FONTINFO model in Grid32. Stubbed for now.
+}
+
+void CMainFrame::OnInsertPicture()
+{
+        // Awaiting Grid32 picture-cell support.
+        AfxMessageBox(_T("Picture insertion will be available once Grid32 supports image cells."));
+}
+
+void CMainFrame::OnInsertDateTime()
+{
+        // Insert formatted current date/time into the active cell.
+        CGridView* pView = DYNAMIC_DOWNCAST(CGridView, GetActiveView());
+        if (!pView)
+                return;
+        CTime now = CTime::GetCurrentTime();
+        CString strDateTime = now.Format(_T("%Y-%m-%d %H:%M"));
+        // TODO: route through GridCtrl when CGridCtrl exposes SetCurrentCellText.
+        (void)strDateTime;
+}
+
+void CMainFrame::OnAlignCmd(UINT nID)
+{
+        // Horizontal/vertical alignment, wrap-text, and merge-cells all wait on
+        // CGridCtrl growing alignment + merge methods. Cell-level state already
+        // exists in Grid32's cell_base::justification and GRIDCELL::mergeRange.
+        UNREFERENCED_PARAMETER(nID);
 }
 
