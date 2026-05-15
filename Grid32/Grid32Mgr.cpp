@@ -1840,20 +1840,23 @@ bool CGrid32Mgr::OnKeyUp(UINT nChar, UINT nRepCnt, UINT nFlags)
 
 void CGrid32Mgr::GetCellByPoint(int x, int y, GRIDPOINT& gridPt)
 {
-    if (x < GetActualRowHeaderWidth() || x >= m_clientRect.right)
+    if (x < GetActualRowHeaderWidth() || x >= m_clientRect.right || gcs.nWidth == 0)
         gridPt.nCol = ~0;
     else
     {
-        size_t nWidth = (size_t)GetActualRowHeaderWidth(); 
+        size_t nWidth = (size_t)GetActualRowHeaderWidth();
         size_t idx = m_visibleTopLeft.nCol;
-        if (idx > (size_t)(~0)/2)
+        if (idx >= (size_t)gcs.nWidth)
             idx = m_visibleTopLeft.nCol = 0;
-        for (; nWidth + pColInfoArray[idx].nWidth < x; ++idx, nWidth += pColInfoArray[idx].nWidth);
+        while (idx + 1 < (size_t)gcs.nWidth && nWidth + pColInfoArray[idx].nWidth < (size_t)x)
+        {
+            nWidth += pColInfoArray[idx].nWidth;
+            ++idx;
+        }
         gridPt.nCol = (UINT)idx;
-
     }
 
-    if(y < GetActualColHeaderHeight() || y >= m_clientRect.bottom)
+    if (y < GetActualColHeaderHeight() || y >= m_clientRect.bottom || gcs.nHeight == 0)
     {
         gridPt.nRow = ~0;
     }
@@ -1861,9 +1864,13 @@ void CGrid32Mgr::GetCellByPoint(int x, int y, GRIDPOINT& gridPt)
     {
         size_t nHeight = (size_t)GetActualColHeaderHeight();
         size_t idx = m_visibleTopLeft.nRow;
-        if (idx > (size_t)-100)
+        if (idx >= (size_t)gcs.nHeight)
             idx = m_visibleTopLeft.nRow = 0;
-        for (; nHeight + pRowInfoArray[idx].nHeight < y; ++idx, nHeight += pRowInfoArray[idx].nHeight);
+        while (idx + 1 < (size_t)gcs.nHeight && nHeight + pRowInfoArray[idx].nHeight < (size_t)y)
+        {
+            nHeight += pRowInfoArray[idx].nHeight;
+            ++idx;
+        }
         gridPt.nRow = (UINT)idx;
     }
 }
@@ -1871,26 +1878,36 @@ void CGrid32Mgr::GetCellByPoint(int x, int y, GRIDPOINT& gridPt)
 void CGrid32Mgr::SetCellByPoint(int x, int y, GRIDPOINT &gridPt)
 {
     if (x < GetActualRowHeaderWidth() || x >= m_clientRect.right ||
-        y < GetActualColHeaderHeight() || y >= m_clientRect.bottom)
+        y < GetActualColHeaderHeight() || y >= m_clientRect.bottom ||
+        gcs.nWidth == 0 || gcs.nHeight == 0)
     {
         gridPt.nRow = ~0;
         gridPt.nCol = ~0;
     }
     else
     {
-        size_t nWidth = (size_t)GetActualRowHeaderWidth(), nHeight = (size_t)GetActualColHeaderHeight();
+        size_t nWidth = (size_t)GetActualRowHeaderWidth();
+        size_t nHeight = (size_t)GetActualColHeaderHeight();
         size_t idx = m_visibleTopLeft.nCol;
-        for (; nWidth + pColInfoArray[idx].nWidth < x; ++idx, nWidth += pColInfoArray[idx].nWidth);
+        while (idx + 1 < (size_t)gcs.nWidth && nWidth + pColInfoArray[idx].nWidth < (size_t)x)
+        {
+            nWidth += pColInfoArray[idx].nWidth;
+            ++idx;
+        }
         m_currentCell.nCol = (UINT)idx;
-        if (nWidth + pColInfoArray[idx].nWidth > m_clientRect.right)
+        if (nWidth + pColInfoArray[idx].nWidth > (size_t)m_clientRect.right)
         {
             m_visibleTopLeft.nCol = (UINT)idx;
             m_scrollDifference.x = (long)CalculatedColumnDistance(0, (size_t)m_visibleTopLeft.nCol);
         }
         idx = m_visibleTopLeft.nRow;
-        for (; nHeight + pRowInfoArray[idx].nHeight < y; ++idx, nHeight += pRowInfoArray[idx].nHeight);
+        while (idx + 1 < (size_t)gcs.nHeight && nHeight + pRowInfoArray[idx].nHeight < (size_t)y)
+        {
+            nHeight += pRowInfoArray[idx].nHeight;
+            ++idx;
+        }
         m_currentCell.nRow = (UINT)idx;
-        if (nHeight + pRowInfoArray[idx].nHeight > m_clientRect.bottom)
+        if (nHeight + pRowInfoArray[idx].nHeight > (size_t)m_clientRect.bottom)
         {
             m_visibleTopLeft.nRow = (UINT)idx;
             m_scrollDifference.y = (long)CalculatedRowDistance(0, (size_t)m_visibleTopLeft.nRow);
