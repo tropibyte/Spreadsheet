@@ -3,6 +3,7 @@
 #include "grid32_internal.h"
 #include <new>
 #include <exception>
+#include <windowsx.h>
 
 GRIDPOINT MakeGridPointFromWPARAM(WPARAM wParam)
 {
@@ -105,28 +106,28 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
             break;
 
         case WM_LBUTTONDOWN:
-            pMgr->OnLButtonDown((UINT)wParam, (int)LOWORD(lParam), (int)HIWORD(lParam));
+            pMgr->OnLButtonDown((UINT)wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
             break;
 
         case WM_LBUTTONUP:
-            pMgr->OnLButtonUp((UINT)wParam, (int)LOWORD(lParam), (int)HIWORD(lParam));
+            pMgr->OnLButtonUp((UINT)wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
             break;
         case WM_MOUSEMOVE:
-            pMgr->OnMouseMove((UINT)wParam, (int)LOWORD(lParam), (int)HIWORD(lParam));
+            pMgr->OnMouseMove((UINT)wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
             break;
         case WM_MOUSEHOVER:
-            pMgr->OnMouseHover((UINT)wParam, (int)LOWORD(lParam), (int)HIWORD(lParam));
+            pMgr->OnMouseHover((UINT)wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
             break;
         case WM_MOUSELEAVE:
-            pMgr->OnMouseLeave((UINT)wParam, (int)LOWORD(lParam), (int)HIWORD(lParam));
+            pMgr->OnMouseLeave((UINT)wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
             break;
         case WM_NCMOUSEMOVE:
-            pMgr->OnNcMouseMove((UINT)wParam, (int)LOWORD(lParam), (int)HIWORD(lParam));
+            pMgr->OnNcMouseMove((UINT)wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
             break;
         case WM_NCHITTEST:
         {
             bool bHitTested = false;
-            pMgr->m_gridHitTest = pMgr->OnNcHitTest((UINT)wParam, LOWORD(lParam), HIWORD(lParam), bHitTested);
+            pMgr->m_gridHitTest = pMgr->OnNcHitTest((UINT)wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam), bHitTested);
             if (bHitTested)
             {
                 pMgr->SetCursorBasedOnNcHitTest();
@@ -135,14 +136,14 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
             break;
         }
         case WM_MOUSEWHEEL:
-            pMgr->OnMouseWheel((short)GET_WHEEL_DELTA_WPARAM(wParam), (UINT)wParam, LOWORD(lParam), HIWORD(lParam));
+            pMgr->OnMouseWheel((short)GET_WHEEL_DELTA_WPARAM(wParam), (UINT)wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
             break;
         case WM_RBUTTONDOWN:
-            pMgr->OnRButtonDown((UINT)wParam, LOWORD(lParam), HIWORD(lParam));
+            pMgr->OnRButtonDown((UINT)wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
             break;
 
         case WM_RBUTTONUP:
-            pMgr->OnRButtonUp((UINT)wParam, LOWORD(lParam), HIWORD(lParam));
+            pMgr->OnRButtonUp((UINT)wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
             break;
         case WM_TIMER:
             pMgr->OnTimer((UINT_PTR)wParam);

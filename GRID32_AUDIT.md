@@ -9,7 +9,7 @@ Findings from the audit performed on 2026-05-15. Each item carries a checkbox; c
 - [x] **C3** `OnDestroy` never runs when `WM_CREATE` fails (`grid32_wndproc.cpp:40-66`, `Grid32Mgr.cpp:65-70`) — GDI+ token, default `HFONT`, edit subclass leak on failed grid creates.
 - [x] **C4** `GetCellByPoint` loop reads past `pColInfoArray[gcs.nWidth]` (`Grid32Mgr.cpp:1834, 1849`, also `SetCellByPoint` 1866/1874) — comma-operator order bug + missing upper-bound check.
 - [x] **C5** `OnPaint` exception path leaks memory DC + bitmap (`Grid32Mgr.cpp:185-231`) — cleanup inside `try`, jumped past on throw.
-- [ ] **C6** Mouse coords extracted as unsigned (`grid32_wndproc.cpp:108, 112, 115, 118, 121, 124, 138, 141, 145`) — drag-above-window yields ~65000 instead of negatives.
+- [x] **C6** Mouse coords extracted as unsigned (`grid32_wndproc.cpp:108, 112, 115, 118, 121, 124, 138, 141, 145`) — drag-above-window yields ~65000 instead of negatives.
 
 ## High
 
