@@ -30,7 +30,11 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         {
         case WM_NCCREATE:
         {
-            pMgr = new CGrid32Mgr();
+            // nothrow new: throwing across the Win32 callback boundary is
+            // implementation-defined and unsafe on most ABIs. The outer
+            // catch(bad_alloc) below requires a valid pMgr for SetLastError,
+            // and at WM_NCCREATE we don't have one yet.
+            pMgr = new (std::nothrow) CGrid32Mgr();
             if (!pMgr)
                 return -1;
 

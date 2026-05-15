@@ -46,5 +46,5 @@ Findings from the audit performed on 2026-05-15. Each item carries a checkbox; c
 - [x] **L5** `Grid32Mgr.cpp:111` — `nColHeaderHeight` overwritten with caller's `nDefRowHeight = 0`, collapsing the header.
 - [x] **L6** `Grid32Mgr.cpp:2705-2717` — `OnSetCurrentCell` with non-numeric `SETBYCOORDINATE` returns `GRID_ERROR_NOT_IMPLEMENTED` instead of `INVALID_PARAMETER`.
 - [x] **L7** `Formulator.cpp:147` — `=1/0` silently returns the dividend instead of an error.
-- [ ] **L8** `grid32_wndproc.cpp:32-38` — `new CGrid32Mgr()` in `WM_NCCREATE` without `nothrow`; bad_alloc through Win32 callback is UB on most ABIs.
+- [x] **L8** `grid32_wndproc.cpp:32-38` — `new CGrid32Mgr()` in `WM_NCCREATE` without `nothrow`; bad_alloc through Win32 callback is UB on most ABIs.
 - [ ] **L9** `Grid32Mgr.cpp:2147 / 2155` — local `RECT r` in `OnMouseMove` computed but never used.
