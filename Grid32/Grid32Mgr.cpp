@@ -2776,8 +2776,10 @@ BOOL CGrid32Mgr::OnSetCurrentCell(UINT nRow, UINT nCol)
 
     if (!IsCellVisible(nRow, nCol))
     {
-        m_visibleTopLeft.nRow = nRow - ((pageStat.end.nRow - pageStat.start.nRow) / 2);
-        m_visibleTopLeft.nCol = nCol - ((pageStat.end.nCol - pageStat.start.nCol) / 2);
+        UINT halfRows = (pageStat.end.nRow - pageStat.start.nRow) / 2;
+        UINT halfCols = (pageStat.end.nCol - pageStat.start.nCol) / 2;
+        m_visibleTopLeft.nRow = (nRow > halfRows) ? (nRow - halfRows) : 0;
+        m_visibleTopLeft.nCol = (nCol > halfCols) ? (nCol - halfCols) : 0;
     }
 
     return TRUE;
