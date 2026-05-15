@@ -3714,13 +3714,24 @@ void CGrid32Mgr::OnStreamOut(LPGCSTREAM pStream)
             // Basic XLSX-like XML
             ss << L"<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">";
             ss << L"<sheetData>";
+            auto colLetters = [](size_t c) -> std::wstring {
+                // Excel column letter: 0->A, 25->Z, 26->AA, 51->AZ, 52->BA, ...
+                std::wstring s;
+                ++c;
+                while (c > 0)
+                {
+                    s.insert(s.begin(), (wchar_t)(L'A' + (c - 1) % 26));
+                    c = (c - 1) / 26;
+                }
+                return s;
+            };
             for (size_t r = 0; r < gcs.nHeight; ++r)
             {
                 ss << L"<row r=\"" << r + 1 << L"\">";
                 for (size_t c = 0; c < gcs.nWidth; ++c)
                 {
                     PGRIDCELL cell = GetCell(static_cast<UINT>(r), static_cast<UINT>(c));
-                    ss << L"<c r=\"" << r + 1 << L"" << (wchar_t)(L'A' + c) << L"\" t=\"inlineStr\"><is><t>";
+                    ss << L"<c r=\"" << colLetters(c) << r + 1 << L"\" t=\"inlineStr\"><is><t>";
                     if (cell)
                         ss << EscapeXML(cell->m_wsText);
                     ss << L"</t></is></c>";

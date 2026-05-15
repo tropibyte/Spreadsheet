@@ -41,7 +41,7 @@ Findings from the audit performed on 2026-05-15. Each item carries a checkbox; c
 
 - [x] **L1** `Grid32Mgr.cpp:1411-1414` — `gcs.nHeight - 1` wraps when `gcs.nHeight == 0`.
 - [x] **L2** `Grid32Mgr.cpp:1392` — `abs(LONG_MIN)` is UB.
-- [ ] **L3** `Grid32Mgr.cpp:3634` — XLSX writes column letter as `(wchar_t)(L'A' + c)`; columns ≥ 26 produce invalid letters.
+- [x] **L3** `Grid32Mgr.cpp:3634` — XLSX writes column letter as `(wchar_t)(L'A' + c)`; columns ≥ 26 produce invalid letters.
 - [ ] **L4** `Grid32Mgr.cpp:2566` — Undo dispatch can throw mid-restore, pushing partial state to redo stack.
 - [ ] **L5** `Grid32Mgr.cpp:111` — `nColHeaderHeight` overwritten with caller's `nDefRowHeight = 0`, collapsing the header.
 - [ ] **L6** `Grid32Mgr.cpp:2705-2717` — `OnSetCurrentCell` with non-numeric `SETBYCOORDINATE` returns `GRID_ERROR_NOT_IMPLEMENTED` instead of `INVALID_PARAMETER`.
