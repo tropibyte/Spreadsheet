@@ -3701,8 +3701,18 @@ void CGrid32Mgr::OnStreamOut(LPGCSTREAM pStream)
     }
 
     std::wstring data = ss.str();
-    size_t toCopy = min(data.size(), static_cast<size_t>(pStream->m_cbBuffSize / sizeof(wchar_t)));
-    wmemcpy(const_cast<LPWSTR>(pStream->m_pwszBuff), data.c_str(), toCopy);
+    size_t bufWchars = pStream->m_cbBuffSize / sizeof(wchar_t);
+    if (bufWchars == 0 || pStream->m_pwszBuff == nullptr)
+    {
+        pStream->m_dwError = GRID_ERROR_INVALID_PARAMETER;
+        if (pStream->m_pfnCallback)
+            pStream->m_pfnCallback(pStream);
+        return;
+    }
+    // Reserve one wchar for the trailing null terminator.
+    size_t toCopy = min(data.size(), bufWchars - 1);
+    wmemcpy(pStream->m_pwszBuff, data.c_str(), toCopy);
+    pStream->m_pwszBuff[toCopy] = L'\0';
     if (toCopy < data.size())
         pStream->m_dwError = GRID_ERROR_OUT_OF_RANGE;
     else

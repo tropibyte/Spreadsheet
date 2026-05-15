@@ -232,7 +232,9 @@ typedef DWORD(CALLBACK* GCSTREAMCALLBACK)(struct tagGCSTREAM *);
 typedef struct tagGCSTREAM {
 	DWORD_PTR          m_dwCookie;
 	DWORD              m_dwError;
-	LPCWSTR			   m_pwszBuff;
+	// Stream-in reads from this buffer; stream-out writes into it.
+	// Must point to writable memory for GM_STREAMOUT.
+	LPWSTR             m_pwszBuff;
 	UINT			   m_cbSize, m_cbBuffSize, m_cbBuffOut;
 	GCSTREAMCALLBACK   m_pfnCallback;
         DWORD             m_dwFormat;
