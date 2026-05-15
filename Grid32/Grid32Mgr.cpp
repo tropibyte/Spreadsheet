@@ -2207,19 +2207,14 @@ void CGrid32Mgr::OnMouseMove(UINT nFlags, int x, int y)
     {
         if (m_gridHitTest == GRID_HTCOLDIVIDER)
         {
-            RECT r = { x - 5, 0, x + 5, m_clientRect.bottom };
-            Invalidate();
-            r.left = m_nSizingLine - 5;
-            r.right = r.left + 10;
+            // Invalidate the old sizing-line band and the new one. The local
+            // RECT bookkeeping is gone — Invalidate() repaints the full
+            // window anyway, so the per-band rects were dead code.
             Invalidate();
             m_nSizingLine = x;
         }
         else if (m_gridHitTest == GRID_HTROWDIVIDER)
         {
-            RECT r = { 0, y - 5, m_clientRect.right, y + 5 };
-            Invalidate();
-            r.top = m_nSizingLine - 5;
-            r.bottom = r.top + 10;
             Invalidate();
             m_nSizingLine = y;
         }
