@@ -19,7 +19,7 @@ Findings from the audit performed on 2026-05-15. Each item carries a checkbox; c
 - [x] **H4** `OnGetCellText` writes `wszBuff[0]` without checking `nLen` (`Grid32Mgr.cpp:2916-2918`).
 - [x] **H5** `EM_SETSEL` caret position uses inflated `GetCellTextLen` value (`Grid32Mgr.cpp:1015-1035, 1798-1800`) — `+2` is buffer headroom, not a caret offset.
 - [x] **H6** `SetClipboardData` failure leaks `HGLOBAL` (`Grid32Mgr.cpp:2389-2401`).
-- [ ] **H7** CSV/TSV stream-in has no quote handling (`Grid32Mgr.cpp:3673-3705`).
+- [x] **H7** CSV/TSV stream-in has no quote handling (`Grid32Mgr.cpp:3673-3705`).
 - [ ] **H8** Stream-in trusts `m_cbBuffSize` as bytes-of-payload (`Grid32Mgr.cpp:3677, 3710, 3771`) — reads garbage past terminator.
 - [ ] **H9** Stream-out `wmemcpy` does not null-terminate; writes through `const_cast<LPWSTR>(LPCWSTR)` (`Grid32Mgr.cpp:3645-3652`).
 - [ ] **H10** SSF stream-in doesn't recognize `=` prefix as formulas (`Grid32Mgr.cpp:3796-3811`) — round-trip loses formulas.

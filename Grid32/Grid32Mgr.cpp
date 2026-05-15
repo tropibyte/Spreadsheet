@@ -3735,10 +3735,39 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
         std::wstring_view input(pStream->m_pwszBuff, pStream->m_cbBuffSize / sizeof(wchar_t));
         size_t row = 0, col = 0;
         std::wstring cellText;
+        bool inQuotes = false;
         for (size_t i = 0; i < input.size() && row < gcs.nHeight; ++i)
         {
             wchar_t ch = input[i];
-            if (ch == delim || ch == L'\n')
+
+            if (inQuotes)
+            {
+                if (ch == L'"')
+                {
+                    // RFC 4180: "" inside quoted field = literal "
+                    if (i + 1 < input.size() && input[i + 1] == L'"')
+                    {
+                        cellText.push_back(L'"');
+                        ++i;
+                    }
+                    else
+                    {
+                        inQuotes = false;
+                    }
+                }
+                else
+                {
+                    cellText.push_back(ch);
+                }
+                continue;
+            }
+
+            if (ch == L'"' && cellText.empty())
+            {
+                // Field starts with a quote => quoted field
+                inQuotes = true;
+            }
+            else if (ch == delim || ch == L'\n')
             {
                 SetCellText((UINT)row, (UINT)col, cellText.c_str());
                 cellText.clear();
@@ -3748,6 +3777,10 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
                     col = 0;
                     ++row;
                 }
+            }
+            else if (ch == L'\r')
+            {
+                // Swallow CR — \r\n line endings handled via the following \n.
             }
             else
             {
