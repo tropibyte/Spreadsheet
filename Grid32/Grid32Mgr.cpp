@@ -3732,7 +3732,8 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
     {
         wchar_t delim = (pStream->m_dwFormat == SF_TSV) ? L'\t' : L',';
 
-        std::wstring_view input(pStream->m_pwszBuff, pStream->m_cbBuffSize / sizeof(wchar_t));
+        size_t maxChars = pStream->m_cbBuffSize / sizeof(wchar_t);
+        std::wstring_view input(pStream->m_pwszBuff, wcsnlen(pStream->m_pwszBuff, maxChars));
         size_t row = 0, col = 0;
         std::wstring cellText;
         bool inQuotes = false;
@@ -3798,7 +3799,8 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
 
     if (pStream->m_dwFormat == SF_ODF || pStream->m_dwFormat == SF_XLSX)
     {
-        std::wstring_view xml(pStream->m_pwszBuff, pStream->m_cbBuffSize / sizeof(wchar_t));
+        size_t maxChars = pStream->m_cbBuffSize / sizeof(wchar_t);
+        std::wstring_view xml(pStream->m_pwszBuff, wcsnlen(pStream->m_pwszBuff, maxChars));
         UINT row = 0;
         size_t pos = 0;
         if (pStream->m_dwFormat == SF_ODF)
@@ -3859,7 +3861,8 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
     }
 
     // SSF format
-    std::wistringstream in(std::wstring(pStream->m_pwszBuff, pStream->m_cbBuffSize / sizeof(wchar_t)));
+    size_t maxChars = pStream->m_cbBuffSize / sizeof(wchar_t);
+    std::wistringstream in(std::wstring(pStream->m_pwszBuff, wcsnlen(pStream->m_pwszBuff, maxChars)));
     std::wstring line;
     std::getline(in, line);
     if (line.rfind(L"SSF", 0) != 0)
