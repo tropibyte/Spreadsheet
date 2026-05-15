@@ -1676,7 +1676,7 @@ void CGrid32Mgr::CalculatePageStats(PAGESTAT& pageStat)
     for (size_t idx = (size_t)m_visibleTopLeft.nCol; idx < gcs.nWidth; ++idx)
     {
         if (idx == gcs.nWidth - 1)
-            pageStat.end.nCol = (UINT)gcs.nWidth;
+            pageStat.end.nCol = (UINT)(gcs.nWidth - 1);
         if (pageStat.nWidth + pColInfoArray[idx].nWidth <= ((size_t)m_clientRect.right - GetActualRowHeaderWidth()))
             pageStat.nWidth += pColInfoArray[idx].nWidth;
         else
