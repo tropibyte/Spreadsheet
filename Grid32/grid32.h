@@ -181,12 +181,27 @@ typedef struct __COLINFO : public cell_base {
 	__COLINFO() : nWidth(0) {}
 }COLINFO;
 
+// Underlying value type for a cell. m_wsText always carries the displayed
+// representation; cells that are typed (Number/Date/Boolean/Formula) also
+// populate m_dValue with the canonical scalar value. CT_Text cells leave
+// m_dValue at 0.0 and treat m_wsText as authoritative.
+enum CellType {
+        CT_Text    = 0,
+        CT_Number  = 1,
+        CT_Date    = 2,   // m_dValue is days since 1899-12-30 (Excel serial)
+        CT_Boolean = 3,
+        CT_Formula = 4,   // m_wsFormula carries the source; m_dValue is the last evaluated number; m_wsText is the displayed result
+        CT_Error   = 5,
+};
+
 typedef struct __GRIDCELL : public cell_base {
         std::wstring m_wsText;
         std::wstring m_wsFormula;
         bool m_bFormula;
+        CellType m_eType;
+        double m_dValue;
         MERGERANGE mergeRange;
-        __GRIDCELL() : m_bFormula(false) {}
+        __GRIDCELL() : m_bFormula(false), m_eType(CT_Text), m_dValue(0.0) {}
 }GRIDCELL, *PGRIDCELL;
 
 typedef struct{
