@@ -3634,6 +3634,8 @@ void CGrid32Mgr::OnStreamOut(LPGCSTREAM pStream)
                 PGRIDCELL cell = GetCellOrDefault((UINT)r, (UINT)c);
                 ss << r << L"," << c;
                 AppendTLV(ss, L"T", cell->m_wsText);
+                if (cell->m_bFormula)
+                    AppendTLV(ss, L"F", cell->m_wsFormula);
                 AppendTLV(ss, L"FF", cell->fontInfo.m_wsFontFace);
                 AppendTLV(ss, L"FS", std::to_wstring(cell->fontInfo.m_fPointSize));
                 AppendTLV(ss, L"FC", std::to_wstring(cell->fontInfo.m_clrTextColor));
@@ -3913,6 +3915,11 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
 
             if (tag == L"T")
                 cell->m_wsText = value;
+            else if (tag == L"F")
+            {
+                cell->m_bFormula = true;
+                cell->m_wsFormula = value;
+            }
             else if (tag == L"FF")
                 cell->fontInfo.m_wsFontFace = value;
             else if (tag == L"FS")
@@ -3960,6 +3967,9 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
             }
         }
     }
+
+    // Refresh evaluated text for any formula cells loaded above.
+    RecalculateFormulas();
 
     pStream->m_dwError = 0;
     if (pStream->m_pfnCallback)
