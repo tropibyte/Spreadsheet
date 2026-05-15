@@ -384,7 +384,7 @@ void CGrid32Mgr::DrawHeaderButton(HDC hDC, COLORREF background, COLORREF border,
         // Calculate highlight (average with white) and shadow (average with black) colors
         COLORREF highlight = RGB(GetRValue(background) <= 192 ? (GetRValue(background) + 255) / 2 : 255,
             GetGValue(background) <= 192 ? (GetGValue(background) + 255) / 2 : 255,
-            GetGValue(background) <= 192 ? (GetBValue(background) + 255) / 2 : 255);
+            GetBValue(background) <= 192 ? (GetBValue(background) + 255) / 2 : 255);
 
         COLORREF shadow = RGB(GetRValue(background) / 2,
             GetGValue(background) / 2,
