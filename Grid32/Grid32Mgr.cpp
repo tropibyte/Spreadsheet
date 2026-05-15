@@ -2712,8 +2712,12 @@ size_t CGrid32Mgr::OnCanRedo()
 void CGrid32Mgr::OnSetSelection(GRIDSELECTION* pGridSel) 
 {
     if (pGridSel) {
-        // Validate selection coordinates
-        if (pGridSel->start.nRow < 0 || pGridSel->start.nCol < 0 ||
+        // Validate selection coordinates. start.nRow/nCol are UINT so the
+        // < 0 checks here used to be no-ops (compiler warning suppressed by
+        // implicit cast); the meaningful upper bound is end >= nHeight/nWidth,
+        // plus start > end which would have wrapped under after a host bug.
+        if (pGridSel->start.nRow > pGridSel->end.nRow ||
+            pGridSel->start.nCol > pGridSel->end.nCol ||
             pGridSel->end.nRow >= gcs.nHeight || pGridSel->end.nCol >= gcs.nWidth) {
             SetLastError(GRID_ERROR_INVALID_CELL_REFERENCE);
             return;
