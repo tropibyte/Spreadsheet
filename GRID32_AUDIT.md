@@ -35,7 +35,7 @@ Findings from the audit performed on 2026-05-15. Each item carries a checkbox; c
 - [x] **M4** `OnIncrementCell` can't express negative deltas (`Grid32Mgr.cpp:3166-3180`) — UINT struct passed where signed deltas needed.
 - [x] **M5** Edit subclass is never restored on destroy (`Grid32Mgr.cpp:149-150`, `EditWndProc.cpp:8`) — late-queue messages dispatched against stale parent.
 - [x] **M6** `DrawCornerCell` highlight RGB uses `GetGValue` where it should use `GetBValue` (`Grid32Mgr.cpp:365-367`).
-- [ ] **M7** `CalcSelectionCoordinatesWithMouse` decrements UINT past zero with `(UINT)-100` sentinel masking the bug (`Grid32Mgr.cpp:1949-1957, 1982-1989`).
+- [x] **M7** `CalcSelectionCoordinatesWithMouse` decrements UINT past zero with `(UINT)-100` sentinel masking the bug (`Grid32Mgr.cpp:1949-1957, 1982-1989`).
 
 ## Low / Also noted
 

@@ -2004,14 +2004,12 @@ void CGrid32Mgr::CalcSelectionCoordinatesWithMouse(int x, int y, bool& bChangeX,
 
     if (pt.x <= GetActualRowHeaderWidth())
     {
-        if (m_visibleTopLeft.nCol > (UINT)-100)
-            m_visibleTopLeft.nCol = 0;
-        else if (m_visibleTopLeft.nCol > 0)
+        // Decrement only if non-zero; the prior (UINT)-100 "if already
+        // underflowed" sentinel masked the bug without preventing it.
+        if (m_visibleTopLeft.nCol > 0)
             --m_visibleTopLeft.nCol;
 
-        if (m_selectionRect.end.nCol > (UINT)-100)
-            m_selectionRect.end.nCol = 0;
-        else if (m_selectionRect.end.nCol > 0)
+        if (m_selectionRect.end.nCol > 0)
             --m_selectionRect.end.nCol;
 
         bChangeX = true;
