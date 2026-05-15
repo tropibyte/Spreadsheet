@@ -161,7 +161,17 @@ double CFormulator::ParseTerm(CGrid32Mgr* mgr, const std::wstring& expr, size_t&
         if (op != L'*' && op != L'/') break;
         ++pos;
         double rhs = ParseFactor(mgr, expr, pos, visited);
-        if (op == L'*') value *= rhs; else if (rhs != 0) value /= rhs;
+        if (op == L'*')
+        {
+            value *= rhs;
+        }
+        else
+        {
+            // Division: NaN/inf on zero divisor — surfaces the error to the
+            // caller via the result rather than silently returning the
+            // dividend. Spreadsheet host will format these distinctly.
+            value /= rhs;
+        }
     }
     return value;
 }
