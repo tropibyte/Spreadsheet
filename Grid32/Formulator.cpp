@@ -7,6 +7,23 @@
 
 // --- Formula evaluation helpers ---
 
+namespace {
+    // Cap formula recursion to defend against pathological cycles and deeply
+    // nested expressions that the visited-set alone can't bound (e.g.,
+    // long alternating chains across multiple cells).
+    constexpr int kMaxFormulaDepth = 256;
+    thread_local int g_formulaDepth = 0;
+
+    struct FormulaDepthGuard {
+        bool overflowed;
+        FormulaDepthGuard() : overflowed(false) {
+            if (++g_formulaDepth > kMaxFormulaDepth)
+                overflowed = true;
+        }
+        ~FormulaDepthGuard() { --g_formulaDepth; }
+    };
+}
+
 
 void CFormulator::SkipSpaces(const std::wstring& s, size_t& pos) {
     while (pos < s.size() && iswspace(s[pos])) ++pos;
@@ -151,6 +168,8 @@ double CFormulator::ParseTerm(CGrid32Mgr* mgr, const std::wstring& expr, size_t&
 
 double CFormulator::ParseExpression(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos,
     std::set<std::pair<UINT, UINT>>& visited) {
+    FormulaDepthGuard depth;
+    if (depth.overflowed) return 0.0;
     double value = ParseTerm(mgr, expr, pos, visited);
     while (true) {
         SkipSpaces(expr, pos);
@@ -318,6 +337,8 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
 
 double CFormulator::GetCellValue(CGrid32Mgr* mgr, UINT row, UINT col,
     std::set<std::pair<UINT, UINT>>& visited) {
+    FormulaDepthGuard depth;
+    if (depth.overflowed) return 0.0;
     auto key = std::make_pair(row, col);
     if (visited.count(key)) return 0.0;
     visited.insert(key);
