@@ -13,7 +13,7 @@ Findings from the audit performed on 2026-05-15. Each item carries a checkbox; c
 
 ## High
 
-- [ ] **H1** `CopyGridCell` drops `m_bFormula` and `m_wsFormula` (`Grid32Mgr.cpp:3474-3495`) — `GM_ENUMCELLS` returns broken formula data.
+- [x] **H1** `CopyGridCell` drops `m_bFormula` and `m_wsFormula` (`Grid32Mgr.cpp:3474-3495`) — `GM_ENUMCELLS` returns broken formula data.
 - [ ] **H2** `OnSetCurrentCell(UINT,UINT)` underflows `m_visibleTopLeft` (`Grid32Mgr.cpp:2745-2748`) — missing the `> halfRows` ternary guard that `SetCurrentCell` has.
 - [ ] **H3** `m_bSelecting` / `m_bSizing` never reset on capture loss — add `WM_CAPTURECHANGED` / `WM_CANCELMODE` handler.
 - [ ] **H4** `OnGetCellText` writes `wszBuff[0]` without checking `nLen` (`Grid32Mgr.cpp:2916-2918`).

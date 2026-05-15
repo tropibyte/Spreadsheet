@@ -3523,6 +3523,8 @@ void CGrid32Mgr::CopyGridCell(GRIDCELL& dest, GRIDCELL& src)
 
     // Copy the specific GRIDCELL attributes
     dest.m_wsText = src.m_wsText;
+    dest.m_wsFormula = src.m_wsFormula;
+    dest.m_bFormula = src.m_bFormula;
     dest.mergeRange = src.mergeRange;
 }
 
