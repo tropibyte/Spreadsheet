@@ -112,7 +112,18 @@ bool CGrid32Mgr::Create(PGRIDCREATESTRUCT pGCS)
         return false;
     }
 
-	nColHeaderHeight = static_cast<long>((gcs.style & GS_COLHEADER) ? gcs.nDefRowHeight : 0);
+	// If the host left nDefRowHeight at 0, keep the constructor's
+	// default (40) so the column header doesn't collapse.
+	if (gcs.style & GS_COLHEADER)
+	{
+		if (gcs.nDefRowHeight > 0)
+			nColHeaderHeight = static_cast<long>(gcs.nDefRowHeight);
+		// else keep the existing default initialized in the constructor.
+	}
+	else
+	{
+		nColHeaderHeight = 0;
+	}
 
     for (size_t idx = 0; idx < gcs.nWidth; ++idx)
     {
