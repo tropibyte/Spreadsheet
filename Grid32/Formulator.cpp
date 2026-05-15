@@ -22,6 +22,26 @@ namespace {
         }
         ~FormulaDepthGuard() { --g_formulaDepth; }
     };
+
+    // Split a function's argument string at top-level commas, respecting
+    // nested parentheses. "A1+B1, IF(C1>0, X, Y), 3" -> { "A1+B1", " IF(C1>0, X, Y)", " 3" }.
+    std::vector<std::wstring> SplitArgs(const std::wstring& arg) {
+        std::vector<std::wstring> out;
+        int depth = 0;
+        size_t start = 0;
+        for (size_t i = 0; i < arg.size(); ++i) {
+            wchar_t c = arg[i];
+            if (c == L'(') ++depth;
+            else if (c == L')') { if (depth > 0) --depth; }
+            else if (c == L',' && depth == 0) {
+                out.push_back(arg.substr(start, i - start));
+                start = i + 1;
+            }
+        }
+        out.push_back(arg.substr(start));
+        return out;
+    }
+
 }
 
 
@@ -176,6 +196,12 @@ double CFormulator::ParseTerm(CGrid32Mgr* mgr, const std::wstring& expr, size_t&
     return value;
 }
 
+double CFormulator::EvalArg(CGrid32Mgr* mgr, const std::wstring& s,
+    std::set<std::pair<UINT, UINT>>& visited) {
+    size_t p = 0;
+    return ParseExpression(mgr, s, p, visited);
+}
+
 double CFormulator::ParseExpression(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos,
     std::set<std::pair<UINT, UINT>>& visited) {
     FormulaDepthGuard depth;
@@ -323,6 +349,106 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
         {
             size_t p = 0;
             res = log(ParseExpression(mgr, arg, p, visited));
+        }
+        else if (_wcsicmp(token.c_str(), L"IF") == 0)
+        {
+            // IF(cond, then [, else]) — non-zero condition selects `then`.
+            auto args = SplitArgs(arg);
+            if (args.size() >= 2)
+            {
+                double cond = EvalArg(mgr, args[0], visited);
+                if (cond != 0.0)
+                    res = EvalArg(mgr, args[1], visited);
+                else if (args.size() >= 3)
+                    res = EvalArg(mgr, args[2], visited);
+                else
+                    res = 0.0;
+            }
+        }
+        else if (_wcsicmp(token.c_str(), L"IFS") == 0)
+        {
+            // IFS(cond1, val1, cond2, val2, ...) — first truthy condition wins.
+            auto args = SplitArgs(arg);
+            for (size_t i = 0; i + 1 < args.size(); i += 2)
+            {
+                if (EvalArg(mgr, args[i], visited) != 0.0)
+                {
+                    res = EvalArg(mgr, args[i + 1], visited);
+                    break;
+                }
+            }
+        }
+        else if (_wcsicmp(token.c_str(), L"AND") == 0)
+        {
+            auto args = SplitArgs(arg);
+            res = 1.0;
+            for (auto& a : args) {
+                if (EvalArg(mgr, a, visited) == 0.0) { res = 0.0; break; }
+            }
+            if (args.empty()) res = 0.0;
+        }
+        else if (_wcsicmp(token.c_str(), L"OR") == 0)
+        {
+            auto args = SplitArgs(arg);
+            res = 0.0;
+            for (auto& a : args) {
+                if (EvalArg(mgr, a, visited) != 0.0) { res = 1.0; break; }
+            }
+        }
+        else if (_wcsicmp(token.c_str(), L"NOT") == 0)
+        {
+            res = (EvalArg(mgr, arg, visited) == 0.0) ? 1.0 : 0.0;
+        }
+        else if (_wcsicmp(token.c_str(), L"ABS") == 0)
+        {
+            res = std::fabs(EvalArg(mgr, arg, visited));
+        }
+        else if (_wcsicmp(token.c_str(), L"ROUND") == 0)
+        {
+            // ROUND(value, digits)
+            auto args = SplitArgs(arg);
+            double v = args.size() >= 1 ? EvalArg(mgr, args[0], visited) : 0.0;
+            double d = args.size() >= 2 ? EvalArg(mgr, args[1], visited) : 0.0;
+            double mult = std::pow(10.0, d);
+            res = std::floor(v * mult + (v >= 0 ? 0.5 : -0.5)) / mult;
+        }
+        else if (_wcsicmp(token.c_str(), L"CEILING") == 0)
+        {
+            auto args = SplitArgs(arg);
+            double v = args.size() >= 1 ? EvalArg(mgr, args[0], visited) : 0.0;
+            double sig = args.size() >= 2 ? EvalArg(mgr, args[1], visited) : 1.0;
+            res = sig != 0.0 ? std::ceil(v / sig) * sig : 0.0;
+        }
+        else if (_wcsicmp(token.c_str(), L"FLOOR") == 0)
+        {
+            auto args = SplitArgs(arg);
+            double v = args.size() >= 1 ? EvalArg(mgr, args[0], visited) : 0.0;
+            double sig = args.size() >= 2 ? EvalArg(mgr, args[1], visited) : 1.0;
+            res = sig != 0.0 ? std::floor(v / sig) * sig : 0.0;
+        }
+        else if (_wcsicmp(token.c_str(), L"MOD") == 0)
+        {
+            // MOD(dividend, divisor)
+            auto args = SplitArgs(arg);
+            double d1 = args.size() >= 1 ? EvalArg(mgr, args[0], visited) : 0.0;
+            double d2 = args.size() >= 2 ? EvalArg(mgr, args[1], visited) : 0.0;
+            res = d2 != 0.0 ? std::fmod(d1, d2) : 0.0;
+        }
+        else if (_wcsicmp(token.c_str(), L"INT") == 0)
+        {
+            // INT rounds toward -inf, like Excel.
+            res = std::floor(EvalArg(mgr, arg, visited));
+        }
+        else if (_wcsicmp(token.c_str(), L"TRUNC") == 0)
+        {
+            // TRUNC drops the fractional part toward zero.
+            double v = EvalArg(mgr, arg, visited);
+            res = (v >= 0) ? std::floor(v) : std::ceil(v);
+        }
+        else if (_wcsicmp(token.c_str(), L"SQRT") == 0)
+        {
+            double v = EvalArg(mgr, arg, visited);
+            res = (v >= 0) ? std::sqrt(v) : 0.0;
         }
         else
         {

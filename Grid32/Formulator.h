@@ -23,4 +23,5 @@ class CFormulator
 		std::set<std::pair<UINT, UINT>>& visited);
 	static double ParseTerm(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos, std::set<std::pair<UINT, UINT>>& visited);
 	static double ParseExpression(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos, std::set<std::pair<UINT, UINT>>& visited);
+	static double EvalArg(CGrid32Mgr* mgr, const std::wstring& s, std::set<std::pair<UINT, UINT>>& visited);
 };
