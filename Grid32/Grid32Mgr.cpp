@@ -2439,7 +2439,15 @@ void CGrid32Mgr::OnCopy()
             {
                 wcscpy_s(p, data.size() + 1, data.c_str());
                 GlobalUnlock(hMem);
-                SetClipboardData(CF_UNICODETEXT, hMem);
+                if (!SetClipboardData(CF_UNICODETEXT, hMem))
+                {
+                    // SetClipboardData failed — ownership not transferred, free.
+                    GlobalFree(hMem);
+                }
+            }
+            else
+            {
+                GlobalFree(hMem);
             }
         }
         CloseClipboard();
