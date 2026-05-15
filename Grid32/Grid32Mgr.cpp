@@ -183,6 +183,14 @@ void CGrid32Mgr::OnDestroy()
     if (m_hWndEdit != NULL && IsWindow(m_hWndEdit))
     {
         SendMessage(m_hWndEdit, WM_SETFONT, 0, 0);
+        // Restore the original WNDPROC so late-queue messages to the edit
+        // window (e.g. EM_GETSEL from background tooltip/IME work) don't
+        // route through EditCtrl_WndProc with a stale CGrid32Mgr pointer.
+        if (m_editWndProc != nullptr)
+        {
+            SetWindowLongPtr(m_hWndEdit, GWLP_WNDPROC, (LONG_PTR)m_editWndProc);
+            m_editWndProc = nullptr;
+        }
     }
     if (m_hDefaultFont != NULL)
     {

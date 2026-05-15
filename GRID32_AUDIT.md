@@ -33,7 +33,7 @@ Findings from the audit performed on 2026-05-15. Each item carries a checkbox; c
 - [x] **M2** `OnSetSelection` signed/unsigned comparison is a no-op (`Grid32Mgr.cpp:2655`) — `pGridSel->start.nRow < 0` always false on UINT.
 - [x] **M3** `CalculatePageStats`: `pageStat.end.nCol = gcs.nWidth` is one past end (`Grid32Mgr.cpp:1653-1654`).
 - [x] **M4** `OnIncrementCell` can't express negative deltas (`Grid32Mgr.cpp:3166-3180`) — UINT struct passed where signed deltas needed.
-- [ ] **M5** Edit subclass is never restored on destroy (`Grid32Mgr.cpp:149-150`, `EditWndProc.cpp:8`) — late-queue messages dispatched against stale parent.
+- [x] **M5** Edit subclass is never restored on destroy (`Grid32Mgr.cpp:149-150`, `EditWndProc.cpp:8`) — late-queue messages dispatched against stale parent.
 - [ ] **M6** `DrawCornerCell` highlight RGB uses `GetGValue` where it should use `GetBValue` (`Grid32Mgr.cpp:365-367`).
 - [ ] **M7** `CalcSelectionCoordinatesWithMouse` decrements UINT past zero with `(UINT)-100` sentinel masking the bug (`Grid32Mgr.cpp:1949-1957, 1982-1989`).
 
