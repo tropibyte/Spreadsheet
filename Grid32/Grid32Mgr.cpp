@@ -1500,33 +1500,36 @@ void CGrid32Mgr::IncrementSelectedCell(long nRow, long nCol)
 
 void CGrid32Mgr::IncrementSelectedPage(long nRow, long nCol)
 {
-    if (nRow < 0)
+    if (nRow < 0 && m_visibleTopLeft.nRow > 0)
     {
+        UINT oldTop = m_visibleTopLeft.nRow;
+        UINT rowOffset = m_currentCell.nRow - oldTop;
         size_t nHeight = 0;
-        auto rowDiff = m_currentCell.nRow - m_visibleTopLeft.nRow;
-        for (size_t idx = m_visibleTopLeft.nRow - 1; idx != ~0; --idx)
+        size_t target = (size_t)m_clientRect.bottom - GetActualColHeaderHeight();
+        size_t idx = oldTop;
+        while (idx > 0)
         {
-            if (idx == 0 || m_visibleTopLeft.nRow == 0)
+            --idx;
+            if ((nHeight + pRowInfoArray[idx].nHeight) >= target)
             {
-                m_visibleTopLeft.nRow = 0;
-                m_currentCell.nRow = rowDiff;
+                // This row would overflow; new top = idx + 1
+                UINT diff = oldTop - (UINT)(idx + 1);
+                m_visibleTopLeft.nRow = (UINT)(idx + 1);
+                m_currentCell.nRow = (m_currentCell.nRow > diff) ? (m_currentCell.nRow - diff) : 0;
                 break;
             }
-            else if ((nHeight + pRowInfoArray[idx].nHeight) < (size_t)m_clientRect.bottom - GetActualColHeaderHeight())
-                nHeight += pRowInfoArray[idx].nHeight;
-            else
+            nHeight += pRowInfoArray[idx].nHeight;
+            if (idx == 0)
             {
-                ++idx;
-                auto rowDiff = m_visibleTopLeft.nRow - (UINT)idx;
-                m_currentCell.nRow -= rowDiff;
-                m_visibleTopLeft.nRow = (UINT)idx;
+                m_visibleTopLeft.nRow = 0;
+                m_currentCell.nRow = rowOffset;
                 break;
             }
         }
     }
     else if (nRow > 0)
     {
-        for (size_t idx = 0; idx < abs(nRow); ++idx)
+        for (size_t idx = 0; idx < (size_t)abs(nRow); ++idx)
         {
             PAGESTAT pageStat;
             CalculatePageStats(pageStat);
@@ -1542,26 +1545,28 @@ void CGrid32Mgr::IncrementSelectedPage(long nRow, long nCol)
         }
     }
 
-    if (nCol < 0)
+    if (nCol < 0 && m_visibleTopLeft.nCol > 0)
     {
+        UINT oldLeft = m_visibleTopLeft.nCol;
+        UINT colOffset = m_currentCell.nCol - oldLeft;
         size_t nWidth = 0;
-        auto colDiff = m_currentCell.nCol - m_visibleTopLeft.nCol;
-        for (size_t idx = m_visibleTopLeft.nCol - 1; idx != ~0; --idx)
+        size_t target = (size_t)m_clientRect.right - GetActualRowHeaderWidth();
+        size_t idx = oldLeft;
+        while (idx > 0)
         {
-            if (idx == 0 || m_visibleTopLeft.nCol == 0)
+            --idx;
+            if ((nWidth + pColInfoArray[idx].nWidth) >= target)
             {
-                m_visibleTopLeft.nCol = 0;
-                m_currentCell.nCol = colDiff;
+                UINT diff = oldLeft - (UINT)(idx + 1);
+                m_visibleTopLeft.nCol = (UINT)(idx + 1);
+                m_currentCell.nCol = (m_currentCell.nCol > diff) ? (m_currentCell.nCol - diff) : 0;
                 break;
             }
-            else if ((nWidth + pColInfoArray[idx].nWidth) < (size_t)m_clientRect.right - GetActualRowHeaderWidth())
-                nWidth += pColInfoArray[idx].nWidth;
-            else
+            nWidth += pColInfoArray[idx].nWidth;
+            if (idx == 0)
             {
-                ++idx;
-                auto colDiff = m_visibleTopLeft.nCol - idx;
-                m_currentCell.nCol -= (UINT)colDiff;
-                m_visibleTopLeft.nCol = (UINT)idx;
+                m_visibleTopLeft.nCol = 0;
+                m_currentCell.nCol = colOffset;
                 break;
             }
         }
@@ -1597,16 +1602,18 @@ void CGrid32Mgr::IncrementSelectEdge(long nRow, long nCol)
         m_visibleTopLeft.nRow = 0;
         m_currentCell.nRow = 0;
     }
-    else if (nRow > 0)
+    else if (nRow > 0 && gcs.nHeight > 0)
     {
+        UINT lastRow = (UINT)gcs.nHeight - 1;
+        m_currentCell.nRow = lastRow;
         size_t nHeight = 0;
-        m_currentCell.nRow = (UINT)gcs.nHeight - 1;
-        size_t idx = m_currentCell.nRow - 1;
-        for (; nHeight < ((size_t)m_clientRect.bottom * 2) / 3; --idx)
+        size_t target = ((size_t)m_clientRect.bottom * 2) / 3;
+        size_t idx = lastRow;
+        while (idx > 0 && nHeight < target)
         {
+            --idx;
             nHeight += pRowInfoArray[idx].nHeight;
         }
-
         m_visibleTopLeft.nRow = (UINT)idx;
     }
     if (nCol < 0)
@@ -1614,16 +1621,18 @@ void CGrid32Mgr::IncrementSelectEdge(long nRow, long nCol)
         m_visibleTopLeft.nCol = 0;
         m_currentCell.nCol = 0;
     }
-    else if (nCol > 0)
+    else if (nCol > 0 && gcs.nWidth > 0)
     {
+        UINT lastCol = (UINT)gcs.nWidth - 1;
+        m_currentCell.nCol = lastCol;
         size_t nWidth = 0;
-        m_currentCell.nCol = (UINT)gcs.nWidth - 1;
-        size_t idx = m_currentCell.nCol - 1;
-        for (; nWidth < (m_clientRect.right * 2) / 3; --idx)
+        size_t target = ((size_t)m_clientRect.right * 2) / 3;
+        size_t idx = lastCol;
+        while (idx > 0 && nWidth < target)
         {
+            --idx;
             nWidth += pColInfoArray[idx].nWidth;
         }
-
         m_visibleTopLeft.nCol = (UINT)idx;
     }
     m_scrollDifference.x = (long)CalculatedColumnDistance(0, (size_t)m_visibleTopLeft.nCol);
