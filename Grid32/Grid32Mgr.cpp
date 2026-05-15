@@ -1432,9 +1432,9 @@ void CGrid32Mgr::IncrementSelectedCell(long nRow, long nCol)
     _ASSERT(pageStat.nHeight < ((size_t)m_clientRect.bottom - GetActualColHeaderHeight()));
     Nop();
     
-    if (nRow > 0 && m_currentCell.nRow == gcs.nHeight - 1)
+    if (nRow > 0 && gcs.nHeight > 0 && m_currentCell.nRow == (UINT)(gcs.nHeight - 1))
         nRow = 0;
-    if (nCol > 0 && m_currentCell.nCol == gcs.nWidth - 1)
+    if (nCol > 0 && gcs.nWidth > 0 && m_currentCell.nCol == (UINT)(gcs.nWidth - 1))
         nCol = 0;
     if (IsCellIncrementWithinCurrentPage(nRow, nCol, pageStat))
     {
