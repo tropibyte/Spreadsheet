@@ -3814,14 +3814,47 @@ void CGrid32Mgr::OnStreamOut(LPGCSTREAM pStream)
     }
     else if (fmt == SF_SSF)
     {
-        ss << L"SSF,1\n"; // version header
-        ss << gcs.nHeight << L"," << gcs.nWidth << L"\n";
+        // SSF v2 — Spreadsheet File format, v2.
+        //   Line 1:  "SSF2,1"               -- format marker + revision
+        //   Line 2:  "WB,<sheetCount>"     -- workbook envelope
+        //   Per sheet:
+        //     "SH,<name>,<rows>,<cols>"   -- sheet header
+        //     One cell-line per cell:
+        //       "<row>,<col>;TAG:VALUE[;TAG:LEN:VALUE]*"
+        //     Tag families:
+        //       Y:<c>           cell type char (n/d/b/f/e — t omitted)
+        //       V:<dbl>         typed numeric value (for n/d/b/f types)
+        //       T:<len>:<text>  display text
+        //       F:<len>:<src>   formula source (no leading '=')
+        //       FF/FS/FC/IT/UN/ST/WT/BG/BC/BW/PS/J/NM/MR -- as in v1
+        ss << L"SSF2,1\n";
+        ss << L"WB,1\n";
+        ss << L"SH,Sheet1," << gcs.nHeight << L"," << gcs.nWidth << L"\n";
         for (size_t r = 0; r < gcs.nHeight; ++r)
         {
             for (size_t c = 0; c < gcs.nWidth; ++c)
             {
                 PGRIDCELL cell = GetCellOrDefault((UINT)r, (UINT)c);
+                // Skip default cells with no data to keep the file compact.
+                if (cell->m_wsText.empty() && !cell->m_bFormula && cell->m_eType == CT_Text)
+                    continue;
                 ss << r << L"," << c;
+                if (cell->m_eType != CT_Text)
+                {
+                    const wchar_t* typeStr = L"t";
+                    switch (cell->m_eType) {
+                        case CT_Number:  typeStr = L"n"; break;
+                        case CT_Date:    typeStr = L"d"; break;
+                        case CT_Boolean: typeStr = L"b"; break;
+                        case CT_Formula: typeStr = L"f"; break;
+                        case CT_Error:   typeStr = L"e"; break;
+                        default:         typeStr = L"t"; break;
+                    }
+                    ss << L";Y:1:" << typeStr;
+                    // V tag carries the numeric form for any non-text type.
+                    std::wstring vstr = std::to_wstring(cell->m_dValue);
+                    ss << L";V:" << vstr.size() << L":" << vstr;
+                }
                 AppendTLV(ss, L"T", cell->m_wsText);
                 if (cell->m_bFormula)
                     AppendTLV(ss, L"F", cell->m_wsFormula);
@@ -4072,24 +4105,32 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
         return;
     }
 
-    // SSF format
+    // SSF format — supports both v1 ("SSF,<rev>") and v2 ("SSF2,<rev>").
     size_t maxChars = pStream->m_cbBuffSize / sizeof(wchar_t);
     std::wistringstream in(std::wstring(pStream->m_pwszBuff, wcsnlen(pStream->m_pwszBuff, maxChars)));
     std::wstring line;
     std::getline(in, line);
-    if (line.rfind(L"SSF", 0) != 0)
+    bool isV2 = (line.rfind(L"SSF2", 0) == 0);
+    bool isV1 = !isV2 && (line.rfind(L"SSF", 0) == 0);
+    if (!isV1 && !isV2)
     {
         pStream->m_dwError = GRID_ERROR_INVALID_PARAMETER;
         if (pStream->m_pfnCallback)
             pStream->m_pfnCallback(pStream);
         return;
     }
-    // Skip version, assume valid
-    std::getline(in, line); // dimensions line
+    // v1 stores dimensions on line 2; v2 has a WB envelope + SH header
+    // before cell data.
+    if (isV1)
+    {
+        std::getline(in, line); // dimensions line (ignored on load)
+    }
     while (std::getline(in, line))
     {
         if (line.empty())
             continue;
+        if (isV2 && (line.rfind(L"WB,", 0) == 0 || line.rfind(L"SH,", 0) == 0))
+            continue;   // envelope / sheet headers — single-sheet for now
         size_t pos = line.find(L';');
         if (pos == std::wstring::npos)
             continue;
@@ -4100,6 +4141,7 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
         UINT r = (UINT)std::stoul(coords.substr(0, comma));
         UINT c = (UINT)std::stoul(coords.substr(comma + 1));
         PGRIDCELL cell = GetCellOrCreate(r, c);
+        bool hadExplicitType = false;
         size_t p = pos + 1;
         while (p < line.size())
         {
@@ -4115,6 +4157,23 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
 
             if (tag == L"T")
                 cell->m_wsText = value;
+            else if (tag == L"Y" && !value.empty())
+            {
+                // v2: explicit cell type. Maps t/n/d/b/f/e to CellType enum.
+                hadExplicitType = true;
+                switch (value[0]) {
+                    case L'n': cell->m_eType = CT_Number;  break;
+                    case L'd': cell->m_eType = CT_Date;    break;
+                    case L'b': cell->m_eType = CT_Boolean; break;
+                    case L'f': cell->m_eType = CT_Formula; break;
+                    case L'e': cell->m_eType = CT_Error;   break;
+                    default:   cell->m_eType = CT_Text;    break;
+                }
+            }
+            else if (tag == L"V")
+            {
+                cell->m_dValue = std::wcstod(value.c_str(), nullptr);
+            }
             else if (tag == L"F")
             {
                 cell->m_bFormula = true;
@@ -4164,6 +4223,25 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
                         }
                     }
                 }
+            }
+        }
+
+        // v1 files don't carry Y/V tags — infer typing from the loaded text
+        // so opened-from-v1 sheets behave like freshly-typed ones (proper
+        // sort, formula-result numeric form).
+        if (!hadExplicitType)
+        {
+            if (cell->m_bFormula)
+            {
+                cell->m_eType = CT_Formula;
+                double n = 0.0;
+                if (TryParseNumber(cell->m_wsText, n)) cell->m_dValue = n;
+            }
+            else
+            {
+                double v = 0.0;
+                cell->m_eType = InferType(cell->m_wsText, v);
+                cell->m_dValue = v;
             }
         }
     }
