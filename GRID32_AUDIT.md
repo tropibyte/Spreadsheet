@@ -16,7 +16,7 @@ Findings from the audit performed on 2026-05-15. Each item carries a checkbox; c
 - [x] **H1** `CopyGridCell` drops `m_bFormula` and `m_wsFormula` (`Grid32Mgr.cpp:3474-3495`) — `GM_ENUMCELLS` returns broken formula data.
 - [x] **H2** `OnSetCurrentCell(UINT,UINT)` underflows `m_visibleTopLeft` (`Grid32Mgr.cpp:2745-2748`) — missing the `> halfRows` ternary guard that `SetCurrentCell` has.
 - [x] **H3** `m_bSelecting` / `m_bSizing` never reset on capture loss — add `WM_CAPTURECHANGED` / `WM_CANCELMODE` handler.
-- [ ] **H4** `OnGetCellText` writes `wszBuff[0]` without checking `nLen` (`Grid32Mgr.cpp:2916-2918`).
+- [x] **H4** `OnGetCellText` writes `wszBuff[0]` without checking `nLen` (`Grid32Mgr.cpp:2916-2918`).
 - [ ] **H5** `EM_SETSEL` caret position uses inflated `GetCellTextLen` value (`Grid32Mgr.cpp:1015-1035, 1798-1800`) — `+2` is buffer headroom, not a caret offset.
 - [ ] **H6** `SetClipboardData` failure leaks `HGLOBAL` (`Grid32Mgr.cpp:2389-2401`).
 - [ ] **H7** CSV/TSV stream-in has no quote handling (`Grid32Mgr.cpp:3673-3705`).

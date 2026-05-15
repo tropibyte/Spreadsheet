@@ -2936,7 +2936,8 @@ size_t CGrid32Mgr::GetRowHeight(size_t nRow)
 
 BOOL CGrid32Mgr::OnGetCellText(const GRIDPOINT& point, GRID_GETTEXT* text) {
     // Input validation
-    if (!text || point.nRow >= gcs.nHeight || point.nCol >= gcs.nWidth) {
+    if (!text || !text->wszBuff || text->nLen == 0 ||
+        point.nRow >= gcs.nHeight || point.nCol >= gcs.nWidth) {
         SetLastError(GRID_ERROR_INVALID_PARAMETER);
         return FALSE;
     }
