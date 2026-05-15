@@ -2571,9 +2571,13 @@ void CGrid32Mgr::OnUndo()
     if (m_undoStack.empty())
         return;
 
+    // Copy the top op but don't pop yet — if the restore throws, we want
+    // the undo stack to retain the entry so the user can retry rather
+    // than silently losing the operation.
     GridEditOperation op = m_undoStack.top();
-    m_undoStack.pop();
 
+    try
+    {
     switch (op.type)
     {
     case EditOperationType::SetText:
@@ -2630,10 +2634,17 @@ void CGrid32Mgr::OnUndo()
     break;
     }
 
-    // Push to redo stack
+    // Restore succeeded — move the op from undo to redo atomically.
+    m_undoStack.pop();
     m_redoStack.push(op);
     Invalidate();
     SetLastError(0);
+    }
+    catch (...)
+    {
+        // Restore threw; leave undo stack intact so the user can retry.
+        SetLastError(GRID_ERROR_NOT_IMPLEMENTED);
+    }
 }
 
 // Redo the last undone operation
