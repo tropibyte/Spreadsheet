@@ -6,6 +6,7 @@
 #include <cwctype>
 #include <set>
 #include "Grid32Mgr.h"
+#include "grid32_internal.h"
 #include "Formulator.h"
 #include <new>
 #include <string_view>
@@ -20,106 +21,10 @@ L';', L':', L'\'', L'\"', L',', L'.', L'/', L'<', L'>', L'?',
 L'`', L'~'
 };
 
-// ---- Cell type inference ----------------------------------------------------
-// Convert calendar Y/M/D to Excel-style serial (days since 1899-12-30).
-// Within bounds of typical spreadsheet dates; doesn't implement the Excel
-// 1900-leap-year quirk because we're not Excel.
-static double DateToSerial(int y, int m, int d)
-{
-    if (m <= 2) { y -= 1; m += 12; }
-    int a = y / 100;
-    int b = 2 - a + a / 4;
-    long long jdn = (long long)(365.25 * (y + 4716)) + (long long)(30.6001 * (m + 1)) + d + b - 1524;
-    // 1899-12-30 has Julian Day Number 2415018.5 -> use 2415019 since we use the integer JDN at noon.
-    return (double)(jdn - 2415019);
-}
-
-// Attempt to parse `text` as a date in a few common formats. Returns true and
-// populates `serialOut` if successful. Recognized:
-//   YYYY-MM-DD, YYYY/MM/DD, MM/DD/YYYY, M/D/YYYY, M/D/YY
-static bool TryParseDate(const std::wstring& text, double& serialOut)
-{
-    if (text.empty()) return false;
-    int y = 0, m = 0, d = 0;
-
-    // ISO: YYYY-MM-DD or YYYY/MM/DD
-    if (text.size() == 10 && (text[4] == L'-' || text[4] == L'/') &&
-        text[4] == text[7] && iswdigit(text[0]) && iswdigit(text[5]) && iswdigit(text[8]))
-    {
-        try {
-            y = std::stoi(text.substr(0, 4));
-            m = std::stoi(text.substr(5, 2));
-            d = std::stoi(text.substr(8, 2));
-        } catch (...) { return false; }
-    }
-    else
-    {
-        // US: M/D/YYYY or M/D/YY (one or two digits each component, '/' delimiter)
-        size_t slash1 = text.find(L'/');
-        if (slash1 == std::wstring::npos) return false;
-        size_t slash2 = text.find(L'/', slash1 + 1);
-        if (slash2 == std::wstring::npos) return false;
-        if (text.find(L'/', slash2 + 1) != std::wstring::npos) return false;
-        try {
-            m = std::stoi(text.substr(0, slash1));
-            d = std::stoi(text.substr(slash1 + 1, slash2 - slash1 - 1));
-            y = std::stoi(text.substr(slash2 + 1));
-        } catch (...) { return false; }
-        if (y < 100) y += (y < 30 ? 2000 : 1900);   // 2-digit year heuristic
-    }
-
-    if (y < 1900 || y > 9999 || m < 1 || m > 12 || d < 1 || d > 31) return false;
-    static const int dim[] = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
-    int maxD = dim[m - 1];
-    bool leap = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
-    if (m == 2 && leap) maxD = 29;
-    if (d > maxD) return false;
-
-    serialOut = DateToSerial(y, m, d);
-    return true;
-}
-
-// Attempt to parse `text` as a number. Accepts optional leading sign, an
-// optional decimal point, and optional exponent. Whole string must be
-// consumed.
-static bool TryParseNumber(const std::wstring& text, double& valueOut)
-{
-    if (text.empty()) return false;
-    try {
-        size_t consumed = 0;
-        double v = std::stod(text, &consumed);
-        if (consumed != text.size()) return false;
-        valueOut = v;
-        return true;
-    } catch (...) { return false; }
-}
-
-static bool IEquals(const std::wstring& a, const wchar_t* b)
-{
-    size_t i = 0;
-    while (b[i] != 0 && i < a.size())
-    {
-        if (towlower(a[i]) != towlower(b[i])) return false;
-        ++i;
-    }
-    return i == a.size() && b[i] == 0;
-}
-
-// Classify a cell's text into one of the non-formula CellTypes and produce a
-// canonical scalar value when applicable. CT_Formula is set by SetCellText
-// when the text starts with '=' — this helper only handles literal cells.
-static CellType InferType(const std::wstring& text, double& valueOut)
-{
-    valueOut = 0.0;
-    if (text.empty()) return CT_Text;
-
-    double n = 0.0;
-    if (TryParseDate(text, n)) { valueOut = n; return CT_Date; }
-    if (IEquals(text, L"TRUE"))  { valueOut = 1.0; return CT_Boolean; }
-    if (IEquals(text, L"FALSE")) { valueOut = 0.0; return CT_Boolean; }
-    if (TryParseNumber(text, n)) { valueOut = n; return CT_Number; }
-    return CT_Text;
-}
+// Cell-type inference helpers (DateToSerial, TryParseDate, TryParseNumber,
+// IEquals, InferType) are defined inline in grid32_internal.h under the
+// Grid32Detail namespace so the test project can call them without
+// pulling in this entire TU. Callers in this file go through Grid32Detail::.
 
 CGrid32Mgr::CGrid32Mgr() : pRowInfoArray(nullptr), pColInfoArray(nullptr),
 m_hWndGrid(NULL), nColHeaderHeight(40), nRowHeaderWidth(70), m_editWndProc(nullptr),
@@ -1327,14 +1232,14 @@ void CGrid32Mgr::SetCellText(UINT nRow, UINT nCol, LPCWSTR newText)
         // Cache the numeric form when the formula result parses as a number,
         // so type-aware sort/compare doesn't have to stod the display text.
         double n = 0.0;
-        if (TryParseNumber(pCell->m_wsText, n)) pCell->m_dValue = n;
+        if (Grid32Detail::TryParseNumber(pCell->m_wsText, n)) pCell->m_dValue = n;
         else pCell->m_dValue = 0.0;
     } else {
         pCell->m_bFormula = false;
         pCell->m_wsFormula.clear();
         pCell->m_wsText = newText ? newText : L"";
         double v = 0.0;
-        pCell->m_eType = InferType(pCell->m_wsText, v);
+        pCell->m_eType = Grid32Detail::InferType(pCell->m_wsText, v);
         pCell->m_dValue = v;
     }
     op.newState = *pCell;
@@ -4235,12 +4140,12 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
             {
                 cell->m_eType = CT_Formula;
                 double n = 0.0;
-                if (TryParseNumber(cell->m_wsText, n)) cell->m_dValue = n;
+                if (Grid32Detail::TryParseNumber(cell->m_wsText, n)) cell->m_dValue = n;
             }
             else
             {
                 double v = 0.0;
-                cell->m_eType = InferType(cell->m_wsText, v);
+                cell->m_eType = Grid32Detail::InferType(cell->m_wsText, v);
                 cell->m_dValue = v;
             }
         }
