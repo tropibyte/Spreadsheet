@@ -14,6 +14,7 @@
 #include <iostream>
 #include <functional>
 #include <cmath>
+#include <climits>
 
 // Pull in the helpers under test. The header includes Grid32Mgr.h which
 // pulls in <map>, <vector>, <stack> — fine for a test exe.
@@ -205,6 +206,124 @@ TEST(InferType_NotDateButLooksLikeOne)
     // 2026-13-01 fails month check -> falls through to Number? "2026-13-01"
     // isn't a valid number either, so should be Text.
     ASSERT_EQ((int)InferType(L"2026-13-01", v), (int)CT_Text);
+}
+
+// ---- FormatWithThousands ---------------------------------------------------
+TEST(FormatWithThousands_Basic)
+{
+    ASSERT_TRUE(FormatWithThousands(0) == L"0");
+    ASSERT_TRUE(FormatWithThousands(1) == L"1");
+    ASSERT_TRUE(FormatWithThousands(999) == L"999");
+    ASSERT_TRUE(FormatWithThousands(1000) == L"1,000");
+    ASSERT_TRUE(FormatWithThousands(1234567) == L"1,234,567");
+    ASSERT_TRUE(FormatWithThousands(-1234) == L"-1,234");
+    // LLONG_MIN edge: -(LLONG_MIN) overflows; our impl guards via unsigned math.
+    ASSERT_TRUE(FormatWithThousands(LLONG_MIN).front() == L'-');
+}
+
+// ---- FormatFixed -----------------------------------------------------------
+TEST(FormatFixed_NoDecimals)
+{
+    ASSERT_TRUE(FormatFixed(42.0, 0, false) == L"42");
+    ASSERT_TRUE(FormatFixed(42.7, 0, false) == L"43");      // half-away-from-zero
+    ASSERT_TRUE(FormatFixed(-42.5, 0, false) == L"-43");
+    ASSERT_TRUE(FormatFixed(0.0, 0, false) == L"0");
+}
+
+TEST(FormatFixed_TwoDecimals)
+{
+    ASSERT_TRUE(FormatFixed(3.14, 2, false) == L"3.14");
+    ASSERT_TRUE(FormatFixed(3.1, 2, false) == L"3.10");     // trailing zero kept
+    ASSERT_TRUE(FormatFixed(3.0, 2, false) == L"3.00");
+    ASSERT_TRUE(FormatFixed(-3.14, 2, false) == L"-3.14");
+}
+
+TEST(FormatFixed_Thousands)
+{
+    ASSERT_TRUE(FormatFixed(1234.5, 2, true) == L"1,234.50");
+    ASSERT_TRUE(FormatFixed(1234567.0, 0, true) == L"1,234,567");
+}
+
+// ---- FormatCellValue -------------------------------------------------------
+TEST(FormatCellValue_TextAlwaysRaw)
+{
+    // Text cells ignore format — raw text wins regardless.
+    ASSERT_TRUE(FormatCellValue(CT_Text, 42.0, L"hello", FMT_CURRENCY) == L"hello");
+    ASSERT_TRUE(FormatCellValue(CT_Text, 0.0, L"world", FMT_NUMBER) == L"world");
+}
+
+TEST(FormatCellValue_GeneralReturnsRaw)
+{
+    // FMT_GENERAL preserves the user's typed input even for typed cells.
+    ASSERT_TRUE(FormatCellValue(CT_Number, 3.14, L"3.14", FMT_GENERAL) == L"3.14");
+    ASSERT_TRUE(FormatCellValue(CT_Date,   46157.0, L"2026-05-15", FMT_GENERAL) == L"2026-05-15");
+}
+
+TEST(FormatCellValue_Number)
+{
+    ASSERT_TRUE(FormatCellValue(CT_Number, 3.14, L"3.14", FMT_NUMBER) == L"3.14");
+    ASSERT_TRUE(FormatCellValue(CT_Number, 1234.5, L"1234.5", FMT_THOUSANDS) == L"1,234.50");
+}
+
+TEST(FormatCellValue_Integer)
+{
+    ASSERT_TRUE(FormatCellValue(CT_Number, 3.14, L"3.14", FMT_INTEGER) == L"3");
+    ASSERT_TRUE(FormatCellValue(CT_Number, 3.7, L"3.7", FMT_INTEGER) == L"4");
+}
+
+TEST(FormatCellValue_Currency)
+{
+    ASSERT_TRUE(FormatCellValue(CT_Number, 1234.5, L"", FMT_CURRENCY) == L"$1,234.50");
+    ASSERT_TRUE(FormatCellValue(CT_Number, -42.0, L"", FMT_CURRENCY) == L"-$42.00");
+    ASSERT_TRUE(FormatCellValue(CT_Number, 0.0, L"", FMT_CURRENCY) == L"$0.00");
+}
+
+TEST(FormatCellValue_Percent)
+{
+    // 0.5 -> "50.00%". The format multiplies by 100.
+    ASSERT_TRUE(FormatCellValue(CT_Number, 0.5, L"", FMT_PERCENT) == L"50.00%");
+    ASSERT_TRUE(FormatCellValue(CT_Number, 1.0, L"", FMT_PERCENT) == L"100.00%");
+}
+
+TEST(FormatCellValue_DateISO)
+{
+    double s = DateToSerial(2026, 5, 15);
+    ASSERT_TRUE(FormatCellValue(CT_Date, s, L"", FMT_DATE_ISO) == L"2026-05-15");
+}
+
+TEST(FormatCellValue_DateUS)
+{
+    double s = DateToSerial(2026, 5, 15);
+    ASSERT_TRUE(FormatCellValue(CT_Date, s, L"", FMT_DATE_US) == L"5/15/2026");
+}
+
+TEST(FormatCellValue_Time)
+{
+    // 0.5 of a day = 12:00:00
+    ASSERT_TRUE(FormatCellValue(CT_Number, 0.5, L"", FMT_TIME) == L"12:00:00");
+    // 0.25 = 06:00:00
+    ASSERT_TRUE(FormatCellValue(CT_Number, 0.25, L"", FMT_TIME) == L"06:00:00");
+}
+
+// ---- FormatEditValue -------------------------------------------------------
+TEST(FormatEditValue_BooleanRoundTrip)
+{
+    ASSERT_TRUE(FormatEditValue(CT_Boolean, 1.0, L"TRUE") == L"TRUE");
+    ASSERT_TRUE(FormatEditValue(CT_Boolean, 0.0, L"FALSE") == L"FALSE");
+}
+
+TEST(FormatEditValue_DateISO)
+{
+    double s = DateToSerial(2026, 5, 15);
+    ASSERT_TRUE(FormatEditValue(CT_Date, s, L"") == L"2026-05-15");
+}
+
+TEST(FormatEditValue_NumberNoTrailingZeros)
+{
+    // 42 → "42" (decimal point and trailing zeros stripped from to_wstring's %.6f output).
+    ASSERT_TRUE(FormatEditValue(CT_Number, 42.0, L"") == L"42");
+    ASSERT_TRUE(FormatEditValue(CT_Number, 0.0, L"") == L"0");
+    ASSERT_TRUE(FormatEditValue(CT_Number, 3.14, L"") == L"3.14");
 }
 
 // ---- SerialToYMD round-trip --------------------------------------------

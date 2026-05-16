@@ -1157,7 +1157,49 @@ void CGrid32Mgr::SetRangeFormat(const GRIDSELECTION& selRange, const FONTINFO& f
     SetLastError(0);
 }
 
+void CGrid32Mgr::SetCellNumberFormat(UINT nRow, UINT nCol, UINT format)
+{
+    PGRIDCELL pCell = GetCellOrCreate(nRow, nCol, true);
+    if (!pCell)
+    {
+        SetLastError(GRID_ERROR_OUT_OF_MEMORY);
+        return;
+    }
+    GridEditOperation op;
+    op.type = EditOperationType::SetFormat;
+    op.row = nRow;
+    op.col = nCol;
+    op.oldState = *pCell;
+    pCell->m_nFormat = format;
+    // Re-render display text from the typed value. Text cells stay literal.
+    if (pCell->m_eType != CT_Text && !pCell->m_bFormula)
+    {
+        pCell->m_wsText = Grid32Detail::FormatCellValue(
+            pCell->m_eType, pCell->m_dValue, pCell->m_wsText, format);
+    }
+    op.newState = *pCell;
+    RecordUndoOperation(op);
+    Invalidate();
+    SetLastError(0);
+}
 
+void CGrid32Mgr::SetSelectionNumberFormat(UINT format)
+{
+    GRIDSELECTION sel = m_selectionRect;
+    NormalizeSelectionRect(sel);
+    bool record = m_bUndoRecordEnabled;
+    m_bUndoRecordEnabled = false;
+    for (UINT r = sel.start.nRow; r <= sel.end.nRow && r < gcs.nHeight; ++r)
+    {
+        for (UINT c = sel.start.nCol; c <= sel.end.nCol && c < gcs.nWidth; ++c)
+        {
+            SetCellNumberFormat(r, c, format);
+        }
+    }
+    m_bUndoRecordEnabled = record;
+    Invalidate();
+    SetLastError(0);
+}
 
 
 void CGrid32Mgr::GetCellText(UINT nRow, UINT nCol, LPWSTR pText, UINT nLen)
@@ -1237,10 +1279,15 @@ void CGrid32Mgr::SetCellText(UINT nRow, UINT nCol, LPCWSTR newText)
     } else {
         pCell->m_bFormula = false;
         pCell->m_wsFormula.clear();
-        pCell->m_wsText = newText ? newText : L"";
+        std::wstring raw = newText ? newText : L"";
         double v = 0.0;
-        pCell->m_eType = Grid32Detail::InferType(pCell->m_wsText, v);
+        pCell->m_eType = Grid32Detail::InferType(raw, v);
         pCell->m_dValue = v;
+        // Apply per-cell number format. For FMT_GENERAL or text cells the
+        // user's raw input is the display text; otherwise format the
+        // numeric value (currency/percent/date/time/etc.).
+        pCell->m_wsText = Grid32Detail::FormatCellValue(pCell->m_eType,
+            pCell->m_dValue, raw, pCell->m_nFormat);
     }
     op.newState = *pCell;
 
@@ -1846,6 +1893,15 @@ bool CGrid32Mgr::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
                 std::wstring display = L"=" + pCell->m_wsFormula;
                 SetWindowText(m_hWndEdit, display.c_str());
                 PostMessage(m_hWndEdit, EM_SETSEL, display.length(), display.length());
+            }
+            else if (pCell && pCell->m_nFormat != FMT_GENERAL && pCell->m_eType != CT_Text)
+            {
+                // Re-edit the underlying value, not the formatted display.
+                // E.g. a cell shown as "$1,234.50" goes back to "1234.5".
+                std::wstring raw = Grid32Detail::FormatEditValue(
+                    pCell->m_eType, pCell->m_dValue, pCell->m_wsText);
+                SetWindowText(m_hWndEdit, raw.c_str());
+                PostMessage(m_hWndEdit, EM_SETSEL, (WPARAM)raw.length(), (LPARAM)raw.length());
             }
             else if (nLen)
             {
@@ -3643,6 +3699,7 @@ void CGrid32Mgr::CopyGridCell(GRIDCELL& dest, GRIDCELL& src)
     dest.m_bFormula = src.m_bFormula;
     dest.m_eType = src.m_eType;
     dest.m_dValue = src.m_dValue;
+    dest.m_nFormat = src.m_nFormat;
     dest.mergeRange = src.mergeRange;
 }
 
@@ -3741,7 +3798,8 @@ void CGrid32Mgr::OnStreamOut(LPGCSTREAM pStream)
             {
                 PGRIDCELL cell = GetCellOrDefault((UINT)r, (UINT)c);
                 // Skip default cells with no data to keep the file compact.
-                if (cell->m_wsText.empty() && !cell->m_bFormula && cell->m_eType == CT_Text)
+                if (cell->m_wsText.empty() && !cell->m_bFormula
+                    && cell->m_eType == CT_Text && cell->m_nFormat == FMT_GENERAL)
                     continue;
                 ss << r << L"," << c;
                 if (cell->m_eType != CT_Text)
@@ -3760,6 +3818,8 @@ void CGrid32Mgr::OnStreamOut(LPGCSTREAM pStream)
                     std::wstring vstr = std::to_wstring(cell->m_dValue);
                     ss << L";V:" << vstr.size() << L":" << vstr;
                 }
+                if (cell->m_nFormat != FMT_GENERAL)
+                    AppendTLV(ss, L"FM", std::to_wstring(cell->m_nFormat));
                 AppendTLV(ss, L"T", cell->m_wsText);
                 if (cell->m_bFormula)
                     AppendTLV(ss, L"F", cell->m_wsFormula);
@@ -4108,6 +4168,8 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
                 cell->penStyle = std::stoi(value);
             else if (tag == L"J")
                 cell->justification = (UINT)std::stoul(value);
+            else if (tag == L"FM")
+                cell->m_nFormat = (UINT)std::stoul(value);
             else if (tag == L"NM")
                 cell->m_wsName = value;
             else if (tag == L"MR")
@@ -4148,6 +4210,13 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
                 cell->m_eType = Grid32Detail::InferType(cell->m_wsText, v);
                 cell->m_dValue = v;
             }
+        }
+        // Regenerate display text from the format code so the file stays
+        // canonical even if the format renderer changes between revisions.
+        if (cell->m_nFormat != FMT_GENERAL && cell->m_eType != CT_Text && !cell->m_bFormula)
+        {
+            cell->m_wsText = Grid32Detail::FormatCellValue(
+                cell->m_eType, cell->m_dValue, cell->m_wsText, cell->m_nFormat);
         }
     }
 

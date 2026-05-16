@@ -113,7 +113,8 @@ struct tagGCSTREAM;
 #define GM_STREAMIN					(WM_USER + 24)
 #define GM_STREAMOUT                            (WM_USER + 25)
 #define GM_REPLACETEXT                          (WM_USER + 26)
-// GM_SETCHARFORMAT wParam flags
+#define GM_SETFORMAT                            (WM_USER + 27)
+// GM_SETCHARFORMAT / GM_SETFORMAT wParam flags
 #define SCF_CURRENTCELL 0x0000
 #define SCF_SELECTION 0x0001
 #define SCF_RANGE 0x0002
@@ -159,6 +160,19 @@ typedef struct __FONTINFO {
 	{}
 }FONTINFO, *PFONTINFO;
 
+// Cell number-format codes. Determines how a typed value renders to display
+// text. CT_Text cells ignore format. Set on cell_base so it applies to
+// individual cells, columns, and rows.
+#define FMT_GENERAL    0   // raw text (the user-entered representation)
+#define FMT_NUMBER     1   // 0.00
+#define FMT_INTEGER    2   // 0
+#define FMT_CURRENCY   3   // $#,##0.00
+#define FMT_PERCENT    4   // 0.00%
+#define FMT_DATE_ISO   5   // yyyy-mm-dd
+#define FMT_DATE_US    6   // m/d/yyyy
+#define FMT_TIME       7   // hh:mm:ss
+#define FMT_THOUSANDS  8   // #,##0.00 (no currency symbol)
+
 struct cell_base
 {
 	FONTINFO fontInfo;
@@ -166,8 +180,9 @@ struct cell_base
 	UINT m_nBorderWidth;
 	int penStyle;
 	UINT justification;
+	UINT m_nFormat;             // FMT_* constant — display formatting
 	std::wstring m_wsName;
-	cell_base() : clrBackground(0), m_clrBorderColor(0), m_nBorderWidth(0), penStyle(0), justification(0)
+	cell_base() : clrBackground(0), m_clrBorderColor(0), m_nBorderWidth(0), penStyle(0), justification(0), m_nFormat(FMT_GENERAL)
 	{}
 };
 

@@ -108,5 +108,128 @@ inline CellType InferType(const std::wstring& text, double& valueOut)
     return CT_Text;
 }
 
+// ---- Number formatting --------------------------------------------------
+// Render a value with thousands separators. helper: stringify integer with
+// commas every three digits.
+inline std::wstring FormatWithThousands(long long whole)
+{
+    std::wstring s;
+    bool neg = whole < 0;
+    unsigned long long n = neg ? (unsigned long long)(-(whole + 1)) + 1ULL : (unsigned long long)whole;
+    if (n == 0) s = L"0";
+    int digits = 0;
+    while (n > 0)
+    {
+        if (digits > 0 && digits % 3 == 0) s.insert(s.begin(), L',');
+        s.insert(s.begin(), (wchar_t)(L'0' + (n % 10)));
+        n /= 10;
+        ++digits;
+    }
+    if (neg) s.insert(s.begin(), L'-');
+    return s;
+}
+
+// Render `value` with `decimals` fractional digits (rounded half-away-from-zero)
+// and optional thousands separators. Returns the formatted body without sign;
+// sign is prepended by callers as needed.
+inline std::wstring FormatFixed(double value, int decimals, bool useThousands)
+{
+    bool neg = value < 0;
+    double abs = neg ? -value : value;
+    double mult = 1.0;
+    for (int i = 0; i < decimals; ++i) mult *= 10.0;
+    long long scaled = (long long)(abs * mult + 0.5);
+    long long whole = scaled / (long long)mult;
+    long long frac = scaled - whole * (long long)mult;
+
+    std::wstring out = useThousands ? FormatWithThousands(whole) : std::to_wstring(whole);
+    if (decimals > 0)
+    {
+        out.push_back(L'.');
+        std::wstring fracStr = std::to_wstring(frac);
+        while ((int)fracStr.size() < decimals) fracStr.insert(fracStr.begin(), L'0');
+        out += fracStr;
+    }
+    if (neg) out.insert(out.begin(), L'-');
+    return out;
+}
+
+// Format a typed cell value for display. CT_Text cells always return rawText.
+// For numeric / date / boolean / formula cells, the format code drives the
+// representation and m_dValue carries the canonical scalar.
+inline std::wstring FormatCellValue(CellType type, double value,
+                                    const std::wstring& rawText, UINT format)
+{
+    if (type == CT_Text || format == FMT_GENERAL) return rawText;
+
+    auto formatDate = [](double serial, bool iso) -> std::wstring {
+        int y = 0, m = 0, d = 0;
+        SerialToYMD(serial, y, m, d);
+        wchar_t buf[16];
+        if (iso) swprintf_s(buf, 16, L"%04d-%02d-%02d", y, m, d);
+        else     swprintf_s(buf, 16, L"%d/%d/%04d", m, d, y);
+        return buf;
+    };
+
+    switch (format)
+    {
+    case FMT_NUMBER:    return FormatFixed(value, 2, false);
+    case FMT_INTEGER:   return FormatFixed(value, 0, false);
+    case FMT_THOUSANDS: return FormatFixed(value, 2, true);
+    case FMT_CURRENCY:  {
+        std::wstring body = FormatFixed(value < 0 ? -value : value, 2, true);
+        return (value < 0) ? (L"-$" + body) : (L"$" + body);
+    }
+    case FMT_PERCENT:   return FormatFixed(value * 100.0, 2, false) + L"%";
+    case FMT_DATE_ISO:  return formatDate(value, true);
+    case FMT_DATE_US:   return formatDate(value, false);
+    case FMT_TIME: {
+        double frac = value - std::floor(value);
+        if (frac < 0) frac += 1.0;
+        int totalSec = (int)(frac * 86400.0 + 0.5);
+        int hh = (totalSec / 3600) % 24;
+        int mm = (totalSec / 60) % 60;
+        int ss = totalSec % 60;
+        wchar_t buf[16];
+        swprintf_s(buf, 16, L"%02d:%02d:%02d", hh, mm, ss);
+        return buf;
+    }
+    default: return rawText;
+    }
+}
+
+// Render the value the user should see when re-entering edit mode on a
+// formatted typed cell. Numbers come back as their natural form (no trailing
+// zeros, no thousands separators, no currency symbol), dates as ISO, booleans
+// as TRUE/FALSE. Text cells return their literal text.
+inline std::wstring FormatEditValue(CellType type, double value, const std::wstring& rawText)
+{
+    switch (type)
+    {
+    case CT_Boolean:
+        return value != 0.0 ? L"TRUE" : L"FALSE";
+    case CT_Date: {
+        int y = 0, m = 0, d = 0;
+        SerialToYMD(value, y, m, d);
+        wchar_t buf[16];
+        swprintf_s(buf, 16, L"%04d-%02d-%02d", y, m, d);
+        return buf;
+    }
+    case CT_Number: {
+        // Trim a trailing ".000000" / ".5000" tail from to_wstring's fixed
+        // 6-digit output. Integers come back without a dot.
+        std::wstring s = std::to_wstring(value);
+        if (s.find(L'.') != std::wstring::npos)
+        {
+            while (!s.empty() && s.back() == L'0') s.pop_back();
+            if (!s.empty() && s.back() == L'.') s.pop_back();
+        }
+        return s;
+    }
+    default:
+        return rawText;
+    }
+}
+
 } // namespace Grid32Detail
 

@@ -108,6 +108,9 @@ public:
         void SetCellFormat(UINT nRow, UINT nCol, const FONTINFO& fontInfo);
         void SetSelectionFormat(const FONTINFO& fontInfo);
         void SetRangeFormat(const GRIDSELECTION& sel, const FONTINFO& fontInfo);
+        // Set the per-cell number format (FMT_*). Re-renders display text.
+        void SetCellNumberFormat(UINT nRow, UINT nCol, UINT format);
+        void SetSelectionNumberFormat(UINT format);
 	void GetCellText(UINT nRow, UINT nCol, LPWSTR pText, UINT nLen);
 	void SetCell(UINT nRow, UINT nCol, const GRIDCELL& gc);
 	void SetCurrentCellText(LPCWSTR newText);

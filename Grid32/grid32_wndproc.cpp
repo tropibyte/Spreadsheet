@@ -323,6 +323,18 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
                 return pMgr->OnReplaceText(*(LPGCREPLACESTRUCT)lParam);
             break;
 
+        case GM_SETFORMAT:
+            // wParam: SCF_CURRENTCELL / SCF_SELECTION / SCF_RANGE
+            // lParam: UINT format code (FMT_*) for current/selection;
+            //         GCCELLFORMAT* for range (range form unimplemented).
+            if (wParam == SCF_SELECTION)
+                pMgr->SetSelectionNumberFormat((UINT)lParam);
+            else
+                pMgr->SetCellNumberFormat(pMgr->m_currentCell.nRow,
+                                          pMgr->m_currentCell.nCol,
+                                          (UINT)lParam);
+            break;
+
         case GM_ENUMCELLS:
             // Handle GM_ENUMCELLS
             pMgr->OnEnumCells((GRIDCELL*)lParam, (UINT)wParam);
