@@ -28,6 +28,9 @@
 
 IMPLEMENT_DYNCREATE(CMainFrame, CFrameWndEx)
 
+// Modeless CFindReplaceDialog posts this registered message on each action.
+static const UINT WM_FINDREPLACE_REG = ::RegisterWindowMessage(FINDMSGSTRING);
+
 BEGIN_MESSAGE_MAP(CMainFrame, CFrameWndEx)
 	ON_WM_CREATE()
 	ON_COMMAND_RANGE(ID_VIEW_APPLOOK_WIN_2000, ID_VIEW_APPLOOK_WINDOWS_7, &CMainFrame::OnApplicationLook)
@@ -62,6 +65,17 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWndEx)
         ON_UPDATE_COMMAND_UI(ID_FONT_ITALIC,        &CMainFrame::OnUpdateFontItalic)
         ON_UPDATE_COMMAND_UI(ID_FONT_UNDERLINE,     &CMainFrame::OnUpdateFontUnderline)
         ON_UPDATE_COMMAND_UI(ID_FONT_STRIKETHROUGH, &CMainFrame::OnUpdateFontStrikethrough)
+        ON_COMMAND(ID_EDIT_FIND,       &CMainFrame::OnEditFind)
+        ON_COMMAND(ID_EDIT_REPLACE,    &CMainFrame::OnEditReplace)
+        ON_COMMAND(ID_EDIT_SELECT_ALL, &CMainFrame::OnEditSelectAll)
+        ON_COMMAND(ID_EDIT_CLEAR,      &CMainFrame::OnEditClear)
+        ON_REGISTERED_MESSAGE(WM_FINDREPLACE_REG, &CMainFrame::OnFindReplaceMsg)
+        ON_COMMAND(ID_CELL_FONT,       &CMainFrame::OnCellFont)
+        ON_COMMAND(ID_DLG_ALIGNMENT,   &CMainFrame::OnDlgAlignment)
+        ON_COMMAND(ID_DLG_NUMBER,      &CMainFrame::OnDlgNumber)
+        ON_COMMAND(ID_DLG_INSERT,      &CMainFrame::OnDlgInsert)
+        ON_COMMAND_RANGE(ID_SORT_ASC,  ID_SORT_DESC, &CMainFrame::OnSortCmd)
+        ON_COMMAND_RANGE(ID_FILL_DOWN, ID_FILL_LEFT, &CMainFrame::OnFillCmd)
 END_MESSAGE_MAP()
 
 // CMainFrame construction/destruction
@@ -89,6 +103,9 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	SetupFontPanel();
 	SetupAlignmentPanel();
 	SetupNumberPanel();
+	SetupInsertPanel();
+	SetupClipboardPanel();
+	SetupSortFillPanel();
 
 	if (!m_wndStatusBar.Create(this))
 	{
@@ -580,6 +597,15 @@ static CMFCRibbonPanel* FindHomePanel(CMFCRibbonBar& bar, LPCTSTR pszName)
         return nullptr;
 }
 
+// Helper: ribbon button with tooltip + description in one call.
+static CMFCRibbonButton* MakeBtn(UINT id, LPCTSTR text, int idx, LPCTSTR tip, LPCTSTR desc)
+{
+        auto* b = new CMFCRibbonButton(id, text, idx);
+        b->SetToolTipText(tip);
+        b->SetDescription(desc);
+        return b;
+}
+
 void CMainFrame::SetupFontPanel()
 {
         CMFCRibbonPanel* pFontPanel = FindHomePanel(m_wndRibbonBar, _T("Font"));
@@ -588,11 +614,12 @@ void CMainFrame::SetupFontPanel()
 
         pFontPanel->RemoveAll();
 
-        // Top row: Font name, Font size, A+, A-
         CMFCRibbonButtonsGroup* pTopRow = new CMFCRibbonButtonsGroup();
 
         CMFCRibbonFontComboBox* pFontComboBox = new CMFCRibbonFontComboBox(ID_FONT_NAME,
                 DEVICE_FONTTYPE | RASTER_FONTTYPE | TRUETYPE_FONTTYPE, DEFAULT_CHARSET, DEFAULT_PITCH, 120);
+        pFontComboBox->SetToolTipText(_T("Font"));
+        pFontComboBox->SetDescription(_T("Pick a font for the selected cells."));
         pTopRow->AddButton(pFontComboBox);
 
         CMFCRibbonComboBox* pFontSizeComboBox = new CMFCRibbonComboBox(ID_FONT_SIZE, TRUE, 40);
@@ -604,22 +631,31 @@ void CMainFrame::SetupFontPanel()
                 pFontSizeComboBox->AddItem(strSize);
         }
         pFontSizeComboBox->SelectItem(4);
+        pFontSizeComboBox->SetToolTipText(_T("Font size"));
+        pFontSizeComboBox->SetDescription(_T("Change the size of the selected cells' text."));
         pTopRow->AddButton(pFontSizeComboBox);
 
-        pTopRow->AddButton(new CMFCRibbonButton(ID_FONT_GROW,   _T("Grow font"),   FluentIdx::FontInc));
-        pTopRow->AddButton(new CMFCRibbonButton(ID_FONT_SHRINK, _T("Shrink font"), FluentIdx::FontDec));
+        pTopRow->AddButton(MakeBtn(ID_FONT_GROW,   _T("Grow font"),   FluentIdx::FontInc,
+                _T("Grow font"),   _T("Increase the font size of the selected cells.")));
+        pTopRow->AddButton(MakeBtn(ID_FONT_SHRINK, _T("Shrink font"), FluentIdx::FontDec,
+                _T("Shrink font"), _T("Decrease the font size of the selected cells.")));
 
         pFontPanel->Add(pTopRow);
 
-        // Bottom row: B I U S x2 x^ + Highlight + Color
         CMFCRibbonButtonsGroup* pBottomRow = new CMFCRibbonButtonsGroup();
 
-        pBottomRow->AddButton(new CMFCRibbonButton(ID_FONT_BOLD,          _T("Bold"),          FluentIdx::Bold));
-        pBottomRow->AddButton(new CMFCRibbonButton(ID_FONT_ITALIC,        _T("Italic"),        FluentIdx::Italic));
-        pBottomRow->AddButton(new CMFCRibbonButton(ID_FONT_UNDERLINE,     _T("Underline"),     FluentIdx::Underline));
-        pBottomRow->AddButton(new CMFCRibbonButton(ID_FONT_STRIKETHROUGH, _T("Strikethrough"), FluentIdx::Strike));
-        pBottomRow->AddButton(new CMFCRibbonButton(ID_FONT_SUBSCRIPT,     _T("Subscript"),     FluentIdx::Subscript));
-        pBottomRow->AddButton(new CMFCRibbonButton(ID_FONT_SUPERSCRIPT,   _T("Superscript"),   FluentIdx::Superscript));
+        pBottomRow->AddButton(MakeBtn(ID_FONT_BOLD,          _T("Bold"),          FluentIdx::Bold,
+                _T("Bold (Ctrl+B)"),         _T("Make the selected text bold.")));
+        pBottomRow->AddButton(MakeBtn(ID_FONT_ITALIC,        _T("Italic"),        FluentIdx::Italic,
+                _T("Italic"),                _T("Italicize the selected text.")));
+        pBottomRow->AddButton(MakeBtn(ID_FONT_UNDERLINE,     _T("Underline"),     FluentIdx::Underline,
+                _T("Underline"),             _T("Underline the selected text.")));
+        pBottomRow->AddButton(MakeBtn(ID_FONT_STRIKETHROUGH, _T("Strikethrough"), FluentIdx::Strike,
+                _T("Strikethrough"),         _T("Draw a line through the selected text.")));
+        pBottomRow->AddButton(MakeBtn(ID_FONT_SUBSCRIPT,     _T("Subscript"),     FluentIdx::Subscript,
+                _T("Subscript"),             _T("Type small letters below the line of text.")));
+        pBottomRow->AddButton(MakeBtn(ID_FONT_SUPERSCRIPT,   _T("Superscript"),   FluentIdx::Superscript,
+                _T("Superscript"),           _T("Type small letters above the line of text.")));
 
         CMFCRibbonColorButton* pHighlight = new CMFCRibbonColorButton(ID_FONT_CELL_BKGND, _T("Highlight"), TRUE, FluentIdx::Highlight);
         pHighlight->EnableAutomaticButton(_T("No Color"), (COLORREF)-1);
@@ -627,6 +663,8 @@ void CMainFrame::SetupFontPanel()
         pHighlight->SetColumns(10);
         pHighlight->SetColor(RGB(255, 255, 0));
         pHighlight->SetDefaultCommand(FALSE);
+        pHighlight->SetToolTipText(_T("Highlight color"));
+        pHighlight->SetDescription(_T("Make text look like it was marked with a highlighter."));
         pBottomRow->AddButton(pHighlight);
 
         CMFCRibbonColorButton* pFontColor = new CMFCRibbonColorButton(ID_FONT_COLOR, _T("Font color"), TRUE, FluentIdx::FontColor);
@@ -635,9 +673,12 @@ void CMainFrame::SetupFontPanel()
         pFontColor->SetColumns(10);
         pFontColor->SetColor(RGB(255, 0, 0));
         pFontColor->SetDefaultCommand(FALSE);
+        pFontColor->SetToolTipText(_T("Font color"));
+        pFontColor->SetDescription(_T("Change the color of the text."));
         pBottomRow->AddButton(pFontColor);
 
         pFontPanel->Add(pBottomRow);
+        pFontPanel->EnableLaunchButton(ID_CELL_FONT);
 }
 
 void CMainFrame::SetupAlignmentPanel()
@@ -648,21 +689,28 @@ void CMainFrame::SetupAlignmentPanel()
 
         pPanel->RemoveAll();
 
-        // Top row: horizontal alignment + wrap text
         CMFCRibbonButtonsGroup* pTopRow = new CMFCRibbonButtonsGroup();
-        pTopRow->AddButton(new CMFCRibbonButton(ID_ALIGN_LEFT,   _T("Align left"),   FluentIdx::AlignLeft));
-        pTopRow->AddButton(new CMFCRibbonButton(ID_ALIGN_CENTER, _T("Center"),       FluentIdx::AlignCenter));
-        pTopRow->AddButton(new CMFCRibbonButton(ID_ALIGN_RIGHT,  _T("Align right"),  FluentIdx::AlignRight));
-        pTopRow->AddButton(new CMFCRibbonButton(ID_ALIGN_WRAP,   _T("Wrap text"),    FluentIdx::TextWrap));
+        pTopRow->AddButton(MakeBtn(ID_ALIGN_LEFT,   _T("Align left"),   FluentIdx::AlignLeft,
+                _T("Align left"),   _T("Align text to the left edge of the cell.")));
+        pTopRow->AddButton(MakeBtn(ID_ALIGN_CENTER, _T("Center"),       FluentIdx::AlignCenter,
+                _T("Center"),       _T("Horizontally center text within the cell.")));
+        pTopRow->AddButton(MakeBtn(ID_ALIGN_RIGHT,  _T("Align right"),  FluentIdx::AlignRight,
+                _T("Align right"),  _T("Align text to the right edge of the cell.")));
+        pTopRow->AddButton(MakeBtn(ID_ALIGN_WRAP,   _T("Wrap text"),    FluentIdx::TextWrap,
+                _T("Wrap text"),    _T("Make text visible across multiple lines within a cell.")));
         pPanel->Add(pTopRow);
 
-        // Bottom row: vertical alignment + merge cells
         CMFCRibbonButtonsGroup* pBottomRow = new CMFCRibbonButtonsGroup();
-        pBottomRow->AddButton(new CMFCRibbonButton(ID_ALIGN_TOP,    _T("Align top"),    FluentIdx::AlignTop));
-        pBottomRow->AddButton(new CMFCRibbonButton(ID_ALIGN_MIDDLE, _T("Align middle"), FluentIdx::AlignMiddle));
-        pBottomRow->AddButton(new CMFCRibbonButton(ID_ALIGN_BOTTOM, _T("Align bottom"), FluentIdx::AlignBottom));
-        pBottomRow->AddButton(new CMFCRibbonButton(ID_ALIGN_MERGE,  _T("Merge cells"),  FluentIdx::Merge));
+        pBottomRow->AddButton(MakeBtn(ID_ALIGN_TOP,    _T("Align top"),    FluentIdx::AlignTop,
+                _T("Align top"),    _T("Align text to the top of the cell.")));
+        pBottomRow->AddButton(MakeBtn(ID_ALIGN_MIDDLE, _T("Align middle"), FluentIdx::AlignMiddle,
+                _T("Align middle"), _T("Vertically center text within the cell.")));
+        pBottomRow->AddButton(MakeBtn(ID_ALIGN_BOTTOM, _T("Align bottom"), FluentIdx::AlignBottom,
+                _T("Align bottom"), _T("Align text to the bottom of the cell.")));
+        pBottomRow->AddButton(MakeBtn(ID_ALIGN_MERGE,  _T("Merge cells"),  FluentIdx::Merge,
+                _T("Merge cells"),  _T("Combine the selected cells into one larger cell.")));
         pPanel->Add(pBottomRow);
+        pPanel->EnableLaunchButton(ID_DLG_ALIGNMENT);
 }
 
 void CMainFrame::OnFontSubscript()
@@ -720,16 +768,75 @@ void CMainFrame::SetupNumberPanel()
 
         pPanel->RemoveAll();
 
-        // Two rows. Top: General + Number. Bottom: Currency + Percent + Date.
         CMFCRibbonButtonsGroup* pTopRow = new CMFCRibbonButtonsGroup();
-        pTopRow->AddButton(new CMFCRibbonButton(ID_FMT_GENERAL, _T("General"), FluentIdx::FmtGeneral));
-        pTopRow->AddButton(new CMFCRibbonButton(ID_FMT_NUMBER,  _T("Number"),  FluentIdx::FmtNumber));
+        pTopRow->AddButton(MakeBtn(ID_FMT_GENERAL, _T("General"), FluentIdx::FmtGeneral,
+                _T("General"), _T("No specific number format applied to the cell.")));
+        pTopRow->AddButton(MakeBtn(ID_FMT_NUMBER,  _T("Number"),  FluentIdx::FmtNumber,
+                _T("Number"),  _T("Display values as numbers with thousands separators and decimals.")));
         pPanel->Add(pTopRow);
 
         CMFCRibbonButtonsGroup* pBottomRow = new CMFCRibbonButtonsGroup();
-        pBottomRow->AddButton(new CMFCRibbonButton(ID_FMT_CURRENCY, _T("Currency"), FluentIdx::FmtCurrency));
-        pBottomRow->AddButton(new CMFCRibbonButton(ID_FMT_PERCENT,  _T("Percent"),  FluentIdx::FmtPercent));
-        pBottomRow->AddButton(new CMFCRibbonButton(ID_FMT_DATE,     _T("Date"),     FluentIdx::FmtDate));
+        pBottomRow->AddButton(MakeBtn(ID_FMT_CURRENCY, _T("Currency"), FluentIdx::FmtCurrency,
+                _T("Currency"), _T("Display values as monetary amounts with a currency symbol.")));
+        pBottomRow->AddButton(MakeBtn(ID_FMT_PERCENT,  _T("Percent"),  FluentIdx::FmtPercent,
+                _T("Percent"),  _T("Display values as percentages, e.g. 0.25 as 25%.")));
+        pBottomRow->AddButton(MakeBtn(ID_FMT_DATE,     _T("Date"),     FluentIdx::FmtDate,
+                _T("Date"),     _T("Display values as dates in ISO format.")));
+        pPanel->Add(pBottomRow);
+        pPanel->EnableLaunchButton(ID_DLG_NUMBER);
+}
+
+void CMainFrame::SetupInsertPanel()
+{
+        CMFCRibbonPanel* pPanel = FindHomePanel(m_wndRibbonBar, _T("Insert"));
+        if (!pPanel) return;
+        pPanel->EnableLaunchButton(ID_DLG_INSERT);
+}
+
+void CMainFrame::SetupClipboardPanel()
+{
+        CMFCRibbonPanel* pPanel = FindHomePanel(m_wndRibbonBar, _T("Clipboard"));
+        if (!pPanel) return;
+        pPanel->Add(MakeBtn(ID_EDIT_CLEAR, _T("Clear"), FluentIdx::FontDec /* placeholder icon */,
+                _T("Clear"), _T("Delete the contents of the selected cells.")));
+}
+
+void CMainFrame::SetupSortFillPanel()
+{
+        CMFCRibbonCategory* pCategory = nullptr;
+        for (int i = 0; i < m_wndRibbonBar.GetCategoryCount(); ++i)
+        {
+                if (0 == _tcsicmp(m_wndRibbonBar.GetCategory(i)->GetName(), _T("Home")))
+                {
+                        pCategory = m_wndRibbonBar.GetCategory(i);
+                        break;
+                }
+        }
+        if (!pCategory) return;
+
+        // Skip if a previous run already added the panel (e.g. ribbon re-layout).
+        for (int i = 0; i < pCategory->GetPanelCount(); ++i)
+                if (0 == _tcsicmp(pCategory->GetPanel(i)->GetName(), _T("Sort && Fill")))
+                        return;
+
+        CMFCRibbonPanel* pPanel = pCategory->AddPanel(_T("Sort && Fill"));
+
+        CMFCRibbonButtonsGroup* pTopRow = new CMFCRibbonButtonsGroup();
+        pTopRow->AddButton(MakeBtn(ID_SORT_ASC,  _T("Sort A→Z"), -1,
+                _T("Sort ascending"),  _T("Sort the current column from smallest to largest.")));
+        pTopRow->AddButton(MakeBtn(ID_SORT_DESC, _T("Sort Z→A"), -1,
+                _T("Sort descending"), _T("Sort the current column from largest to smallest.")));
+        pPanel->Add(pTopRow);
+
+        CMFCRibbonButtonsGroup* pBottomRow = new CMFCRibbonButtonsGroup();
+        pBottomRow->AddButton(MakeBtn(ID_FILL_DOWN,  _T("Fill down"),  FluentIdx::AlignBottom,
+                _T("Fill down"),  _T("Copy the topmost cell of the selection into every cell below it.")));
+        pBottomRow->AddButton(MakeBtn(ID_FILL_RIGHT, _T("Fill right"), FluentIdx::AlignRight,
+                _T("Fill right"), _T("Copy the leftmost cell of the selection into every cell to its right.")));
+        pBottomRow->AddButton(MakeBtn(ID_FILL_UP,    _T("Fill up"),    FluentIdx::AlignTop,
+                _T("Fill up"),    _T("Copy the bottommost cell of the selection into every cell above it.")));
+        pBottomRow->AddButton(MakeBtn(ID_FILL_LEFT,  _T("Fill left"),  FluentIdx::AlignLeft,
+                _T("Fill left"),  _T("Copy the rightmost cell of the selection into every cell to its left.")));
         pPanel->Add(pBottomRow);
 }
 
@@ -816,5 +923,213 @@ void CMainFrame::OnUpdateFontUnderline(CCmdUI* pCmdUI)
 void CMainFrame::OnUpdateFontStrikethrough(CCmdUI* pCmdUI)
 {
         UpdateFontToggle(pCmdUI, ActiveGrid(), [](const FONTINFO& fi) { return fi.bStrikeThrough != FALSE; });
+}
+
+void CMainFrame::OnEditFind()
+{
+        if (!ActiveGrid()) return;
+        if (m_pFindReplace) { m_pFindReplace->SetFocus(); return; }
+        m_pFindReplace = new CFindReplaceDialog;
+        m_pFindReplace->Create(TRUE, nullptr, nullptr, FR_DOWN, this);
+}
+
+void CMainFrame::OnEditReplace()
+{
+        if (!ActiveGrid()) return;
+        if (m_pFindReplace) { m_pFindReplace->SetFocus(); return; }
+        m_pFindReplace = new CFindReplaceDialog;
+        m_pFindReplace->Create(FALSE, nullptr, nullptr, FR_DOWN, this);
+}
+
+void CMainFrame::OnEditSelectAll()
+{
+        if (CGridCtrl* g = ActiveGrid()) g->SelectAll();
+}
+
+void CMainFrame::OnEditClear()
+{
+        CGridCtrl* g = ActiveGrid();
+        if (!g) return;
+        // Clear cell text across the current selection via GM_FILLCELLS with an
+        // empty source. FILL_TEXT alone preserves cell formatting (matches the
+        // Excel Delete-key behavior); a future "Clear All" can OR in more flags.
+        GCFILLSTRUCT fs{};
+        fs.m_cbSize          = sizeof(GCFILLSTRUCT);
+        fs.m_dwFillHow       = FILLBYTEXT;
+        fs.m_dwFillWhat      = FILL_TEXT;
+        fs.m_dwFillRange     = FILLBYCURRENTSELECTION;
+        fs.m_wsText          = L"";
+        ::SendMessage(g->GetSafeHwnd(), GM_FILLCELLS, 0, (LPARAM)&fs);
+}
+
+void CMainFrame::OnCellFont()
+{
+        CGridCtrl* g = ActiveGrid();
+        if (!g) return;
+
+        FONTINFO fi{};
+        if (!g->GetCurrentCellFontInfo(fi))
+        {
+                fi.m_wsFontFace = L"Calibri";
+                fi.m_fPointSize = 11.0f;
+                fi.bWeight      = FW_NORMAL;
+        }
+
+        LOGFONT lf{};
+        wcscpy_s(lf.lfFaceName, LF_FACESIZE, fi.m_wsFontFace.c_str());
+        HDC hdc = ::GetDC(nullptr);
+        lf.lfHeight    = -MulDiv((int)(fi.m_fPointSize + 0.5f), GetDeviceCaps(hdc, LOGPIXELSY), 72);
+        ::ReleaseDC(nullptr, hdc);
+        lf.lfWeight    = (LONG)(fi.bWeight ? fi.bWeight : FW_NORMAL);
+        lf.lfItalic    = fi.bItalic        ? 1 : 0;
+        lf.lfUnderline = fi.bUnderline     ? 1 : 0;
+        lf.lfStrikeOut = fi.bStrikeThrough ? 1 : 0;
+        lf.lfCharSet   = DEFAULT_CHARSET;
+
+        CFontDialog dlg(&lf, CF_EFFECTS | CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT, nullptr, this);
+        dlg.m_cf.rgbColors = fi.m_clrTextColor;
+        if (dlg.DoModal() != IDOK)
+                return;
+
+        LOGFONT out{};
+        dlg.GetCurrentFont(&out);
+        fi.m_wsFontFace    = out.lfFaceName;
+        // CHOOSEFONT.iPointSize is in tenths of a point.
+        fi.m_fPointSize    = dlg.m_cf.iPointSize / 10.0f;
+        fi.bWeight         = (UINT)out.lfWeight;
+        fi.bItalic         = out.lfItalic    != 0;
+        fi.bUnderline      = out.lfUnderline != 0;
+        fi.bStrikeThrough  = out.lfStrikeOut != 0;
+        fi.m_clrTextColor  = dlg.GetColor();
+        g->SetSelectionFormat(fi);
+}
+
+void CMainFrame::OnDlgAlignment()
+{
+        AfxMessageBox(_T("A full Cell Alignment dialog is coming soon. ")
+                      _T("For now, use the Alignment panel buttons."),
+                      MB_OK | MB_ICONINFORMATION);
+}
+
+void CMainFrame::OnDlgNumber()
+{
+        AfxMessageBox(_T("A full Number Format dialog is coming soon. ")
+                      _T("For now, use the Number panel buttons."),
+                      MB_OK | MB_ICONINFORMATION);
+}
+
+void CMainFrame::OnDlgInsert()
+{
+        AfxMessageBox(_T("A full Insert dialog is coming soon. ")
+                      _T("For now, use the Insert panel buttons."),
+                      MB_OK | MB_ICONINFORMATION);
+}
+
+void CMainFrame::OnSortCmd(UINT nID)
+{
+        CGridCtrl* g = ActiveGrid();
+        if (!g) return;
+        GRIDSELECTION sel{};
+        ::SendMessage(g->GetSafeHwnd(), GM_GETSELECTION, 0, (LPARAM)&sel);
+        GCSORTSTRUCT ss{};
+        ss.m_cbSize     = sizeof(GCSORTSTRUCT);
+        ss.m_sortSel    = sel;
+        ss.m_bAscending = (nID == ID_SORT_ASC);
+        ::SendMessage(g->GetSafeHwnd(), GM_SORTCELLS, 0, (LPARAM)&ss);
+}
+
+void CMainFrame::OnFillCmd(UINT nID)
+{
+        CGridCtrl* g = ActiveGrid();
+        if (!g) return;
+        GRIDSELECTION sel{};
+        ::SendMessage(g->GetSafeHwnd(), GM_GETSELECTION, 0, (LPARAM)&sel);
+
+        // Pick the source corner of the selection. OnFillCells doesn't use the
+        // direction flag itself; we encode direction here by choosing refCell.
+        GRIDPOINT refCell{};
+        switch (nID)
+        {
+        case ID_FILL_DOWN:  refCell = sel.start; break;                                // top-left
+        case ID_FILL_RIGHT: refCell = sel.start; break;                                // top-left
+        case ID_FILL_UP:    refCell = { sel.end.nRow, sel.start.nCol }; break;         // bottom-left
+        case ID_FILL_LEFT:  refCell = { sel.start.nRow, sel.end.nCol }; break;         // top-right
+        default: return;
+        }
+
+        GCFILLSTRUCT fs{};
+        fs.m_cbSize        = sizeof(GCFILLSTRUCT);
+        fs.m_dwFillHow     = FILLBYREFCELL;
+        fs.m_dwFillWhat    = FILL_TEXT | FILL_COLOR | FILL_FONT | FILL_POINTSIZE | FILL_EFFECTS;
+        fs.m_dwFillRange   = FILLBYCURRENTSELECTION;
+        fs.m_refCell       = refCell;
+        ::SendMessage(g->GetSafeHwnd(), GM_FILLCELLS, 0, (LPARAM)&fs);
+}
+
+LRESULT CMainFrame::OnFindReplaceMsg(WPARAM, LPARAM lParam)
+{
+        CFindReplaceDialog* dlg = CFindReplaceDialog::GetNotifier(lParam);
+        if (!dlg) return 0;
+        if (dlg->IsTerminating())
+        {
+                m_pFindReplace = nullptr;   // dialog self-deletes via PostNcDestroy
+                return 0;
+        }
+        CGridCtrl* g = ActiveGrid();
+        if (!g) return 0;
+
+        // Start the next search just past the current cell so repeated Find Next
+        // moves forward instead of re-matching the cell we're already on.
+        GRIDPOINT cur{};
+        g->GetCurrentCell(cur);
+        GRIDPOINT next = cur;
+        if (dlg->SearchDown()) { next.nCol += 1; }
+        else                    { if (next.nCol == 0) { if (next.nRow) { --next.nRow; next.nCol = 0xFFFF; } } else --next.nCol; }
+
+        CString findStr = dlg->GetFindString();
+        CT2W wFind(findStr);
+
+        if (dlg->FindNext())
+        {
+                GCFINDSTRUCT fs{};
+                fs.m_cbSize = sizeof(fs);
+                fs.m_wsFindText = (LPCWSTR)wFind;
+                fs.m_startCell = next;
+                fs.m_bMatchCase = dlg->MatchCase();
+                fs.m_bSearchForward = dlg->SearchDown();
+                if (!g->FindText(fs))
+                        AfxMessageBox(_T("No more matches."), MB_OK | MB_ICONINFORMATION);
+                return 0;
+        }
+
+        if (dlg->ReplaceCurrent() || dlg->ReplaceAll())
+        {
+                CT2W wRepl(dlg->GetReplaceString());
+                GCREPLACESTRUCT rs{};
+                rs.m_cbSize = sizeof(rs);
+                rs.m_wsFindText = (LPCWSTR)wFind;
+                rs.m_wsReplaceText = (LPCWSTR)wRepl;
+                rs.m_bMatchCase = dlg->MatchCase();
+                rs.m_bSearchForward = TRUE;
+
+                if (dlg->ReplaceCurrent())
+                {
+                        rs.m_startCell = cur;       // operate on the current match, don't skip past it
+                        g->ReplaceText(rs);
+                        return 0;
+                }
+
+                rs.m_startCell = { 0, 0 };
+                int count = 0;
+                while (g->ReplaceText(rs))
+                {
+                        ++count;
+                        g->GetCurrentCell(rs.m_startCell);
+                        rs.m_startCell.nCol += 1;   // advance past last replacement
+                }
+                CString msg; msg.Format(_T("%d replacement(s) made."), count);
+                AfxMessageBox(msg, MB_OK | MB_ICONINFORMATION);
+        }
+        return 0;
 }
 

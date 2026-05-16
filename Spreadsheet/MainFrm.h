@@ -34,6 +34,9 @@ protected: // create from serialization only
         void SetupFontPanel();
         void SetupAlignmentPanel();
         void SetupNumberPanel();
+        void SetupInsertPanel();
+        void SetupClipboardPanel();
+        void SetupSortFillPanel();
         void ApplyCurrentFont();
         // Convenience: active grid control on the active view, or nullptr.
         CGridCtrl* ActiveGrid();
@@ -67,6 +70,7 @@ protected:  // control bar embedded members
     CMFCCaptionBar    m_wndCaptionBar;
     //FONTINFO          m_currFontInfo;
     COLORREF          m_cellBkg;
+    CFindReplaceDialog* m_pFindReplace = nullptr;  // modeless; self-deletes on close
 
 // Generated message map functions
 protected:
@@ -113,6 +117,17 @@ public:
 	afx_msg void OnUpdateFontItalic(CCmdUI* pCmdUI);
 	afx_msg void OnUpdateFontUnderline(CCmdUI* pCmdUI);
 	afx_msg void OnUpdateFontStrikethrough(CCmdUI* pCmdUI);
+	afx_msg void OnEditFind();
+	afx_msg void OnEditReplace();
+	afx_msg void OnEditSelectAll();
+	afx_msg void OnEditClear();
+	afx_msg LRESULT OnFindReplaceMsg(WPARAM wParam, LPARAM lParam);
+	afx_msg void OnCellFont();
+	afx_msg void OnDlgAlignment();
+	afx_msg void OnDlgNumber();
+	afx_msg void OnDlgInsert();
+	afx_msg void OnSortCmd(UINT nID);
+	afx_msg void OnFillCmd(UINT nID);
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	virtual BOOL LoadFrame(UINT nIDResource, DWORD dwDefaultStyle = WS_OVERLAPPEDWINDOW | FWS_ADDTOTITLE, CWnd* pParentWnd = NULL, CCreateContext* pContext = NULL);
 };

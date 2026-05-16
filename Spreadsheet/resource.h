@@ -102,13 +102,22 @@
 #define ID_FMT_CURRENCY                 32812
 #define ID_FMT_PERCENT                  32813
 #define ID_FMT_DATE                     32814
+#define ID_DLG_ALIGNMENT                32815
+#define ID_DLG_NUMBER                   32816
+#define ID_DLG_INSERT                   32817
+#define ID_SORT_ASC                     32818
+#define ID_SORT_DESC                    32819
+#define ID_FILL_DOWN                    32820
+#define ID_FILL_RIGHT                   32821
+#define ID_FILL_UP                      32822
+#define ID_FILL_LEFT                    32823
 
 // Next default values for new objects
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        327
-#define _APS_NEXT_COMMAND_VALUE         32815
+#define _APS_NEXT_COMMAND_VALUE         32824
 #define _APS_NEXT_CONTROL_VALUE         1002
 #define _APS_NEXT_SYMED_VALUE           316
 #endif
