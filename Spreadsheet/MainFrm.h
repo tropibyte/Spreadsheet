@@ -126,6 +126,8 @@ public:
 	afx_msg void OnDlgAlignment();
 	afx_msg void OnDlgNumber();
 	afx_msg void OnDlgInsert();
+	afx_msg void OnDlgSort();
+	afx_msg void OnDlgFill();
 	afx_msg void OnSortCmd(UINT nID);
 	afx_msg void OnFillCmd(UINT nID);
 	virtual BOOL PreTranslateMessage(MSG* pMsg);

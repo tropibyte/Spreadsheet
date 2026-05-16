@@ -74,6 +74,8 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWndEx)
         ON_COMMAND(ID_DLG_ALIGNMENT,   &CMainFrame::OnDlgAlignment)
         ON_COMMAND(ID_DLG_NUMBER,      &CMainFrame::OnDlgNumber)
         ON_COMMAND(ID_DLG_INSERT,      &CMainFrame::OnDlgInsert)
+        ON_COMMAND(ID_DLG_SORT,        &CMainFrame::OnDlgSort)
+        ON_COMMAND(ID_DLG_FILL,        &CMainFrame::OnDlgFill)
         ON_COMMAND_RANGE(ID_SORT_ASC,  ID_SORT_DESC, &CMainFrame::OnSortCmd)
         ON_COMMAND_RANGE(ID_FILL_DOWN, ID_FILL_LEFT, &CMainFrame::OnFillCmd)
 END_MESSAGE_MAP()
@@ -814,30 +816,37 @@ void CMainFrame::SetupSortFillPanel()
         }
         if (!pCategory) return;
 
-        // Skip if a previous run already added the panel (e.g. ribbon re-layout).
+        // Skip if a previous run already added these panels (ribbon re-layout).
         for (int i = 0; i < pCategory->GetPanelCount(); ++i)
-                if (0 == _tcsicmp(pCategory->GetPanel(i)->GetName(), _T("Sort && Fill")))
+                if (0 == _tcsicmp(pCategory->GetPanel(i)->GetName(), _T("Sort")))
                         return;
 
-        CMFCRibbonPanel* pPanel = pCategory->AddPanel(_T("Sort && Fill"));
-
-        CMFCRibbonButtonsGroup* pTopRow = new CMFCRibbonButtonsGroup();
-        pTopRow->AddButton(MakeBtn(ID_SORT_ASC,  _T("Sort A→Z"), -1,
+        // Sort panel — one launcher arrow, opens the (forthcoming) multi-key Sort dialog.
+        CMFCRibbonPanel* pSort = pCategory->AddPanel(_T("Sort"));
+        // Use \u2192 (RIGHTWARDS ARROW) explicitly. Literal UTF-8 bytes in source
+        // got mis-rendered as "Aâ†Z" when MSVC read the file as Windows-1252.
+        pSort->Add(MakeBtn(ID_SORT_ASC,  L"Sort A\u2192Z", -1,
                 _T("Sort ascending"),  _T("Sort the current column from smallest to largest.")));
-        pTopRow->AddButton(MakeBtn(ID_SORT_DESC, _T("Sort Z→A"), -1,
+        pSort->Add(MakeBtn(ID_SORT_DESC, L"Sort Z\u2192A", -1,
                 _T("Sort descending"), _T("Sort the current column from largest to smallest.")));
-        pPanel->Add(pTopRow);
+        pSort->EnableLaunchButton(ID_DLG_SORT);
+
+        // Fill panel — separate launcher for the (forthcoming) Fill Series dialog.
+        CMFCRibbonPanel* pFill = pCategory->AddPanel(_T("Fill"));
+        CMFCRibbonButtonsGroup* pTopRow = new CMFCRibbonButtonsGroup();
+        pTopRow->AddButton(MakeBtn(ID_FILL_DOWN,  _T("Fill down"),  FluentIdx::AlignBottom,
+                _T("Fill down"),  _T("Copy the topmost cell of the selection into every cell below it.")));
+        pTopRow->AddButton(MakeBtn(ID_FILL_RIGHT, _T("Fill right"), FluentIdx::AlignRight,
+                _T("Fill right"), _T("Copy the leftmost cell of the selection into every cell to its right.")));
+        pFill->Add(pTopRow);
 
         CMFCRibbonButtonsGroup* pBottomRow = new CMFCRibbonButtonsGroup();
-        pBottomRow->AddButton(MakeBtn(ID_FILL_DOWN,  _T("Fill down"),  FluentIdx::AlignBottom,
-                _T("Fill down"),  _T("Copy the topmost cell of the selection into every cell below it.")));
-        pBottomRow->AddButton(MakeBtn(ID_FILL_RIGHT, _T("Fill right"), FluentIdx::AlignRight,
-                _T("Fill right"), _T("Copy the leftmost cell of the selection into every cell to its right.")));
         pBottomRow->AddButton(MakeBtn(ID_FILL_UP,    _T("Fill up"),    FluentIdx::AlignTop,
                 _T("Fill up"),    _T("Copy the bottommost cell of the selection into every cell above it.")));
         pBottomRow->AddButton(MakeBtn(ID_FILL_LEFT,  _T("Fill left"),  FluentIdx::AlignLeft,
                 _T("Fill left"),  _T("Copy the rightmost cell of the selection into every cell to its left.")));
-        pPanel->Add(pBottomRow);
+        pFill->Add(pBottomRow);
+        pFill->EnableLaunchButton(ID_DLG_FILL);
 }
 
 void CMainFrame::OnFormatCmd(UINT nID)
@@ -1022,6 +1031,20 @@ void CMainFrame::OnDlgInsert()
 {
         AfxMessageBox(_T("A full Insert dialog is coming soon. ")
                       _T("For now, use the Insert panel buttons."),
+                      MB_OK | MB_ICONINFORMATION);
+}
+
+void CMainFrame::OnDlgSort()
+{
+        AfxMessageBox(_T("A full multi-key Sort dialog is coming soon. ")
+                      _T("For now, use the Sort panel buttons."),
+                      MB_OK | MB_ICONINFORMATION);
+}
+
+void CMainFrame::OnDlgFill()
+{
+        AfxMessageBox(_T("A full Fill (Series / Justify) dialog is coming soon. ")
+                      _T("For now, use the Fill panel buttons."),
                       MB_OK | MB_ICONINFORMATION);
 }
 
