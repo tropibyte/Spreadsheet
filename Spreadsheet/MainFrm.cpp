@@ -56,6 +56,12 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWndEx)
         ON_COMMAND(ID_INSERT_DATETIME, &CMainFrame::OnInsertDateTime)
         ON_COMMAND_RANGE(ID_ALIGN_LEFT, ID_ALIGN_MERGE, &CMainFrame::OnAlignCmd)
         ON_COMMAND_RANGE(ID_FMT_GENERAL, ID_FMT_DATE, &CMainFrame::OnFormatCmd)
+        ON_UPDATE_COMMAND_UI_RANGE(ID_ALIGN_LEFT, ID_ALIGN_MERGE, &CMainFrame::OnUpdateAlignCmd)
+        ON_UPDATE_COMMAND_UI_RANGE(ID_FMT_GENERAL, ID_FMT_DATE, &CMainFrame::OnUpdateFormatCmd)
+        ON_UPDATE_COMMAND_UI(ID_FONT_BOLD,          &CMainFrame::OnUpdateFontBold)
+        ON_UPDATE_COMMAND_UI(ID_FONT_ITALIC,        &CMainFrame::OnUpdateFontItalic)
+        ON_UPDATE_COMMAND_UI(ID_FONT_UNDERLINE,     &CMainFrame::OnUpdateFontUnderline)
+        ON_UPDATE_COMMAND_UI(ID_FONT_STRIKETHROUGH, &CMainFrame::OnUpdateFontStrikethrough)
 END_MESSAGE_MAP()
 
 // CMainFrame construction/destruction
@@ -744,5 +750,71 @@ void CMainFrame::OnFormatCmd(UINT nID)
         // SCF_SELECTION on Grid32's side falls back to the current cell when
         // the selection rect is empty, so this works for single-cell edits too.
         pView->GetGridCtrl().SetSelectionNumberFormat(fmt);
+}
+
+void CMainFrame::OnUpdateAlignCmd(CCmdUI* pCmdUI)
+{
+        CGridCtrl* g = ActiveGrid();
+        if (!g) { pCmdUI->Enable(FALSE); return; }
+        switch (pCmdUI->m_nID)
+        {
+        case ID_ALIGN_LEFT:   pCmdUI->SetCheck(g->GetCurrentCellHAlign() == DT_LEFT);    break;
+        case ID_ALIGN_CENTER: pCmdUI->SetCheck(g->GetCurrentCellHAlign() == DT_CENTER);  break;
+        case ID_ALIGN_RIGHT:  pCmdUI->SetCheck(g->GetCurrentCellHAlign() == DT_RIGHT);   break;
+        case ID_ALIGN_TOP:    pCmdUI->SetCheck(g->GetCurrentCellVAlign() == DT_TOP);     break;
+        case ID_ALIGN_MIDDLE: pCmdUI->SetCheck(g->GetCurrentCellVAlign() == DT_VCENTER); break;
+        case ID_ALIGN_BOTTOM: pCmdUI->SetCheck(g->GetCurrentCellVAlign() == DT_BOTTOM);  break;
+        case ID_ALIGN_WRAP:   pCmdUI->SetCheck(g->GetCurrentCellWrap() ? 1 : 0);         break;
+        case ID_ALIGN_MERGE:  pCmdUI->Enable(FALSE); break;  // roadmapped — Grid32 merge not yet implemented
+        }
+}
+
+void CMainFrame::OnUpdateFormatCmd(CCmdUI* pCmdUI)
+{
+        CGridCtrl* g = ActiveGrid();
+        if (!g) { pCmdUI->Enable(FALSE); return; }
+        const UINT cur = g->GetCurrentCellFormat();
+        UINT want = FMT_GENERAL;
+        switch (pCmdUI->m_nID)
+        {
+        case ID_FMT_GENERAL:  want = FMT_GENERAL;  break;
+        case ID_FMT_NUMBER:   want = FMT_NUMBER;   break;
+        case ID_FMT_CURRENCY: want = FMT_CURRENCY; break;
+        case ID_FMT_PERCENT:  want = FMT_PERCENT;  break;
+        case ID_FMT_DATE:     want = FMT_DATE_ISO; break;
+        default: return;
+        }
+        pCmdUI->SetCheck(cur == want);
+}
+
+// Reflect Bold/Italic/Underline/Strikethrough state of the current cell back
+// onto the ribbon buttons. Single helper because each button only differs by
+// which FONTINFO field it inspects.
+static void UpdateFontToggle(CCmdUI* pCmdUI, CGridCtrl* g, bool (*pred)(const FONTINFO&))
+{
+        if (!g) { pCmdUI->Enable(FALSE); return; }
+        FONTINFO fi{};
+        if (!g->GetCurrentCellFontInfo(fi)) { pCmdUI->SetCheck(0); return; }
+        pCmdUI->SetCheck(pred(fi) ? 1 : 0);
+}
+
+void CMainFrame::OnUpdateFontBold(CCmdUI* pCmdUI)
+{
+        UpdateFontToggle(pCmdUI, ActiveGrid(), [](const FONTINFO& fi) { return fi.bWeight >= 700; });
+}
+
+void CMainFrame::OnUpdateFontItalic(CCmdUI* pCmdUI)
+{
+        UpdateFontToggle(pCmdUI, ActiveGrid(), [](const FONTINFO& fi) { return fi.bItalic != FALSE; });
+}
+
+void CMainFrame::OnUpdateFontUnderline(CCmdUI* pCmdUI)
+{
+        UpdateFontToggle(pCmdUI, ActiveGrid(), [](const FONTINFO& fi) { return fi.bUnderline != FALSE; });
+}
+
+void CMainFrame::OnUpdateFontStrikethrough(CCmdUI* pCmdUI)
+{
+        UpdateFontToggle(pCmdUI, ActiveGrid(), [](const FONTINFO& fi) { return fi.bStrikeThrough != FALSE; });
 }
 

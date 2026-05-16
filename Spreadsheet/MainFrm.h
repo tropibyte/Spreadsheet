@@ -107,6 +107,12 @@ public:
 	afx_msg void OnInsertDateTime();
 	afx_msg void OnAlignCmd(UINT nID);
 	afx_msg void OnFormatCmd(UINT nID);
+	afx_msg void OnUpdateAlignCmd(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateFormatCmd(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateFontBold(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateFontItalic(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateFontUnderline(CCmdUI* pCmdUI);
+	afx_msg void OnUpdateFontStrikethrough(CCmdUI* pCmdUI);
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	virtual BOOL LoadFrame(UINT nIDResource, DWORD dwDefaultStyle = WS_OVERLAPPEDWINDOW | FWS_ADDTOTITLE, CWnd* pParentWnd = NULL, CCreateContext* pContext = NULL);
 };
