@@ -111,6 +111,13 @@ public:
         // Set the per-cell number format (FMT_*). Re-renders display text.
         void SetCellNumberFormat(UINT nRow, UINT nCol, UINT format);
         void SetSelectionNumberFormat(UINT format);
+        // Read the current cell's font info. Returns false if no cell exists.
+        bool GetCurrentCellFontInfo(FONTINFO& out);
+        // Alignment / wrap. Each setter updates only the bits it owns
+        // (horiz: DT_LEFT/CENTER/RIGHT; vert: DT_TOP/VCENTER/BOTTOM; wrap: DT_WORDBREAK).
+        void SetSelectionHAlign(UINT halign);
+        void SetSelectionVAlign(UINT valign);
+        void SetSelectionWrap(BOOL wrap);
 	void GetCellText(UINT nRow, UINT nCol, LPWSTR pText, UINT nLen);
 	void SetCell(UINT nRow, UINT nCol, const GRIDCELL& gc);
 	void SetCurrentCellText(LPCWSTR newText);

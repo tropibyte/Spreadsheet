@@ -114,10 +114,17 @@ struct tagGCSTREAM;
 #define GM_STREAMOUT                            (WM_USER + 25)
 #define GM_REPLACETEXT                          (WM_USER + 26)
 #define GM_SETFORMAT                            (WM_USER + 27)
+#define GM_GETCHARFORMAT                        (WM_USER + 28)
+#define GM_SETALIGN                             (WM_USER + 29)
+#define GM_GETALIGN                             (WM_USER + 30)
 // GM_SETCHARFORMAT / GM_SETFORMAT wParam flags
 #define SCF_CURRENTCELL 0x0000
 #define SCF_SELECTION 0x0001
 #define SCF_RANGE 0x0002
+// GM_SETALIGN wParam — which axis the lParam value updates.
+#define GA_HORIZ                                0
+#define GA_VERT                                 1
+#define GA_WRAP                                 2
 
 
 // Grid32 Error

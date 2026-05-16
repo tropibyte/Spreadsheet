@@ -626,7 +626,13 @@ void CGrid32Mgr::DrawCells(HDC hDC)
 
                 HFONT hOldFont = (HFONT)SelectObject(hDC, hFont);
 
-                DrawTextW(hDC, pCell->m_wsText.c_str(), -1, &gridCellRect, pCell->justification | DT_SINGLELINE);
+                {
+                    // DT_WORDBREAK only takes effect when DT_SINGLELINE is off,
+                    // so cells with the wrap bit drop the single-line flag.
+                    UINT j = pCell->justification;
+                    UINT flags = (j & DT_WORDBREAK) ? j : (j | DT_SINGLELINE);
+                    DrawTextW(hDC, pCell->m_wsText.c_str(), -1, &gridCellRect, flags);
+                }
 
                 SelectObject(hDC, hOldFont);
                 DeleteObject(hFont);
@@ -827,7 +833,11 @@ void CGrid32Mgr::DrawMergedCell(HDC hDC, const MERGERANGE& mergeRange) {
         cell->fontInfo.bUnderline, 0, 0, 0, 0, 0, 0,
         cell->fontInfo.m_wsFontFace.c_str());
     HFONT hOldFont = (HFONT)SelectObject(hDC, hFont);
-    DrawTextW(hDC, cell->m_wsText.c_str(), -1, &rect, cell->justification | DT_SINGLELINE);
+    {
+        UINT j = cell->justification;
+        UINT flags = (j & DT_WORDBREAK) ? j : (j | DT_SINGLELINE);
+        DrawTextW(hDC, cell->m_wsText.c_str(), -1, &rect, flags);
+    }
     SelectObject(hDC, hOldFont);
     DeleteObject(hFont);
 }
@@ -1197,6 +1207,78 @@ void CGrid32Mgr::SetSelectionNumberFormat(UINT format)
         }
     }
     m_bUndoRecordEnabled = record;
+    Invalidate();
+    SetLastError(0);
+}
+
+bool CGrid32Mgr::GetCurrentCellFontInfo(FONTINFO& out)
+{
+    PGRIDCELL pCell = GetCellOrDefault(m_currentCell.nRow, m_currentCell.nCol);
+    if (!pCell)
+        return false;
+    out = pCell->fontInfo;
+    return true;
+}
+
+// Apply an alignment-axis update across the current selection. axis selects
+// which DT_* bits get cleared before lParam's value is OR'd in.
+static void ApplyAlignBits(UINT& just, UINT axis, UINT value)
+{
+    switch (axis)
+    {
+    case GA_HORIZ:
+        just &= ~(DT_LEFT | DT_CENTER | DT_RIGHT);
+        just |= (value & (DT_LEFT | DT_CENTER | DT_RIGHT));
+        break;
+    case GA_VERT:
+        just &= ~(DT_TOP | DT_VCENTER | DT_BOTTOM);
+        just |= (value & (DT_TOP | DT_VCENTER | DT_BOTTOM));
+        break;
+    case GA_WRAP:
+        if (value) just |= DT_WORDBREAK;
+        else       just &= ~DT_WORDBREAK;
+        break;
+    }
+}
+
+void CGrid32Mgr::SetSelectionHAlign(UINT halign)
+{
+    GRIDSELECTION sel = m_selectionRect;
+    NormalizeSelectionRect(sel);
+    for (UINT r = sel.start.nRow; r <= sel.end.nRow && r < gcs.nHeight; ++r)
+        for (UINT c = sel.start.nCol; c <= sel.end.nCol && c < gcs.nWidth; ++c)
+        {
+            PGRIDCELL pCell = GetCellOrCreate(r, c);
+            if (pCell) ApplyAlignBits(pCell->justification, GA_HORIZ, halign);
+        }
+    Invalidate();
+    SetLastError(0);
+}
+
+void CGrid32Mgr::SetSelectionVAlign(UINT valign)
+{
+    GRIDSELECTION sel = m_selectionRect;
+    NormalizeSelectionRect(sel);
+    for (UINT r = sel.start.nRow; r <= sel.end.nRow && r < gcs.nHeight; ++r)
+        for (UINT c = sel.start.nCol; c <= sel.end.nCol && c < gcs.nWidth; ++c)
+        {
+            PGRIDCELL pCell = GetCellOrCreate(r, c);
+            if (pCell) ApplyAlignBits(pCell->justification, GA_VERT, valign);
+        }
+    Invalidate();
+    SetLastError(0);
+}
+
+void CGrid32Mgr::SetSelectionWrap(BOOL wrap)
+{
+    GRIDSELECTION sel = m_selectionRect;
+    NormalizeSelectionRect(sel);
+    for (UINT r = sel.start.nRow; r <= sel.end.nRow && r < gcs.nHeight; ++r)
+        for (UINT c = sel.start.nCol; c <= sel.end.nCol && c < gcs.nWidth; ++c)
+        {
+            PGRIDCELL pCell = GetCellOrCreate(r, c);
+            if (pCell) ApplyAlignBits(pCell->justification, GA_WRAP, wrap ? 1 : 0);
+        }
     Invalidate();
     SetLastError(0);
 }

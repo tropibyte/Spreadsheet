@@ -335,6 +335,43 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
                                           (UINT)lParam);
             break;
 
+        case GM_GETCHARFORMAT:
+            // lParam: PFONTINFO out-param. Reads the current cell's font.
+            if (lParam) {
+                FONTINFO fi{};
+                if (pMgr->GetCurrentCellFontInfo(fi)) {
+                    *reinterpret_cast<PFONTINFO>(lParam) = fi;
+                    return TRUE;
+                }
+            }
+            return FALSE;
+
+        case GM_SETALIGN:
+            // wParam: GA_HORIZ / GA_VERT / GA_WRAP
+            // lParam: DT_* value for horiz/vert axis, or BOOL for wrap.
+            switch (wParam) {
+            case GA_HORIZ: pMgr->SetSelectionHAlign((UINT)lParam); break;
+            case GA_VERT:  pMgr->SetSelectionVAlign((UINT)lParam); break;
+            case GA_WRAP:  pMgr->SetSelectionWrap((BOOL)lParam);   break;
+            }
+            break;
+
+        case GM_GETALIGN:
+            // wParam: GA_HORIZ / GA_VERT / GA_WRAP
+            // Returns the matching DT_* value (horiz/vert) or 0/1 (wrap)
+            // for the current cell. Returns 0 if no cell exists.
+            {
+                PGRIDCELL pCell = pMgr->GetCellOrDefault(pMgr->m_currentCell.nRow,
+                                                         pMgr->m_currentCell.nCol);
+                if (!pCell) return 0;
+                switch (wParam) {
+                case GA_HORIZ: return (LRESULT)(pCell->justification & (DT_LEFT | DT_CENTER | DT_RIGHT));
+                case GA_VERT:  return (LRESULT)(pCell->justification & (DT_TOP | DT_VCENTER | DT_BOTTOM));
+                case GA_WRAP:  return (pCell->justification & DT_WORDBREAK) ? 1 : 0;
+                }
+            }
+            return 0;
+
         case GM_ENUMCELLS:
             // Handle GM_ENUMCELLS
             pMgr->OnEnumCells((GRIDCELL*)lParam, (UINT)wParam);
