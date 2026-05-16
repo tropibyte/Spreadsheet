@@ -27,6 +27,7 @@ public:
     UINT GetCurrentCellHAlign();    // DT_LEFT/CENTER/RIGHT, or 0 if none.
     UINT GetCurrentCellVAlign();    // DT_TOP/VCENTER/BOTTOM, or 0 if none.
     BOOL GetCurrentCellWrap();
+    UINT GetCurrentCellFormat();    // FMT_* (FMT_GENERAL if no cell).
     BOOL SetCurrentCellText(LPCWSTR text);
     BOOL FindText(const GCFINDSTRUCT& fs);
     BOOL ReplaceText(const GCREPLACESTRUCT& rs);

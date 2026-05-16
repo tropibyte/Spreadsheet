@@ -122,6 +122,11 @@ BOOL CGridCtrl::GetCurrentCellWrap()
     return (BOOL)::SendMessage(m_hWnd, GM_GETALIGN, GA_WRAP, 0);
 }
 
+UINT CGridCtrl::GetCurrentCellFormat()
+{
+    return (UINT)::SendMessage(m_hWnd, GM_GETFORMAT, 0, 0);
+}
+
 BOOL CGridCtrl::SetCurrentCellText(LPCWSTR text)
 {
     GRIDPOINT pt{};

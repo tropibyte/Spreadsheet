@@ -372,6 +372,15 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
             }
             return 0;
 
+        case GM_GETFORMAT:
+            // Returns the current cell's FMT_* number-format code, or
+            // FMT_GENERAL if no cell exists.
+            {
+                PGRIDCELL pCell = pMgr->GetCellOrDefault(pMgr->m_currentCell.nRow,
+                                                         pMgr->m_currentCell.nCol);
+                return pCell ? (LRESULT)pCell->m_nFormat : (LRESULT)FMT_GENERAL;
+            }
+
         case GM_ENUMCELLS:
             // Handle GM_ENUMCELLS
             pMgr->OnEnumCells((GRIDCELL*)lParam, (UINT)wParam);

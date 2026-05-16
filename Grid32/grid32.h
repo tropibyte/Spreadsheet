@@ -117,6 +117,7 @@ struct tagGCSTREAM;
 #define GM_GETCHARFORMAT                        (WM_USER + 28)
 #define GM_SETALIGN                             (WM_USER + 29)
 #define GM_GETALIGN                             (WM_USER + 30)
+#define GM_GETFORMAT                            (WM_USER + 31)
 // GM_SETCHARFORMAT / GM_SETFORMAT wParam flags
 #define SCF_CURRENTCELL 0x0000
 #define SCF_SELECTION 0x0001
