@@ -21,6 +21,21 @@ inline double DateToSerial(int y, int m, int d)
     return (double)(jdn - 2415019);
 }
 
+// Inverse of DateToSerial. Valid for serial >= 1.
+inline void SerialToYMD(double serial, int& y, int& m, int& d)
+{
+    long long jdn = (long long)serial + 2415019;
+    long long a = jdn + 32044;
+    long long b = (4 * a + 3) / 146097;
+    long long c = a - (146097 * b) / 4;
+    long long dd = (4 * c + 3) / 1461;
+    long long e = c - (1461 * dd) / 4;
+    long long mm = (5 * e + 2) / 153;
+    d = (int)(e - (153 * mm + 2) / 5 + 1);
+    m = (int)(mm + 3 - 12 * (mm / 10));
+    y = (int)(100 * b + dd - 4800 + mm / 10);
+}
+
 inline bool TryParseDate(const std::wstring& text, double& serialOut)
 {
     if (text.empty()) return false;

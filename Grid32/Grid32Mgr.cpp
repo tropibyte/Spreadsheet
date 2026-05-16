@@ -4160,6 +4160,12 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
 }
 
 
+namespace Grid32FormulaText {
+    extern thread_local std::wstring g_textResult;
+    extern thread_local bool g_textResultValid;
+    void ResetText();
+}
+
 std::wstring CGrid32Mgr::EvaluateFormula(const std::wstring& expr)
 {
     std::wstring clean = expr;
@@ -4167,7 +4173,16 @@ std::wstring CGrid32Mgr::EvaluateFormula(const std::wstring& expr)
         clean = clean.substr(1);
     size_t pos = 0;
     std::set<std::pair<UINT, UINT>> visited;
+    // Reset the text-result slot so a residue from a prior call doesn't
+    // leak into a fresh numeric formula.
+    Grid32FormulaText::ResetText();
     double val = CFormulator::ParseExpression(this, clean, pos, visited);
+    if (Grid32FormulaText::g_textResultValid)
+    {
+        std::wstring r = Grid32FormulaText::g_textResult;
+        Grid32FormulaText::ResetText();
+        return r;
+    }
     std::wstringstream ss;
     ss << val;
     return ss.str();

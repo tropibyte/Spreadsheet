@@ -207,6 +207,29 @@ TEST(InferType_NotDateButLooksLikeOne)
     ASSERT_EQ((int)InferType(L"2026-13-01", v), (int)CT_Text);
 }
 
+// ---- SerialToYMD round-trip --------------------------------------------
+TEST(SerialToYMD_RoundTrip)
+{
+    struct { int y, m, d; } cases[] = {
+        { 1900, 1, 1 },
+        { 1999, 12, 31 },
+        { 2000, 1, 1 },
+        { 2024, 2, 29 },     // leap day
+        { 2026, 5, 15 },
+        { 2100, 7, 4 },
+    };
+    for (auto& tc : cases) {
+        double s = DateToSerial(tc.y, tc.m, tc.d);
+        int y = 0, m = 0, d = 0;
+        SerialToYMD(s, y, m, d);
+        if (y != tc.y || m != tc.m || d != tc.d) {
+            std::cerr << "  mismatch for " << tc.y << "-" << tc.m << "-" << tc.d
+                << " serial=" << s << " got " << y << "-" << m << "-" << d << "\n";
+            ++g_failCount;
+        }
+    }
+}
+
 // ---- driver ----------------------------------------------------------------
 int main()
 {
