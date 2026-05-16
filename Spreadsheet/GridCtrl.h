@@ -31,6 +31,7 @@ public:
     BOOL SetCurrentCellText(LPCWSTR text);
     BOOL FindText(const GCFINDSTRUCT& fs);
     BOOL ReplaceText(const GCREPLACESTRUCT& rs);
+    void SelectAll();
     BOOL GetCurrentCell(GRIDPOINT& pt) const;
     BOOL StreamIn(GCSTREAM& stream);
     BOOL StreamOut(GCSTREAM& stream);

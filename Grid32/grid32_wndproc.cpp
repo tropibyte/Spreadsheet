@@ -381,6 +381,15 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
                 return pCell ? (LRESULT)pCell->m_nFormat : (LRESULT)FMT_GENERAL;
             }
 
+        case GM_SELECTALL:
+            {
+                GRIDSELECTION sel{};
+                sel.start = { 0, 0 };
+                sel.end   = { (UINT)pMgr->gcs.nHeight - 1, (UINT)pMgr->gcs.nWidth - 1 };
+                pMgr->OnSetSelection(&sel);
+            }
+            return 0;
+
         case GM_ENUMCELLS:
             // Handle GM_ENUMCELLS
             pMgr->OnEnumCells((GRIDCELL*)lParam, (UINT)wParam);

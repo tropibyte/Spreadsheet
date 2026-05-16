@@ -146,6 +146,11 @@ BOOL CGridCtrl::ReplaceText(const GCREPLACESTRUCT& rs)
     return ::SendMessage(m_hWnd, GM_REPLACETEXT, 0, (LPARAM)&rs) != 0;
 }
 
+void CGridCtrl::SelectAll()
+{
+    ::SendMessage(m_hWnd, GM_SELECTALL, 0, 0);
+}
+
 BOOL CGridCtrl::GetCurrentCell(GRIDPOINT& pt) const
 {
     LRESULT res = ::SendMessage(m_hWnd, GM_GETCURRENTCELL, 0, 0);
