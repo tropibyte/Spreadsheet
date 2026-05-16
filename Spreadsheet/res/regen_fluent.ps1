@@ -1,16 +1,15 @@
-# Appends new Fluent icons (or rendered glyphs) onto fluent_small.bmp and
-# fluent_large.bmp, in-place. Run from this directory:
-#     pwsh -File regen_fluent.ps1
+# Appends new Fluent icons (or rendered glyphs) onto fluent_small.bmp /
+# fluent_large.bmp by **rebuilding the BMP byte stream**, not by round-
+# tripping through System.Drawing.Bitmap.Save — GDI+ collapses the
+# original strip's straight-alpha channel into a solid A=255, which
+# breaks MFC's alpha-blended ribbon rendering.
 #
-# This script is non-destructive to the existing strip — it loads the
-# current images, widens the canvas, and paints new icons at the right
-# edge. To add more icons, append to $newIcons; the index in the array
-# defines the slot index after the existing icons (28 today, so first
-# appended slot is 28).
+# Run from this directory:
+#     pwsh -File regen_fluent.ps1
 #
 # Each entry is (folder, snake) for a Fluent SVG, or
 # ('__glyph_<char>', '<snake>') to render a single glyph for icons
-# Fluent doesn't ship (we use this for %).
+# Fluent doesn't ship (used for %).
 
 Add-Type -AssemblyName PresentationCore, PresentationFramework, WindowsBase, System.Drawing
 
@@ -35,90 +34,126 @@ function Get-Svg([string]$folder, [string]$snake, [int]$size) {
     return Get-Content $cachePath -Raw
 }
 
-function Render-Svg([string]$svg, [int]$size) {
-    # MFC's ribbon image loader color-keys pure black (RGB 0,0,0) as
-    # transparent, so the strokes have to be drawn in #212121 (33,33,33)
-    # — which also matches the Fluent SVG fill ("fill=#212121").
+# Render an icon to a $size x $size BGRA byte buffer with straight
+# (non-premultiplied) alpha. Background pixels get (0,0,0,0) so MFC's
+# alpha blend leaves them invisible; glyph strokes get Fluent's #212121
+# ink at the appropriate alpha.
+function Render-Svg-Bgra([string]$svg, [int]$size) {
     $pathMatches = [regex]::Matches($svg, '<path\s+[^/]*?d="([^"]+)"[^/]*?/>')
     $dv = [System.Windows.Media.DrawingVisual]::new()
     $ctx = $dv.RenderOpen()
-    $fluentColor = [System.Windows.Media.Color]::FromRgb(33, 33, 33)
-    $brush = [System.Windows.Media.SolidColorBrush]::new($fluentColor)
+    $ink = [System.Windows.Media.Color]::FromRgb(33, 33, 33)
+    $brush = [System.Windows.Media.SolidColorBrush]::new($ink)
     foreach ($m in $pathMatches) {
         $geom = [System.Windows.Media.Geometry]::Parse($m.Groups[1].Value)
         $ctx.DrawGeometry($brush, $null, $geom)
     }
     $ctx.Close()
+    # RenderTargetBitmap produces premultiplied alpha. Copy into a
+    # FormatConvertedBitmap targeting straight Bgra32.
     $rtb = [System.Windows.Media.Imaging.RenderTargetBitmap]::new($size, $size, 96, 96, [System.Windows.Media.PixelFormats]::Pbgra32)
     $rtb.Render($dv)
-    # PNG round-trip into System.Drawing — simplest interop.
-    $enc = [System.Windows.Media.Imaging.PngBitmapEncoder]::new()
-    $enc.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($rtb))
-    $ms = [System.IO.MemoryStream]::new()
-    $enc.Save($ms)
-    $ms.Position = 0
-    return [System.Drawing.Bitmap]::new($ms)
+    $conv = [System.Windows.Media.Imaging.FormatConvertedBitmap]::new($rtb, [System.Windows.Media.PixelFormats]::Bgra32, $null, 0.0)
+    $stride = $size * 4
+    $buf = New-Object byte[] ($size * $stride)
+    $conv.CopyPixels($buf, $stride, 0)
+    return ,$buf
 }
 
-function Render-Glyph([string]$ch, [int]$size) {
-    # For glyphs Fluent doesn't ship (e.g. %). Segoe UI Semibold at ~70% of
-    # the slot height visually matches the stroke weight of regular Fluent
-    # icons; tweak as needed.
-    $bmp = [System.Drawing.Bitmap]::new($size, $size, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-    $g.TextRenderingHint = [System.Drawing.Text.TextRenderingHint]::AntiAliasGridFit
-    $g.Clear([System.Drawing.Color]::Transparent)
-    $fontSize = [int]($size * 0.72)
-    $font = [System.Drawing.Font]::new('Segoe UI', $fontSize, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
-    $sf = [System.Drawing.StringFormat]::new()
-    $sf.Alignment = [System.Drawing.StringAlignment]::Center
-    $sf.LineAlignment = [System.Drawing.StringAlignment]::Center
-    # Match the Fluent #212121 ink color so MFC's color-keying treats only
-    # the background as transparent.
-    $brush = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255, 33, 33, 33))
-    $rect = [System.Drawing.RectangleF]::new(0, 0, $size, $size)
-    $g.DrawString($ch, $font, $brush, $rect, $sf)
-    $brush.Dispose()
-    $g.Dispose()
-    return $bmp
+function Render-Glyph-Bgra([string]$ch, [int]$size) {
+    # Draw the glyph onto a transparent Bgra32 wbm using DrawingContext.DrawText,
+    # then read the pixels straight back.
+    $dv = [System.Windows.Media.DrawingVisual]::new()
+    $ctx = $dv.RenderOpen()
+    $ink = [System.Windows.Media.Color]::FromRgb(33, 33, 33)
+    $brush = [System.Windows.Media.SolidColorBrush]::new($ink)
+    $tf = [System.Windows.Media.Typeface]::new(
+        [System.Windows.Media.FontFamily]::new('Segoe UI'),
+        [System.Windows.FontStyles]::Normal,
+        [System.Windows.FontWeights]::Bold,
+        [System.Windows.FontStretches]::Normal)
+    $emSize = [double]($size * 0.78)
+    $ft = [System.Windows.Media.FormattedText]::new(
+        $ch,
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [System.Windows.FlowDirection]::LeftToRight,
+        $tf, $emSize, $brush, 1.0)
+    $x = ($size - $ft.Width) / 2.0
+    $y = ($size - $ft.Height) / 2.0
+    $ctx.DrawText($ft, [System.Windows.Point]::new($x, $y))
+    $ctx.Close()
+    $rtb = [System.Windows.Media.Imaging.RenderTargetBitmap]::new($size, $size, 96, 96, [System.Windows.Media.PixelFormats]::Pbgra32)
+    $rtb.Render($dv)
+    $conv = [System.Windows.Media.Imaging.FormatConvertedBitmap]::new($rtb, [System.Windows.Media.PixelFormats]::Bgra32, $null, 0.0)
+    $stride = $size * 4
+    $buf = New-Object byte[] ($size * $stride)
+    $conv.CopyPixels($buf, $stride, 0)
+    return ,$buf
 }
 
-function Extend-Strip([string]$inPath, [string]$outPath, [int]$size) {
-    # Load via MemoryStream so GDI+ doesn't hold an exclusive lock on the
-    # source file — otherwise saving back to the same path fails.
+# Append icons to a 32bpp BMP at byte level. Preserves the existing
+# pixel data verbatim and grafts the new icons onto the right side of
+# every row. BMPs are bottom-up so we have to be careful with row order.
+function Append-To-Bmp([string]$inPath, [string]$outPath, [int]$size) {
     $bytes = [System.IO.File]::ReadAllBytes($inPath)
-    $existing = [System.Drawing.Bitmap]::new([System.IO.MemoryStream]::new($bytes))
-    try {
-        $oldWidth = $existing.Width
-        $newWidth = $oldWidth + ($newIcons.Count * $size)
-        $strip = [System.Drawing.Bitmap]::new($newWidth, $size, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-        $g = [System.Drawing.Graphics]::FromImage($strip)
-        $g.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
-        $g.Clear([System.Drawing.Color]::Transparent)
-        # Copy the existing strip verbatim.
-        $g.DrawImage($existing, 0, 0, $oldWidth, $size)
-        # Paint the new icons at the right edge.
-        for ($i = 0; $i -lt $newIcons.Count; $i++) {
-            $folder, $snake = $newIcons[$i]
-            if ($folder -like '__glyph_*') {
-                $ch = $folder.Substring(8)
-                $bmp = Render-Glyph $ch $size
-            } else {
-                $svg = Get-Svg $folder $snake $size
-                $bmp = Render-Svg $svg $size
-            }
-            $g.DrawImage($bmp, ($oldWidth + $i * $size), 0, $size, $size)
-            $bmp.Dispose()
+
+    $dataOffset = [BitConverter]::ToUInt32($bytes, 10)
+    $bpp        = [BitConverter]::ToUInt16($bytes, 28)
+    $oldW       = [BitConverter]::ToInt32($bytes, 18)
+    $h          = [BitConverter]::ToInt32($bytes, 22)
+    if ($bpp -ne 32) { throw "expected 32bpp; got $bpp" }
+    if ($h -ne $size) { throw "BMP height ($h) != strip size ($size)" }
+
+    $oldStride = $oldW * 4
+    $newStride = ($oldW + $newIcons.Count * $size) * 4
+    $newW = $oldW + $newIcons.Count * $size
+
+    # Render every new icon into a [byte[]] of size $size*$size*4 (BGRA, top-down).
+    $glyphBufs = @()
+    foreach ($pair in $newIcons) {
+        $folder, $snake = $pair
+        if ($folder -like '__glyph_*') {
+            $ch = $folder.Substring(8)
+            $glyphBufs += ,(Render-Glyph-Bgra $ch $size)
+        } else {
+            $svg = Get-Svg $folder $snake $size
+            $glyphBufs += ,(Render-Svg-Bgra $svg $size)
         }
-        $g.Dispose()
-        $strip.Save($outPath, [System.Drawing.Imaging.ImageFormat]::Bmp)
-        $strip.Dispose()
-        Write-Host "wrote $outPath  ($newWidth x $size, $($newIcons.Count) icons appended starting at x=$oldWidth)"
-    } finally {
-        $existing.Dispose()
     }
+
+    # New file: header (54 bytes) + new pixel data.
+    $newPixelBytes = $newStride * $h
+    $newFile = New-Object byte[] ($dataOffset + $newPixelBytes)
+
+    # Copy and patch the header.
+    [Array]::Copy($bytes, 0, $newFile, 0, $dataOffset)
+    # Width (offset 18) and image size (offset 34) are little-endian Int32.
+    [BitConverter]::GetBytes([Int32]$newW).CopyTo($newFile, 18)
+    [BitConverter]::GetBytes([UInt32]$newPixelBytes).CopyTo($newFile, 34)
+    # File size (offset 2) is total file size.
+    [BitConverter]::GetBytes([UInt32]($dataOffset + $newPixelBytes)).CopyTo($newFile, 2)
+
+    # Each BMP row corresponds to image y = (h - 1 - rowIdx). Copy old pixels
+    # verbatim and append the new icons.
+    for ($rowIdx = 0; $rowIdx -lt $h; $rowIdx++) {
+        # Old → new (existing portion of the row).
+        [Array]::Copy($bytes, $dataOffset + $rowIdx * $oldStride,
+                      $newFile, $dataOffset + $rowIdx * $newStride,
+                      $oldStride)
+        # The image y for this BMP row.
+        $y = $h - 1 - $rowIdx
+        # Append each new icon's row at column oldW + i*size.
+        for ($i = 0; $i -lt $glyphBufs.Count; $i++) {
+            $buf = $glyphBufs[$i]
+            $srcRowOff = $y * ($size * 4)
+            $dstOff = $dataOffset + $rowIdx * $newStride + ($oldW + $i * $size) * 4
+            [Array]::Copy($buf, $srcRowOff, $newFile, $dstOff, $size * 4)
+        }
+    }
+
+    [System.IO.File]::WriteAllBytes($outPath, $newFile)
+    Write-Host "wrote $outPath  ($newW x $h, $($newIcons.Count) icons appended starting at x=$oldW)"
 }
 
-Extend-Strip (Join-Path $PSScriptRoot 'fluent_small.bmp') (Join-Path $PSScriptRoot 'fluent_small.bmp') 16
-Extend-Strip (Join-Path $PSScriptRoot 'fluent_large.bmp') (Join-Path $PSScriptRoot 'fluent_large.bmp') 32
+Append-To-Bmp (Join-Path $PSScriptRoot 'fluent_small.bmp') (Join-Path $PSScriptRoot 'fluent_small.bmp') 16
+Append-To-Bmp (Join-Path $PSScriptRoot 'fluent_large.bmp') (Join-Path $PSScriptRoot 'fluent_large.bmp') 32
