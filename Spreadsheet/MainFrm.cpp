@@ -510,6 +510,7 @@ BOOL CMainFrame::LoadFrame(UINT nIDResource, DWORD dwDefaultStyle, CWnd* pParent
 //        align_left(14) align_center(15) align_right(16) align_top(17) align_middle(18)
 //        align_bottom(19) text_wrap(20) merge(21) picture(22) date(23) object(24)
 //        find(25) replace(26) goto(27)
+//        fmt_general(28) fmt_number(29) fmt_currency(30) fmt_percent(31) fmt_date(32)
 namespace FluentIdx {
         constexpr int Bold        = 4;
         constexpr int Italic      = 5;
@@ -529,6 +530,11 @@ namespace FluentIdx {
         constexpr int AlignBottom = 19;
         constexpr int TextWrap    = 20;
         constexpr int Merge       = 21;
+        constexpr int FmtGeneral  = 28;
+        constexpr int FmtNumber   = 29;
+        constexpr int FmtCurrency = 30;
+        constexpr int FmtPercent  = 31;
+        constexpr int FmtDate     = 32;
 }
 
 static CMFCRibbonPanel* FindHomePanel(CMFCRibbonBar& bar, LPCTSTR pszName)
@@ -682,17 +688,16 @@ void CMainFrame::SetupNumberPanel()
 
         pPanel->RemoveAll();
 
-        // Two rows of text-only buttons — no icons in the Fluent strip yet.
-        // Top row: General + Number. Bottom row: Currency + Percent + Date.
+        // Two rows. Top: General + Number. Bottom: Currency + Percent + Date.
         CMFCRibbonButtonsGroup* pTopRow = new CMFCRibbonButtonsGroup();
-        pTopRow->AddButton(new CMFCRibbonButton(ID_FMT_GENERAL, _T("General"), -1, -1));
-        pTopRow->AddButton(new CMFCRibbonButton(ID_FMT_NUMBER,  _T("Number"),  -1, -1));
+        pTopRow->AddButton(new CMFCRibbonButton(ID_FMT_GENERAL, _T("General"), FluentIdx::FmtGeneral));
+        pTopRow->AddButton(new CMFCRibbonButton(ID_FMT_NUMBER,  _T("Number"),  FluentIdx::FmtNumber));
         pPanel->Add(pTopRow);
 
         CMFCRibbonButtonsGroup* pBottomRow = new CMFCRibbonButtonsGroup();
-        pBottomRow->AddButton(new CMFCRibbonButton(ID_FMT_CURRENCY, _T("Currency"), -1, -1));
-        pBottomRow->AddButton(new CMFCRibbonButton(ID_FMT_PERCENT,  _T("Percent"),  -1, -1));
-        pBottomRow->AddButton(new CMFCRibbonButton(ID_FMT_DATE,     _T("Date"),     -1, -1));
+        pBottomRow->AddButton(new CMFCRibbonButton(ID_FMT_CURRENCY, _T("Currency"), FluentIdx::FmtCurrency));
+        pBottomRow->AddButton(new CMFCRibbonButton(ID_FMT_PERCENT,  _T("Percent"),  FluentIdx::FmtPercent));
+        pBottomRow->AddButton(new CMFCRibbonButton(ID_FMT_DATE,     _T("Date"),     FluentIdx::FmtDate));
         pPanel->Add(pBottomRow);
 }
 

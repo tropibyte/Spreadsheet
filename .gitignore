@@ -368,3 +368,6 @@ tmpclaude-*-cwd
 
 # Grid32 test harness build artifacts
 Tests/build/
+
+# Fluent icon SVG cache (downloaded by Spreadsheet/res/regen_fluent.ps1)
+Spreadsheet/res/fluent_cache/
