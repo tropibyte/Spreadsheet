@@ -84,6 +84,53 @@ BOOL CGridCtrl::SetSelectionNumberFormat(UINT format)
     return TRUE;
 }
 
+BOOL CGridCtrl::GetCurrentCellFontInfo(FONTINFO& fi)
+{
+    return (BOOL)::SendMessage(m_hWnd, GM_GETCHARFORMAT, SCF_CURRENTCELL, (LPARAM)&fi);
+}
+
+BOOL CGridCtrl::SetSelectionHAlign(UINT halign)
+{
+    ::SendMessage(m_hWnd, GM_SETALIGN, GA_HORIZ, (LPARAM)halign);
+    return TRUE;
+}
+
+BOOL CGridCtrl::SetSelectionVAlign(UINT valign)
+{
+    ::SendMessage(m_hWnd, GM_SETALIGN, GA_VERT, (LPARAM)valign);
+    return TRUE;
+}
+
+BOOL CGridCtrl::SetSelectionWrap(BOOL wrap)
+{
+    ::SendMessage(m_hWnd, GM_SETALIGN, GA_WRAP, (LPARAM)wrap);
+    return TRUE;
+}
+
+UINT CGridCtrl::GetCurrentCellHAlign()
+{
+    return (UINT)::SendMessage(m_hWnd, GM_GETALIGN, GA_HORIZ, 0);
+}
+
+UINT CGridCtrl::GetCurrentCellVAlign()
+{
+    return (UINT)::SendMessage(m_hWnd, GM_GETALIGN, GA_VERT, 0);
+}
+
+BOOL CGridCtrl::GetCurrentCellWrap()
+{
+    return (BOOL)::SendMessage(m_hWnd, GM_GETALIGN, GA_WRAP, 0);
+}
+
+BOOL CGridCtrl::SetCurrentCellText(LPCWSTR text)
+{
+    GRIDPOINT pt{};
+    GetCurrentCell(pt);
+    // GM_SETCELLTEXT packs col in LOWORD, row in HIWORD (see MakeGridPointFromWPARAM).
+    ::SendMessage(m_hWnd, GM_SETCELLTEXT, MAKEWPARAM(pt.nCol, pt.nRow), (LPARAM)text);
+    return TRUE;
+}
+
 BOOL CGridCtrl::FindText(const GCFINDSTRUCT& fs)
 {
     return ::SendMessage(m_hWnd, GM_FINDTEXT, 0, (LPARAM)&fs) != 0;

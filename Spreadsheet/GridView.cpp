@@ -53,6 +53,8 @@ void CGridView::Dump(CDumpContext& dc) const
 {
 	CView::Dump(dc);
 }
+#endif
+#endif //_DEBUG
 
 BOOL CGridView::SetCurrentCell(LPCWSTR pwszRef, short nWhich)
 {
@@ -63,9 +65,6 @@ BOOL CGridView::SetCurrentCell(UINT nRow, UINT nCol)
 {
     return m_wndGridCtrl.SetCurrentCell(nRow, nCol);
 }
-
-#endif
-#endif //_DEBUG
 
 void CGridView::OnFindNext(LPCTSTR lpszFind, BOOL bNext, BOOL bCase)
 {
@@ -140,7 +139,7 @@ void CGridView::OnEditPaste()
 void CGridView::OnEditSelectAll()
 {
     GRIDSELECTION sel{ {0,0}, { (UINT)-1, (UINT)-1 } };
-    m_wndGridCtrl.SetRangeFormat(sel, FONTINFO());
+    m_wndGridCtrl.SendMessage(GM_SETSELECTION, 0, (LPARAM)&sel);
 }
 
 void CGridView::OnEditClear()

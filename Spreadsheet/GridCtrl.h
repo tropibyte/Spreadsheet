@@ -20,6 +20,14 @@ public:
     BOOL SetRangeFormat(const GRIDSELECTION& sel, const FONTINFO& fi);
     BOOL SetCurrentCellNumberFormat(UINT format);
     BOOL SetSelectionNumberFormat(UINT format);
+    BOOL GetCurrentCellFontInfo(FONTINFO& fi);
+    BOOL SetSelectionHAlign(UINT halign);
+    BOOL SetSelectionVAlign(UINT valign);
+    BOOL SetSelectionWrap(BOOL wrap);
+    UINT GetCurrentCellHAlign();    // DT_LEFT/CENTER/RIGHT, or 0 if none.
+    UINT GetCurrentCellVAlign();    // DT_TOP/VCENTER/BOTTOM, or 0 if none.
+    BOOL GetCurrentCellWrap();
+    BOOL SetCurrentCellText(LPCWSTR text);
     BOOL FindText(const GCFINDSTRUCT& fs);
     BOOL ReplaceText(const GCREPLACESTRUCT& rs);
     BOOL GetCurrentCell(GRIDPOINT& pt) const;

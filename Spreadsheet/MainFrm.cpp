@@ -17,6 +17,8 @@
 #include "Spreadsheet.h"
 #include "MainFrm.h"
 #include "GridView.h"
+#include "GotoDlg.h"
+#include <atlconv.h>
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -380,101 +382,114 @@ void CMainFrame::OnUpdateFilePrintPreview(CCmdUI* pCmdUI)
 }
 
 
+// Returns the active grid view's CGridCtrl, or nullptr if no view is active.
+CGridCtrl* CMainFrame::ActiveGrid()
+{
+        CGridView* pView = DYNAMIC_DOWNCAST(CGridView, GetActiveView());
+        return pView ? &pView->GetGridCtrl() : nullptr;
+}
+
+// Read the current cell's font, apply a mutator, write it back to the selection.
+// Centralizes the read-modify-write pattern for all Font-panel toggles.
+template <typename Fn>
+static void MutateCurrentFont(CGridCtrl* g, Fn mutator)
+{
+        if (!g) return;
+        FONTINFO fi{};
+        if (!g->GetCurrentCellFontInfo(fi)) return;
+        mutator(fi);
+        g->SetSelectionFormat(fi);
+}
+
 void CMainFrame::OnCellGoto()
 {
-        AfxMessageBox(_T("Ctrl+G pressed"));
+        CGotoDlg dlg(this);
+        if (dlg.DoModal() != IDOK)
+                return;
+        CGridCtrl* g = ActiveGrid();
+        if (!g) return;
+        CT2W wRef(dlg.m_cellRef);
+        g->SetCurrentCell(wRef, dlg.nWhich);
 }
 
 void CMainFrame::OnFontName()
 {
         CMFCRibbonFontComboBox* pCombo = DYNAMIC_DOWNCAST(CMFCRibbonFontComboBox, m_wndRibbonBar.FindByID(ID_FONT_NAME));
-        if (pCombo)
-        {
-                //m_currFontInfo.m_wsFontFace = pCombo->GetEditText().GetString();
-                //ApplyCurrentFont();
-        }
+        if (!pCombo) return;
+        CString face = pCombo->GetEditText();
+        if (face.IsEmpty()) return;
+        MutateCurrentFont(ActiveGrid(), [&](FONTINFO& fi) { fi.m_wsFontFace = (LPCWSTR)face; });
 }
 
 void CMainFrame::OnFontSize()
 {
         CMFCRibbonComboBox* pCombo = DYNAMIC_DOWNCAST(CMFCRibbonComboBox, m_wndRibbonBar.FindByID(ID_FONT_SIZE));
-        if (pCombo)
-        {
-                int size = _ttoi(pCombo->GetEditText());
-                if (size > 0)
-                {
-                        //m_currFontInfo.m_fPointSize = (float)size;
-                        //ApplyCurrentFont();
-                }
-        }
+        if (!pCombo) return;
+        int size = _ttoi(pCombo->GetEditText());
+        if (size <= 0) return;
+        MutateCurrentFont(ActiveGrid(), [&](FONTINFO& fi) { fi.m_fPointSize = (float)size; });
 }
 
 void CMainFrame::OnFontGrow()
 {
-        //m_currFontInfo.m_fPointSize += 1.0f;
-        //ApplyCurrentFont();
+        MutateCurrentFont(ActiveGrid(), [](FONTINFO& fi) {
+                if (fi.m_fPointSize <= 0) fi.m_fPointSize = 10.0f;
+                fi.m_fPointSize += 1.0f;
+        });
 }
 
 void CMainFrame::OnFontShrink()
 {
-        //if (m_currFontInfo.m_fPointSize > 1.0f)
-        //{
-        //        m_currFontInfo.m_fPointSize -= 1.0f;
-        //        ApplyCurrentFont();
-        //}
+        MutateCurrentFont(ActiveGrid(), [](FONTINFO& fi) {
+                if (fi.m_fPointSize > 1.0f) fi.m_fPointSize -= 1.0f;
+        });
 }
 
 void CMainFrame::OnFontBold()
 {
-        //m_currFontInfo.bWeight = (m_currFontInfo.bWeight == 400 ? 700 : 400);
-        //ApplyCurrentFont();
+        MutateCurrentFont(ActiveGrid(), [](FONTINFO& fi) {
+                fi.bWeight = (fi.bWeight >= 700) ? 400 : 700;
+        });
 }
 
 void CMainFrame::OnFontItalic()
 {
-        //m_currFontInfo.bItalic = !m_currFontInfo.bItalic;
-        //ApplyCurrentFont();
+        MutateCurrentFont(ActiveGrid(), [](FONTINFO& fi) { fi.bItalic = !fi.bItalic; });
 }
 
 void CMainFrame::OnFontUnderline()
 {
-        //m_currFontInfo.bUnderline = !m_currFontInfo.bUnderline;
-        //ApplyCurrentFont();
+        MutateCurrentFont(ActiveGrid(), [](FONTINFO& fi) { fi.bUnderline = !fi.bUnderline; });
 }
 
 void CMainFrame::OnFontStrikethrough()
 {
-        //m_currFontInfo.bStrikeThrough = !m_currFontInfo.bStrikeThrough;
-        //ApplyCurrentFont();
+        MutateCurrentFont(ActiveGrid(), [](FONTINFO& fi) { fi.bStrikeThrough = !fi.bStrikeThrough; });
 }
 
 void CMainFrame::OnFontColor()
 {
         CMFCRibbonColorButton* pBtn = DYNAMIC_DOWNCAST(CMFCRibbonColorButton, m_wndRibbonBar.FindByID(ID_FONT_COLOR));
-        if (pBtn)
-        {
-                //m_currFontInfo.m_clrTextColor = pBtn->GetColor();
-                //ApplyCurrentFont();
-        }
+        if (!pBtn) return;
+        COLORREF c = pBtn->GetColor();
+        MutateCurrentFont(ActiveGrid(), [&](FONTINFO& fi) { fi.m_clrTextColor = c; });
 }
 
 void CMainFrame::OnFontBackground()
 {
         CMFCRibbonColorButton* pBtn = DYNAMIC_DOWNCAST(CMFCRibbonColorButton, m_wndRibbonBar.FindByID(ID_FONT_CELL_BKGND));
-        if (pBtn)
-        {
-                m_cellBkg = pBtn->GetColor();
-                // Background color would require full cell update - omitted for brevity
-        }
+        if (!pBtn) return;
+        m_cellBkg = pBtn->GetColor();
+        // The cell-background channel doesn't go through FONTINFO — it lives
+        // on cell_base::clrBackground. There's no GM_SETBACKGROUND yet, so
+        // this stays parked on m_cellBkg until that lands.
 }
 
 void CMainFrame::ApplyCurrentFont()
 {
-        CGridView* pView = DYNAMIC_DOWNCAST(CGridView, GetActiveView());
-        if (pView != nullptr)
-        {
-                //pView->ApplyFont(m_currFontInfo);
-        }
+        // Legacy entry point. Individual handlers now mutate font state
+        // directly through MutateCurrentFont(); this remains for callers
+        // that already hold a fully-built FONTINFO they want to apply.
 }
 
 
@@ -662,22 +677,33 @@ void CMainFrame::OnInsertPicture()
 
 void CMainFrame::OnInsertDateTime()
 {
-        // Insert formatted current date/time into the active cell.
-        CGridView* pView = DYNAMIC_DOWNCAST(CGridView, GetActiveView());
-        if (!pView)
-                return;
+        CGridCtrl* g = ActiveGrid();
+        if (!g) return;
         CTime now = CTime::GetCurrentTime();
         CString strDateTime = now.Format(_T("%Y-%m-%d %H:%M"));
-        // TODO: route through GridCtrl when CGridCtrl exposes SetCurrentCellText.
-        (void)strDateTime;
+        g->SetCurrentCellText((LPCWSTR)CT2W(strDateTime));
 }
 
 void CMainFrame::OnAlignCmd(UINT nID)
 {
-        // Horizontal/vertical alignment, wrap-text, and merge-cells all wait on
-        // CGridCtrl growing alignment + merge methods. Cell-level state already
-        // exists in Grid32's cell_base::justification and GRIDCELL::mergeRange.
-        UNREFERENCED_PARAMETER(nID);
+        CGridCtrl* g = ActiveGrid();
+        if (!g) return;
+        switch (nID)
+        {
+        case ID_ALIGN_LEFT:   g->SetSelectionHAlign(DT_LEFT);    break;
+        case ID_ALIGN_CENTER: g->SetSelectionHAlign(DT_CENTER);  break;
+        case ID_ALIGN_RIGHT:  g->SetSelectionHAlign(DT_RIGHT);   break;
+        case ID_ALIGN_TOP:    g->SetSelectionVAlign(DT_TOP);     break;
+        case ID_ALIGN_MIDDLE: g->SetSelectionVAlign(DT_VCENTER); break;
+        case ID_ALIGN_BOTTOM: g->SetSelectionVAlign(DT_BOTTOM);  break;
+        case ID_ALIGN_WRAP:
+                g->SetSelectionWrap(!g->GetCurrentCellWrap());
+                break;
+        case ID_ALIGN_MERGE:
+                // Awaiting Grid32 merge-cells implementation (mergeRange exists,
+                // but no API or paint-time handling yet).
+                break;
+        }
 }
 
 void CMainFrame::SetupNumberPanel()

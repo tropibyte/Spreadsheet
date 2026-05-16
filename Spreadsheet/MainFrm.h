@@ -16,6 +16,7 @@
 #include "CalendarBar.h"
 #include "Resource.h"
 #include "../Grid32/grid32.h"
+#include "GridCtrl.h"
 
 
 class COutlookBar : public CMFCOutlookBar
@@ -34,6 +35,8 @@ protected: // create from serialization only
         void SetupAlignmentPanel();
         void SetupNumberPanel();
         void ApplyCurrentFont();
+        // Convenience: active grid control on the active view, or nullptr.
+        CGridCtrl* ActiveGrid();
 
 // Attributes
 public:
