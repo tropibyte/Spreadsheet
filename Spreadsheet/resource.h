@@ -97,13 +97,18 @@
 #define ID_ALIGN_BOTTOM                 32805
 #define ID_ALIGN_WRAP                   32806
 #define ID_ALIGN_MERGE                  32807
+#define ID_FMT_GENERAL                  32810
+#define ID_FMT_NUMBER                   32811
+#define ID_FMT_CURRENCY                 32812
+#define ID_FMT_PERCENT                  32813
+#define ID_FMT_DATE                     32814
 
 // Next default values for new objects
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        327
-#define _APS_NEXT_COMMAND_VALUE         32808
+#define _APS_NEXT_COMMAND_VALUE         32815
 #define _APS_NEXT_CONTROL_VALUE         1002
 #define _APS_NEXT_SYMED_VALUE           316
 #endif

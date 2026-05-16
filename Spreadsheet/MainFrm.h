@@ -32,6 +32,7 @@ protected: // create from serialization only
 	DECLARE_DYNCREATE(CMainFrame)
         void SetupFontPanel();
         void SetupAlignmentPanel();
+        void SetupNumberPanel();
         void ApplyCurrentFont();
 
 // Attributes
@@ -102,6 +103,7 @@ public:
 	afx_msg void OnInsertPicture();
 	afx_msg void OnInsertDateTime();
 	afx_msg void OnAlignCmd(UINT nID);
+	afx_msg void OnFormatCmd(UINT nID);
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	virtual BOOL LoadFrame(UINT nIDResource, DWORD dwDefaultStyle = WS_OVERLAPPEDWINDOW | FWS_ADDTOTITLE, CWnd* pParentWnd = NULL, CCreateContext* pContext = NULL);
 };

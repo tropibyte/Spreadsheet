@@ -53,6 +53,7 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWndEx)
         ON_COMMAND(ID_INSERT_PICTURE, &CMainFrame::OnInsertPicture)
         ON_COMMAND(ID_INSERT_DATETIME, &CMainFrame::OnInsertDateTime)
         ON_COMMAND_RANGE(ID_ALIGN_LEFT, ID_ALIGN_MERGE, &CMainFrame::OnAlignCmd)
+        ON_COMMAND_RANGE(ID_FMT_GENERAL, ID_FMT_DATE, &CMainFrame::OnFormatCmd)
 END_MESSAGE_MAP()
 
 // CMainFrame construction/destruction
@@ -79,6 +80,7 @@ int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
 	m_wndRibbonBar.LoadFromResource(IDR_RIBBON);
 	SetupFontPanel();
 	SetupAlignmentPanel();
+	SetupNumberPanel();
 
 	if (!m_wndStatusBar.Create(this))
 	{
@@ -670,5 +672,46 @@ void CMainFrame::OnAlignCmd(UINT nID)
         // CGridCtrl growing alignment + merge methods. Cell-level state already
         // exists in Grid32's cell_base::justification and GRIDCELL::mergeRange.
         UNREFERENCED_PARAMETER(nID);
+}
+
+void CMainFrame::SetupNumberPanel()
+{
+        CMFCRibbonPanel* pPanel = FindHomePanel(m_wndRibbonBar, _T("Number"));
+        if (!pPanel)
+                return;
+
+        pPanel->RemoveAll();
+
+        // Two rows of text-only buttons — no icons in the Fluent strip yet.
+        // Top row: General + Number. Bottom row: Currency + Percent + Date.
+        CMFCRibbonButtonsGroup* pTopRow = new CMFCRibbonButtonsGroup();
+        pTopRow->AddButton(new CMFCRibbonButton(ID_FMT_GENERAL, _T("General"), -1, -1));
+        pTopRow->AddButton(new CMFCRibbonButton(ID_FMT_NUMBER,  _T("Number"),  -1, -1));
+        pPanel->Add(pTopRow);
+
+        CMFCRibbonButtonsGroup* pBottomRow = new CMFCRibbonButtonsGroup();
+        pBottomRow->AddButton(new CMFCRibbonButton(ID_FMT_CURRENCY, _T("Currency"), -1, -1));
+        pBottomRow->AddButton(new CMFCRibbonButton(ID_FMT_PERCENT,  _T("Percent"),  -1, -1));
+        pBottomRow->AddButton(new CMFCRibbonButton(ID_FMT_DATE,     _T("Date"),     -1, -1));
+        pPanel->Add(pBottomRow);
+}
+
+void CMainFrame::OnFormatCmd(UINT nID)
+{
+        CGridView* pView = DYNAMIC_DOWNCAST(CGridView, GetActiveView());
+        if (!pView)
+                return;
+        UINT fmt = FMT_GENERAL;
+        switch (nID) {
+        case ID_FMT_GENERAL:  fmt = FMT_GENERAL;  break;
+        case ID_FMT_NUMBER:   fmt = FMT_NUMBER;   break;
+        case ID_FMT_CURRENCY: fmt = FMT_CURRENCY; break;
+        case ID_FMT_PERCENT:  fmt = FMT_PERCENT;  break;
+        case ID_FMT_DATE:     fmt = FMT_DATE_ISO; break;
+        default: return;
+        }
+        // SCF_SELECTION on Grid32's side falls back to the current cell when
+        // the selection rect is empty, so this works for single-cell edits too.
+        pView->GetGridCtrl().SetSelectionNumberFormat(fmt);
 }
 

@@ -72,6 +72,18 @@ BOOL CGridCtrl::SetRangeFormat(const GRIDSELECTION& sel, const FONTINFO& fi)
     return ::SendMessage(m_hWnd, GM_SETCHARFORMAT, SCF_RANGE, (LPARAM)&cf) != 0;
 }
 
+BOOL CGridCtrl::SetCurrentCellNumberFormat(UINT format)
+{
+    ::SendMessage(m_hWnd, GM_SETFORMAT, SCF_CURRENTCELL, (LPARAM)format);
+    return TRUE;
+}
+
+BOOL CGridCtrl::SetSelectionNumberFormat(UINT format)
+{
+    ::SendMessage(m_hWnd, GM_SETFORMAT, SCF_SELECTION, (LPARAM)format);
+    return TRUE;
+}
+
 BOOL CGridCtrl::FindText(const GCFINDSTRUCT& fs)
 {
     return ::SendMessage(m_hWnd, GM_FINDTEXT, 0, (LPARAM)&fs) != 0;
