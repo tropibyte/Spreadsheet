@@ -627,6 +627,8 @@ void CMainFrame::SetupFontPanel()
                 DEVICE_FONTTYPE | RASTER_FONTTYPE | TRUETYPE_FONTTYPE, DEFAULT_CHARSET, DEFAULT_PITCH, 120);
         pFontComboBox->SetToolTipText(_T("Font"));
         pFontComboBox->SetDescription(_T("Pick a font for the selected cells."));
+        // Match Grid32's default cell font (set in CGrid32Mgr ctor).
+        pFontComboBox->SetEditText(_T("Arial"));
         pTopRow->AddButton(pFontComboBox);
 
         CMFCRibbonComboBox* pFontSizeComboBox = new CMFCRibbonComboBox(ID_FONT_SIZE, TRUE, 40);
