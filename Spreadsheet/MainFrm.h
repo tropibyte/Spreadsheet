@@ -121,6 +121,7 @@ public:
 	afx_msg void OnEditReplace();
 	afx_msg void OnEditSelectAll();
 	afx_msg void OnEditClear();
+	afx_msg void OnFormatPainter();
 	afx_msg LRESULT OnFindReplaceMsg(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnCellFont();
 	afx_msg void OnDlgAlignment();

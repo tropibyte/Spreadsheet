@@ -113,13 +113,14 @@
 #define ID_FILL_LEFT                    32823
 #define ID_DLG_SORT                     32824
 #define ID_DLG_FILL                     32825
+#define ID_FORMAT_PAINTER               32826
 
 // Next default values for new objects
 //
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        327
-#define _APS_NEXT_COMMAND_VALUE         32826
+#define _APS_NEXT_COMMAND_VALUE         32827
 #define _APS_NEXT_CONTROL_VALUE         1002
 #define _APS_NEXT_SYMED_VALUE           316
 #endif

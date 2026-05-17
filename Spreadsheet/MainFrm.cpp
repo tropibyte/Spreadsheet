@@ -69,6 +69,7 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWndEx)
         ON_COMMAND(ID_EDIT_REPLACE,    &CMainFrame::OnEditReplace)
         ON_COMMAND(ID_EDIT_SELECT_ALL, &CMainFrame::OnEditSelectAll)
         ON_COMMAND(ID_EDIT_CLEAR,      &CMainFrame::OnEditClear)
+        ON_COMMAND(ID_FORMAT_PAINTER,  &CMainFrame::OnFormatPainter)
         ON_REGISTERED_MESSAGE(WM_FINDREPLACE_REG, &CMainFrame::OnFindReplaceMsg)
         ON_COMMAND(ID_CELL_FONT,       &CMainFrame::OnCellFont)
         ON_COMMAND(ID_DLG_ALIGNMENT,   &CMainFrame::OnDlgAlignment)
@@ -551,6 +552,7 @@ BOOL CMainFrame::LoadFrame(UINT nIDResource, DWORD dwDefaultStyle, CWnd* pParent
 //        align_bottom(19) text_wrap(20) merge(21) picture(22) date(23) object(24)
 //        find(25) replace(26) goto(27)
 //        fmt_general(28) fmt_number(29) fmt_currency(30) fmt_percent(31) fmt_date(32)
+//        eraser(33) paint_brush(34)
 namespace FluentIdx {
         constexpr int Bold        = 4;
         constexpr int Italic      = 5;
@@ -575,6 +577,8 @@ namespace FluentIdx {
         constexpr int FmtCurrency = 30;
         constexpr int FmtPercent  = 31;
         constexpr int FmtDate     = 32;
+        constexpr int Eraser      = 33;   // Fluent System Icons: ic_fluent_eraser_segment_*_filled
+        constexpr int PaintBrush  = 34;   // Fluent System Icons: ic_fluent_paint_brush_*_filled
 }
 
 static CMFCRibbonPanel* FindHomePanel(CMFCRibbonBar& bar, LPCTSTR pszName)
@@ -799,7 +803,10 @@ void CMainFrame::SetupClipboardPanel()
 {
         CMFCRibbonPanel* pPanel = FindHomePanel(m_wndRibbonBar, _T("Clipboard"));
         if (!pPanel) return;
-        pPanel->Add(MakeBtn(ID_EDIT_CLEAR, _T("Clear"), FluentIdx::FontDec /* placeholder icon */,
+        pPanel->Add(MakeBtn(ID_FORMAT_PAINTER, _T("Format Painter"), FluentIdx::PaintBrush,
+                _T("Format Painter"),
+                _T("Copy formatting from one cell and apply it to another by clicking the target.")));
+        pPanel->Add(MakeBtn(ID_EDIT_CLEAR, _T("Clear"), FluentIdx::Eraser,
                 _T("Clear"), _T("Delete the contents of the selected cells.")));
 }
 
@@ -953,6 +960,16 @@ void CMainFrame::OnEditReplace()
 void CMainFrame::OnEditSelectAll()
 {
         if (CGridCtrl* g = ActiveGrid()) g->SelectAll();
+}
+
+void CMainFrame::OnFormatPainter()
+{
+        // Real Format Painter needs Grid32 to fire a "next cell click" notification
+        // back into the host so we can grab the target and apply the captured
+        // FONTINFO. Booked under the dialog/model roadmap. Stub for visual fidelity.
+        AfxMessageBox(_T("Format Painter is coming soon. ")
+                      _T("Will copy formatting from the current cell to the next cell you click."),
+                      MB_OK | MB_ICONINFORMATION);
 }
 
 void CMainFrame::OnEditClear()

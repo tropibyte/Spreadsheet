@@ -13,21 +13,32 @@
 
 Add-Type -AssemblyName PresentationCore, PresentationFramework, WindowsBase, System.Drawing
 
+# Each entry is the *next batch* to append onto the existing strip — not the
+# full strip. After running, update this list to whatever batch comes next.
+# Previously-appended batches are recorded above the array as comments.
+#
+#   format: @(folder, snake [, style [, sourceSize]])
+#   style       = 'regular' (default) or 'filled'
+#   sourceSize  = SVG dimension to fetch (defaults to target $size); used when
+#                 the icon only ships at an off-size (e.g. Circle Eraser
+#                 only has 20px SVGs).
+#
+# History of previously-appended batches (already baked into the strips):
+#   batch 2026-05-15  slots 28..32:  Table Simple, Number Symbol, Wallet,
+#                                    __glyph_%, Calendar LTR   (regular)
+#   batch 2026-05-16  slots 33..34:  Circle Eraser (filled, src=20),
+#                                    Paint Brush (filled)
 $newIcons = @(
-    @('Table Simple',   'table_simple'),    # slot 28: fmt_general
-    @('Number Symbol',  'number_symbol'),   # slot 29: fmt_number
-    @('Wallet',         'wallet'),          # slot 30: fmt_currency
-    @('__glyph_%',      'percent'),         # slot 31: fmt_percent
-    @('Calendar LTR',   'calendar_ltr')     # slot 32: fmt_date
+    # Next batch goes here. Currently empty — strip is up to date at slot 34.
 )
 
 $baseUrl = 'https://raw.githubusercontent.com/microsoft/fluentui-system-icons/main/assets'
 $cacheDir = Join-Path $PSScriptRoot 'fluent_cache'
 if (-not (Test-Path $cacheDir)) { New-Item -ItemType Directory $cacheDir | Out-Null }
 
-function Get-Svg([string]$folder, [string]$snake, [int]$size) {
-    $url = "$baseUrl/$([uri]::EscapeDataString($folder))/SVG/ic_fluent_${snake}_${size}_regular.svg"
-    $cachePath = Join-Path $cacheDir "${snake}_${size}.svg"
+function Get-Svg([string]$folder, [string]$snake, [int]$size, [string]$style = 'regular') {
+    $url = "$baseUrl/$([uri]::EscapeDataString($folder))/SVG/ic_fluent_${snake}_${size}_${style}.svg"
+    $cachePath = Join-Path $cacheDir "${snake}_${size}_${style}.svg"
     if (-not (Test-Path $cachePath)) {
         Invoke-WebRequest -Uri $url -OutFile $cachePath -UseBasicParsing
     }
@@ -38,7 +49,12 @@ function Get-Svg([string]$folder, [string]$snake, [int]$size) {
 # (non-premultiplied) alpha. Background pixels get (0,0,0,0) so MFC's
 # alpha blend leaves them invisible; glyph strokes get Fluent's #212121
 # ink at the appropriate alpha.
-function Render-Svg-Bgra([string]$svg, [int]$size) {
+#
+# $svgSize is the natural viewBox dimension of the SVG (defaults to $size).
+# When it differs from $size, the geometry is uniformly scaled so paths
+# drawn at SVG coordinates land correctly on the target canvas.
+function Render-Svg-Bgra([string]$svg, [int]$size, [int]$svgSize = 0) {
+    if ($svgSize -le 0) { $svgSize = $size }
     $pathMatches = [regex]::Matches($svg, '<path\s+[^/]*?d="([^"]+)"[^/]*?/>')
     $dv = [System.Windows.Media.DrawingVisual]::new()
     $ctx = $dv.RenderOpen()
@@ -46,6 +62,10 @@ function Render-Svg-Bgra([string]$svg, [int]$size) {
     $brush = [System.Windows.Media.SolidColorBrush]::new($ink)
     foreach ($m in $pathMatches) {
         $geom = [System.Windows.Media.Geometry]::Parse($m.Groups[1].Value)
+        if ($svgSize -ne $size) {
+            $geom.Transform = [System.Windows.Media.ScaleTransform]::new(
+                $size / $svgSize, $size / $svgSize)
+        }
         $ctx.DrawGeometry($brush, $null, $geom)
     }
     $ctx.Close()
@@ -111,13 +131,16 @@ function Append-To-Bmp([string]$inPath, [string]$outPath, [int]$size) {
     # Render every new icon into a [byte[]] of size $size*$size*4 (BGRA, top-down).
     $glyphBufs = @()
     foreach ($pair in $newIcons) {
-        $folder, $snake = $pair
+        $folder = $pair[0]
+        $snake  = $pair[1]
+        $style  = if ($pair.Count -ge 3) { $pair[2] } else { 'regular' }
+        $svgSz  = if ($pair.Count -ge 4) { [int]$pair[3] } else { $size }
         if ($folder -like '__glyph_*') {
             $ch = $folder.Substring(8)
             $glyphBufs += ,(Render-Glyph-Bgra $ch $size)
         } else {
-            $svg = Get-Svg $folder $snake $size
-            $glyphBufs += ,(Render-Svg-Bgra $svg $size)
+            $svg = Get-Svg $folder $snake $svgSz $style
+            $glyphBufs += ,(Render-Svg-Bgra $svg $size $svgSz)
         }
     }
 
