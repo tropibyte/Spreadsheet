@@ -1585,8 +1585,11 @@ void CGrid32Mgr::IncrementSelectedCell(long nRow, long nCol)
     GRIDPOINT prevCell = m_currentCell;
     PAGESTAT pageStat;
     CalculatePageStats(pageStat);
-    _ASSERT(pageStat.nWidth < ((size_t)m_clientRect.right - GetActualRowHeaderWidth()));
-    _ASSERT(pageStat.nHeight < ((size_t)m_clientRect.bottom - GetActualColHeaderHeight()));
+    // CalculatePageStats accumulates row heights with a `<=` test, so a perfect
+    // fit (pageStat == available) is legal. Use `<=` here to match that
+    // contract; the assert used to fire on cleanly-tiled grids.
+    _ASSERT(pageStat.nWidth <= ((size_t)m_clientRect.right - GetActualRowHeaderWidth()));
+    _ASSERT(pageStat.nHeight <= ((size_t)m_clientRect.bottom - GetActualColHeaderHeight()));
     Nop();
     
     if (nRow > 0 && gcs.nHeight > 0 && m_currentCell.nRow == (UINT)(gcs.nHeight - 1))
