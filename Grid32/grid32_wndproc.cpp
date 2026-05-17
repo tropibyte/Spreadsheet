@@ -4,6 +4,7 @@
 #include <new>
 #include <exception>
 #include <windowsx.h>
+#include <commctrl.h>   // NM_CLICK / NM_KEYDOWN / NM_SETFOCUS / NM_KILLFOCUS / NM_RETURN
 
 GRIDPOINT MakeGridPointFromWPARAM(WPARAM wParam)
 {
@@ -94,12 +95,27 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
             pMgr->OnVScroll(LOWORD(wParam), HIWORD(wParam), (HWND)lParam);
             break;
         case WM_KEYDOWN:
+            {
+                GRIDNMHDR h{};
+                h.cellPt = pMgr->m_currentCell;
+                h.vkey   = (UINT)wParam;
+                h.flags  = (UINT)lParam;
+                pMgr->SendGridNotification(NM_KEYDOWN, &h);
+                if (wParam == VK_RETURN)
+                    pMgr->SendGridNotification(NM_RETURN, &h);
+            }
             if (pMgr->OnKeyDown((UINT)wParam, (UINT)lParam, 0))
             {
                 pMgr->Invalidate(false);
                 return 0;
             }
 
+            break;
+        case WM_SETFOCUS:
+            pMgr->SendGridNotification(NM_SETFOCUS);
+            break;
+        case WM_KILLFOCUS:
+            pMgr->SendGridNotification(NM_KILLFOCUS);
             break;
         case WM_KEYUP:
             if (pMgr->OnKeyUp((UINT)wParam, (UINT)lParam, 0))
@@ -191,9 +207,17 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 
         case WM_UNDO:
             pMgr->OnUndo();
+            {
+                GRIDNMHDR h{}; h.cellPt = pMgr->m_currentCell; h.range = pMgr->m_selectionRect;
+                pMgr->SendGridNotification(GN_CELLCHANGED, &h);
+            }
             break;
         case GM_REDO:
             pMgr->OnRedo();
+            {
+                GRIDNMHDR h{}; h.cellPt = pMgr->m_currentCell; h.range = pMgr->m_selectionRect;
+                pMgr->SendGridNotification(GN_CELLCHANGED, &h);
+            }
             break;
         case GM_CANUNDO:
             return pMgr->OnCanUndo();
@@ -207,6 +231,8 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
             {
                 GRIDPOINT pt = MakeGridPointFromWPARAM(wParam);
                 pMgr->SetCell(pt.nRow, pt.nCol, *reinterpret_cast<PGRIDCELL>(lParam));
+                GRIDNMHDR h{}; h.cellPt = pt;
+                pMgr->SendGridNotification(GN_CELLCHANGED, &h);
             }
             else
             {
@@ -218,19 +244,43 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
             return pMgr->dwError;
 
         case GM_SETCOLUMNWIDTH:
-            return pMgr->SetColumnWidth((size_t)wParam, (size_t)lParam);
+            {
+                size_t oldW = pMgr->GetColumnWidth((size_t)wParam);
+                bool ok = pMgr->SetColumnWidth((size_t)wParam, (size_t)lParam);
+                if (ok)
+                {
+                    GRIDNMHDR h{}; h.cellPt = { 0, (UINT)wParam };
+                    h.oldSize = oldW; h.newSize = (size_t)lParam;
+                    pMgr->SendGridNotification(GN_COLWIDTHCHANGED, &h);
+                }
+                return ok;
+            }
 
         case GM_GETCOLUMNWIDTH:
             return pMgr->GetColumnWidth((size_t)wParam);
 
         case GM_SETROWHEIGHT:
-            return pMgr->SetRowHeight((size_t)wParam, (size_t)lParam);
+            {
+                size_t oldH = pMgr->GetRowHeight((size_t)wParam);
+                bool ok = pMgr->SetRowHeight((size_t)wParam, (size_t)lParam);
+                if (ok)
+                {
+                    GRIDNMHDR h{}; h.cellPt = { (UINT)wParam, 0 };
+                    h.oldSize = oldH; h.newSize = (size_t)lParam;
+                    pMgr->SendGridNotification(GN_ROWHEIGHTCHANGED, &h);
+                }
+                return ok;
+            }
 
         case GM_GETROWHEIGHT:
             return pMgr->GetRowHeight((size_t)wParam);
 
         case GM_SETSELECTION:
             pMgr->OnSetSelection(reinterpret_cast<GRIDSELECTION*>(lParam));
+            {
+                GRIDNMHDR h{}; h.cellPt = pMgr->m_currentCell; h.range = pMgr->m_selectionRect;
+                pMgr->SendGridNotification(GN_SELCHANGE, &h);
+            }
             break;
 
         case GM_GETSELECTION:
@@ -240,27 +290,41 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         case GM_SETCHARFORMAT:
             if (lParam)
             {
+                GRIDNMHDR h{};
                 if (wParam == SCF_RANGE)
                 {
                     LPGCCELLCHARFORMAT pCF = reinterpret_cast<LPGCCELLCHARFORMAT>(lParam);
                     if (pCF->m_cbSize == sizeof(GCCELLCHARFORMAT))
+                    {
                         pMgr->SetRangeFormat(pCF->m_range, pCF->m_format);
+                        h.range = pCF->m_range;
+                        h.cellPt = pCF->m_range.start;
+                    }
                 }
                 else if (wParam == SCF_SELECTION)
                 {
                     PFONTINFO pInfo = reinterpret_cast<PFONTINFO>(lParam);
                     pMgr->SetSelectionFormat(*pInfo);
+                    h.range = pMgr->m_selectionRect;
+                    h.cellPt = pMgr->m_currentCell;
                 }
                 else
                 {
                     PFONTINFO pInfo = reinterpret_cast<PFONTINFO>(lParam);
                     pMgr->SetCellFormat(pMgr->m_currentCell.nRow, pMgr->m_currentCell.nCol, *pInfo);
+                    h.cellPt = pMgr->m_currentCell;
                 }
+                pMgr->SendGridNotification(GN_CELLCHANGED, &h);
             }
             break;
 
         case GM_SETCELLTEXT:
-            pMgr->SetCellText(MakeGridPointFromWPARAM(wParam), reinterpret_cast<LPCWSTR>(lParam));
+            {
+                GRIDPOINT pt = MakeGridPointFromWPARAM(wParam);
+                pMgr->SetCellText(pt, reinterpret_cast<LPCWSTR>(lParam));
+                GRIDNMHDR h{}; h.cellPt = pt;
+                pMgr->SendGridNotification(GN_CELLCHANGED, &h);
+            }
             break;
 
         case GM_GETCELLTEXT:
@@ -281,18 +345,26 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
             return pMgr->m_bRedraw ? TRUE : FALSE;
 
         case GM_SETCURRENTCELL:
-            if (wParam)
             {
-                LPCWSTR pwszRef = (LPCWSTR)lParam;
-                return pMgr->OnSetCurrentCell(pwszRef, (short)wParam);
+                BOOL ok;
+                if (wParam)
+                {
+                    LPCWSTR pwszRef = (LPCWSTR)lParam;
+                    ok = pMgr->OnSetCurrentCell(pwszRef, (short)wParam);
+                }
+                else
+                {
+                    UINT nRow = LOWORD(lParam);
+                    UINT nCol = HIWORD(lParam);
+                    ok = pMgr->OnSetCurrentCell(nRow, nCol);
+                }
+                if (ok)
+                {
+                    GRIDNMHDR h{}; h.cellPt = pMgr->m_currentCell; h.range = pMgr->m_selectionRect;
+                    pMgr->SendGridNotification(GN_SELCHANGE, &h);
+                }
+                return ok;
             }
-            else
-            {
-                UINT nRow = LOWORD(lParam);
-                UINT nCol = HIWORD(lParam);
-                return pMgr->OnSetCurrentCell(nRow, nCol);
-            }
-            break;
         case GM_GETCURRENTCELL:
         {
             return MAKELRESULT(pMgr->m_currentCell.nCol, pMgr->m_currentCell.nRow);
@@ -303,11 +375,20 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
 
         case GM_FILLCELLS:
             if (lParam)
+            {
                 pMgr->OnFillCells(wParam, *(LPGCFILLSTRUCT)lParam);
+                GRIDNMHDR h{}; h.range = pMgr->m_selectionRect; h.cellPt = h.range.start;
+                pMgr->SendGridNotification(GN_CELLCHANGED, &h);
+            }
             break;
         case GM_SORTCELLS:
             if(lParam)
-                pMgr->OnSortCells(wParam, *(GCSORTSTRUCT*)lParam);
+            {
+                LPGCSORTSTRUCT ss = (GCSORTSTRUCT*)lParam;
+                pMgr->OnSortCells(wParam, *ss);
+                GRIDNMHDR h{}; h.range = ss->m_sortSel; h.cellPt = ss->m_sortSel.start;
+                pMgr->SendGridNotification(GN_CELLCHANGED, &h);
+            }
             break;
 
         case GM_FILTERCELLS:
@@ -320,19 +401,37 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
             break;
         case GM_REPLACETEXT:
             if (lParam)
-                return pMgr->OnReplaceText(*(LPGCREPLACESTRUCT)lParam);
+            {
+                BOOL ok = pMgr->OnReplaceText(*(LPGCREPLACESTRUCT)lParam);
+                if (ok)
+                {
+                    GRIDNMHDR h{}; h.cellPt = pMgr->m_selectionRect.start;
+                    pMgr->SendGridNotification(GN_CELLCHANGED, &h);
+                }
+                return ok;
+            }
             break;
 
         case GM_SETFORMAT:
             // wParam: SCF_CURRENTCELL / SCF_SELECTION / SCF_RANGE
             // lParam: UINT format code (FMT_*) for current/selection;
             //         GCCELLFORMAT* for range (range form unimplemented).
-            if (wParam == SCF_SELECTION)
-                pMgr->SetSelectionNumberFormat((UINT)lParam);
-            else
-                pMgr->SetCellNumberFormat(pMgr->m_currentCell.nRow,
-                                          pMgr->m_currentCell.nCol,
-                                          (UINT)lParam);
+            {
+                GRIDNMHDR h{};
+                if (wParam == SCF_SELECTION)
+                {
+                    pMgr->SetSelectionNumberFormat((UINT)lParam);
+                    h.range = pMgr->m_selectionRect; h.cellPt = pMgr->m_currentCell;
+                }
+                else
+                {
+                    pMgr->SetCellNumberFormat(pMgr->m_currentCell.nRow,
+                                              pMgr->m_currentCell.nCol,
+                                              (UINT)lParam);
+                    h.cellPt = pMgr->m_currentCell;
+                }
+                pMgr->SendGridNotification(GN_CELLCHANGED, &h);
+            }
             break;
 
         case GM_GETCHARFORMAT:
@@ -353,6 +452,10 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
             case GA_HORIZ: pMgr->SetSelectionHAlign((UINT)lParam); break;
             case GA_VERT:  pMgr->SetSelectionVAlign((UINT)lParam); break;
             case GA_WRAP:  pMgr->SetSelectionWrap((BOOL)lParam);   break;
+            }
+            {
+                GRIDNMHDR h{}; h.range = pMgr->m_selectionRect; h.cellPt = pMgr->m_currentCell;
+                pMgr->SendGridNotification(GN_CELLCHANGED, &h);
             }
             break;
 
@@ -387,6 +490,8 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
                 sel.start = { 0, 0 };
                 sel.end   = { (UINT)pMgr->gcs.nHeight - 1, (UINT)pMgr->gcs.nWidth - 1 };
                 pMgr->OnSetSelection(&sel);
+                GRIDNMHDR h{}; h.cellPt = pMgr->m_currentCell; h.range = pMgr->m_selectionRect;
+                pMgr->SendGridNotification(GN_SELCHANGE, &h);
             }
             return 0;
 

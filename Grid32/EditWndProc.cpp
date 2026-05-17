@@ -10,12 +10,25 @@ LRESULT CALLBACK CGrid32Mgr::EditCtrl_WndProc(HWND hWnd, UINT message, WPARAM wP
         return 0;
 
     auto setcurcelltext = [&]() {
+        if (pMgr->m_bSuppressEditCommit)
+        {
+            pMgr->m_bSuppressEditCommit = FALSE;
+            return;
+        }
         int len = GetWindowTextLength(hWnd);
         try {
             WCHAR* wsBuff = new WCHAR[(size_t)len + 10];
             memset(wsBuff, 0, ((size_t)len + 10) * sizeof(WCHAR));
             GetWindowText(hWnd, wsBuff, (len + 10));
             pMgr->SetCurrentCellText(wsBuff);
+
+            GRIDNMHDR h{};
+            h.cellPt = pMgr->m_currentCell;
+            h.text   = wsBuff;
+            pMgr->SendGridNotification(GN_EDITCOMMIT, &h);
+            // No payload re-fill: cellPt + range stay accurate for change too.
+            pMgr->SendGridNotification(GN_CELLCHANGED, &h);
+
             delete[] wsBuff;
             pMgr->Invalidate();
         }
@@ -25,6 +38,12 @@ LRESULT CALLBACK CGrid32Mgr::EditCtrl_WndProc(HWND hWnd, UINT message, WPARAM wP
         catch (...) {
             pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
         }
+    };
+
+    auto fireCancel = [&]() {
+        GRIDNMHDR h{};
+        h.cellPt = pMgr->m_currentCell;
+        pMgr->SendGridNotification(GN_EDITCANCEL, &h);
     };
 
     try {
@@ -69,6 +88,14 @@ LRESULT CALLBACK CGrid32Mgr::EditCtrl_WndProc(HWND hWnd, UINT message, WPARAM wP
             SetFocus(GetParent(hWnd));
             pMgr->IncrementSelectedCell(-1, 0);
             break;
+        case VK_ESCAPE:
+            // Cancel: arm the commit-suppression flag, then bounce focus to the
+            // parent. WM_KILLFOCUS will fire, see the flag, and skip the
+            // commit path — the cell keeps its pre-edit content.
+            fireCancel();
+            pMgr->m_bSuppressEditCommit = TRUE;
+            SetFocus(GetParent(hWnd));
+            return 0;
         }
         break;
     case WM_KILLFOCUS:

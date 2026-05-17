@@ -28,7 +28,7 @@ L'`', L'~'
 
 CGrid32Mgr::CGrid32Mgr() : pRowInfoArray(nullptr), pColInfoArray(nullptr),
 m_hWndGrid(NULL), nColHeaderHeight(40), nRowHeaderWidth(70), m_editWndProc(nullptr),
-m_nMouseHoverDelay(400), m_npHoverDelaySet(0), m_nToBeSized(~0),
+m_nMouseHoverDelay(400), m_npHoverDelaySet(0), m_nToBeSized(~0), m_resizeStartSize(0), m_bSuppressEditCommit(FALSE),
 m_rgbSizingLine(RGB(0, 0, 64)), m_nSizingLine(0), m_bResizable(true), m_bUndoRecordEnabled(TRUE),
 m_bDeferRecalc(FALSE),
 m_bSizing(false), m_bSelecting(false), m_hDefaultFont(NULL),
@@ -1582,6 +1582,7 @@ bool CGrid32Mgr::IsCellIncrementWithinCurrentPage(long nRow, long nCol, PAGESTAT
 
 void CGrid32Mgr::IncrementSelectedCell(long nRow, long nCol)
 {
+    GRIDPOINT prevCell = m_currentCell;
     PAGESTAT pageStat;
     CalculatePageStats(pageStat);
     _ASSERT(pageStat.nWidth < ((size_t)m_clientRect.right - GetActualRowHeaderWidth()));
@@ -1676,10 +1677,19 @@ void CGrid32Mgr::IncrementSelectedCell(long nRow, long nCol)
     m_scrollDifference.y = (long)CalculatedRowDistance(0, (size_t)m_visibleTopLeft.nRow);
 
     Invalidate(false);
+
+    if (prevCell.nRow != m_currentCell.nRow || prevCell.nCol != m_currentCell.nCol)
+    {
+        GRIDNMHDR h{};
+        h.cellPt = m_currentCell;
+        h.range  = m_selectionRect;
+        SendGridNotification(GN_SELCHANGE, &h);
+    }
 }
 
 void CGrid32Mgr::IncrementSelectedPage(long nRow, long nCol)
 {
+    GRIDPOINT prevCell = m_currentCell;
     if (nRow < 0 && m_visibleTopLeft.nRow > 0)
     {
         UINT oldTop = m_visibleTopLeft.nRow;
@@ -1773,10 +1783,19 @@ void CGrid32Mgr::IncrementSelectedPage(long nRow, long nCol)
     m_scrollDifference.y = (long)CalculatedRowDistance(0, (size_t)m_visibleTopLeft.nRow);
 
     Invalidate(false);
+
+    if (prevCell.nRow != m_currentCell.nRow || prevCell.nCol != m_currentCell.nCol)
+    {
+        GRIDNMHDR h{};
+        h.cellPt = m_currentCell;
+        h.range  = m_selectionRect;
+        SendGridNotification(GN_SELCHANGE, &h);
+    }
 }
 
 void CGrid32Mgr::IncrementSelectEdge(long nRow, long nCol)
 {
+    GRIDPOINT prevCell = m_currentCell;
     if (nRow < 0)
     {
         m_visibleTopLeft.nRow = 0;
@@ -1820,6 +1839,13 @@ void CGrid32Mgr::IncrementSelectEdge(long nRow, long nCol)
 
     Invalidate(false);
 
+    if (prevCell.nRow != m_currentCell.nRow || prevCell.nCol != m_currentCell.nCol)
+    {
+        GRIDNMHDR h{};
+        h.cellPt = m_currentCell;
+        h.range  = m_selectionRect;
+        SendGridNotification(GN_SELCHANGE, &h);
+    }
 }
 
 
@@ -2293,6 +2319,26 @@ void CGrid32Mgr::OnLButtonDown(UINT nFlags, int x, int y)
             SetCapture(m_hWndGrid);
 //            ConstrainMouseToClientArea();
             m_bSizing = TRUE;
+            // Remember pre-resize size for the resize-completion notification.
+            if (m_gridHitTest == GRID_HTCOLDIVIDER && m_nToBeSized < (int)gcs.nWidth)
+                m_resizeStartSize = pColInfoArray[m_nToBeSized].nWidth;
+            else if (m_gridHitTest == GRID_HTROWDIVIDER && m_nToBeSized < (int)gcs.nHeight)
+                m_resizeStartSize = pRowInfoArray[m_nToBeSized].nHeight;
+        }
+        break;
+    case GRID_HTCOLHEADER:
+    case GRID_HTROWHEADER:
+    case GRID_HTCORNER:
+        {
+            GRIDPOINT cellPt{};
+            GetCellByPoint(x, y, cellPt);
+            GRIDNMHDR h{};
+            h.pt = { x, y };
+            h.cellPt = cellPt;
+            INT code = m_gridHitTest == GRID_HTCOLHEADER ? GN_COLHEADERCLICK
+                     : m_gridHitTest == GRID_HTROWHEADER ? GN_ROWHEADERCLICK
+                     :                                    GN_CORNERCLICK;
+            SendGridNotification(code, &h);
         }
         break;
     }
@@ -2309,6 +2355,13 @@ void CGrid32Mgr::OnLButtonUp(UINT nFlags, int x, int y)
 {
     GetCurrentMouseCoordinates(x, y);
 
+    // Track which event types to fire after the existing logic completes, so
+    // SendGridNotification calls happen on a stable selection rect / sizes.
+    bool fireSelChange = false;
+    bool fireColResize = false, fireRowResize = false;
+    size_t resizeOld = m_resizeStartSize;
+    size_t resizeIdx = m_nToBeSized;
+
     if (m_bSelecting)
     {
         GRIDPOINT gridPt;
@@ -2318,6 +2371,7 @@ void CGrid32Mgr::OnLButtonUp(UINT nFlags, int x, int y)
         ConstrainMaxPosition();
         CancelMouseTracking();
         Invalidate();
+        fireSelChange = true;
     }
     else if (m_bResizable && m_bSizing)
     {
@@ -2328,7 +2382,10 @@ void CGrid32Mgr::OnLButtonUp(UINT nFlags, int x, int y)
             long long nNewSize = x - nWidth;
 
             if (nNewSize > 0)
+            {
                 pColInfoArray[m_nToBeSized].nWidth = (size_t)nNewSize;
+                fireColResize = true;
+            }
 
             Invalidate();
         }
@@ -2339,16 +2396,56 @@ void CGrid32Mgr::OnLButtonUp(UINT nFlags, int x, int y)
             long long nNewSize = y - nHeight;
 
             if (nNewSize > 0)
+            {
                 pRowInfoArray[m_nToBeSized].nHeight = (size_t)nNewSize;
+                fireRowResize = true;
+            }
 
             Invalidate();
         }
     }
+
+    // NM_CLICK fires after every left-button release, even if the gesture was a
+    // drag-select. cellPt is the released-on cell. Host code (e.g. Format
+    // Painter) uses this as the "user picked a target" hook.
+    bool wasCellClick = (m_gridHitTest == GRID_HTCELL);
+
     m_bSelecting = m_bSizing = 0;
     ReleaseCapture();
     ClipCursor(NULL);
     m_gridHitTest = 0;
     m_mouseDraggingStartPoint = { ~0, ~0 };
+
+    if (wasCellClick)
+    {
+        GRIDNMHDR h{};
+        h.pt = { x, y };
+        GetCellByPoint(x, y, h.cellPt);
+        SendGridNotification(NM_CLICK, &h);
+    }
+    if (fireSelChange)
+    {
+        GRIDNMHDR h{};
+        h.cellPt = m_currentCell;
+        h.range  = m_selectionRect;
+        SendGridNotification(GN_SELCHANGE, &h);
+    }
+    if (fireColResize)
+    {
+        GRIDNMHDR h{};
+        h.cellPt = { 0, (UINT)resizeIdx };
+        h.oldSize = resizeOld;
+        h.newSize = pColInfoArray[resizeIdx].nWidth;
+        SendGridNotification(GN_COLWIDTHCHANGED, &h);
+    }
+    if (fireRowResize)
+    {
+        GRIDNMHDR h{};
+        h.cellPt = { (UINT)resizeIdx, 0 };
+        h.oldSize = resizeOld;
+        h.newSize = pRowInfoArray[resizeIdx].nHeight;
+        SendGridNotification(GN_ROWHEIGHTCHANGED, &h);
+    }
 }
 
 
@@ -3194,8 +3291,13 @@ void CGrid32Mgr::ShowEditControl()
         TRUE);
 
     // Show the edit control
-    BringWindowToTop(m_hWndEdit); 
+    BringWindowToTop(m_hWndEdit);
     SendMessage(m_hWndEdit, EM_SCROLLCARET, 0, 0);
+    {
+        GRIDNMHDR h{};
+        h.cellPt = m_currentCell;
+        SendGridNotification(GN_EDITSTART, &h);
+    }
     ShowWindow(m_hWndEdit, SW_SHOW);
     SetFocus(m_hWndEdit);
 }
@@ -3697,6 +3799,12 @@ bool CGrid32Mgr::OnFindText(const GCFINDSTRUCT& findStruct)
         OnSetCurrentCell(found.nRow, found.nCol);
         Invalidate();
         SetLastError(0);
+        {
+            GRIDNMHDR h{};
+            h.cellPt = m_currentCell;
+            h.range  = m_selectionRect;
+            SendGridNotification(GN_SELCHANGE, &h);
+        }
         return true;
     }
 

@@ -55,6 +55,9 @@ protected:
 	unsigned long long m_lastClickTime;
 	LONG_PTR m_gridHitTest;
 	size_t m_nToBeSized;
+	size_t m_resizeStartSize;   // pre-resize column width / row height; captured on divider down
+	BOOL m_bSuppressEditCommit; // VK_ESCAPE in the edit control sets this so the
+	                            // subsequent WM_KILLFOCUS skips the commit path.
 	long m_nSizingLine;
 	COLORREF m_rgbSizingLine;
 	HFONT m_hDefaultFont;

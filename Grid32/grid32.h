@@ -258,13 +258,46 @@ typedef struct tagGCCELLCHARFORMAT
 } GCCELLCHARFORMAT, *LPGCCELLCHARFORMAT;
 
 
+// Notification payload. SendGridNotification() zero-fills the struct, so
+// handlers only need to read the fields relevant to the notification code:
+//   NM_CLICK / NM_DBLCLK / NM_RCLICK / NM_HOVER  -> pt, cellPt
+//   NM_KEYDOWN / NM_RETURN                       -> vkey, flags
+//   NM_SETFOCUS / NM_KILLFOCUS                   -> (header only)
+//   GN_SELCHANGE                                 -> cellPt (current), range (selection rect)
+//   GN_CELLCHANGED                               -> cellPt or range (caller's choice)
+//   GN_EDITSTART                                 -> cellPt
+//   GN_EDITCOMMIT                                -> cellPt, text (transient, valid only for callback)
+//   GN_EDITCANCEL                                -> cellPt
+//   GN_COLWIDTHCHANGED                           -> cellPt.nCol, oldSize, newSize
+//   GN_ROWHEIGHTCHANGED                          -> cellPt.nRow, oldSize, newSize
+//   GN_COLHEADERCLICK                            -> cellPt.nCol, pt
+//   GN_ROWHEADERCLICK                            -> cellPt.nRow, pt
+//   GN_CORNERCLICK                               -> pt
 typedef struct tagGRIDNMHDR : tagNMHDR {
-	// Add custom members for your notification data
-	// For example:
-	POINT pt; // Mouse position
-	GRIDPOINT cellPt; // Grid cell coordinates
-	void* pExtra; //Extra info as needed
+	POINT         pt;          // mouse position (client coords)
+	GRIDPOINT     cellPt;      // primary cell the event refers to
+	GRIDSELECTION range;       // for events with a range payload
+	UINT          vkey;        // virtual-key code for key events
+	UINT          flags;       // key state flags / event-specific bits
+	size_t        oldSize;     // pre-resize column width or row height
+	size_t        newSize;     // post-resize column width or row height
+	LPCWSTR       text;        // edit-commit text (valid only during callback)
+	void*         pExtra;      // forward-compat slot
 } GRIDNMHDR, * LPGRIDNMHDR;
+
+// Grid notification codes. Below NM_LAST and below LVN_/TVN_/etc. common-control
+// ranges so there's no collision with anything a host already handles.
+#define GN_FIRST              (0U - 2000U)
+#define GN_SELCHANGE          (GN_FIRST -  0)
+#define GN_CELLCHANGED        (GN_FIRST -  1)
+#define GN_EDITSTART          (GN_FIRST -  2)
+#define GN_EDITCOMMIT         (GN_FIRST -  3)
+#define GN_EDITCANCEL         (GN_FIRST -  4)
+#define GN_COLWIDTHCHANGED    (GN_FIRST -  5)
+#define GN_ROWHEIGHTCHANGED   (GN_FIRST -  6)
+#define GN_COLHEADERCLICK     (GN_FIRST -  7)
+#define GN_ROWHEADERCLICK     (GN_FIRST -  8)
+#define GN_CORNERCLICK        (GN_FIRST -  9)
 
 typedef DWORD(CALLBACK* GCSTREAMCALLBACK)(struct tagGCSTREAM *);
 
