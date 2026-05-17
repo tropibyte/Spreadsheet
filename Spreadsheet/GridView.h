@@ -52,6 +52,7 @@ public:
 	afx_msg void OnRawInput(UINT nInputcode, HRAWINPUT hRawInput);
 	afx_msg void OnSysKeyUp(UINT nChar, UINT nRepCnt, UINT nFlags);
         afx_msg void OnSysKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags);
+        afx_msg void OnGridClick(NMHDR* pNMHDR, LRESULT* pResult);
         void ApplyFont(const FONTINFO& fi);
 };
 

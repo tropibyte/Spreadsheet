@@ -71,6 +71,13 @@ protected:  // control bar embedded members
     //FONTINFO          m_currFontInfo;
     COLORREF          m_cellBkg;
     CFindReplaceDialog* m_pFindReplace = nullptr;  // modeless; self-deletes on close
+    BOOL m_bFormatPainterArmed = FALSE;
+    FONTINFO m_capturedFont;
+public:
+    // Called by CGridView when a cell is clicked. Returns true if the click
+    // was consumed (Format Painter armed) and the caller should treat it as
+    // already handled.
+    bool ConsumeGridClick(CGridCtrl* g, const GRIDPOINT& cell);
 
 // Generated message map functions
 protected:
@@ -122,6 +129,7 @@ public:
 	afx_msg void OnEditSelectAll();
 	afx_msg void OnEditClear();
 	afx_msg void OnFormatPainter();
+	afx_msg void OnUpdateFormatPainter(CCmdUI* pCmdUI);
 	afx_msg LRESULT OnFindReplaceMsg(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnCellFont();
 	afx_msg void OnDlgAlignment();

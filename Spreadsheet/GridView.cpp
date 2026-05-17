@@ -4,6 +4,8 @@
 #include "pch.h"
 #include "Spreadsheet.h"
 #include "GridView.h"
+#include "MainFrm.h"
+#include <commctrl.h>
 
 
 // CGridView
@@ -28,6 +30,7 @@ BEGIN_MESSAGE_MAP(CGridView, CView)
     ON_WM_INPUT()
     ON_WM_SYSKEYUP()
     ON_WM_SYSKEYDOWN()
+    ON_NOTIFY(NM_CLICK, GRIDCTRL_ID, &CGridView::OnGridClick)
 END_MESSAGE_MAP()
 
 
@@ -263,4 +266,15 @@ void CGridView::OnSysKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 void CGridView::ApplyFont(const FONTINFO& fi)
 {
     m_wndGridCtrl.SetCurrentCellFormat(fi);
+}
+
+void CGridView::OnGridClick(NMHDR* pNMHDR, LRESULT* pResult)
+{
+    *pResult = 0;
+    LPGRIDNMHDR p = reinterpret_cast<LPGRIDNMHDR>(pNMHDR);
+    // App-level handlers live on CMainFrame (Format Painter etc.); CGridView
+    // just forwards. If/when more click consumers appear, generalize this
+    // into a dispatch table.
+    if (CMainFrame* pFrame = DYNAMIC_DOWNCAST(CMainFrame, AfxGetMainWnd()))
+        pFrame->ConsumeGridClick(&m_wndGridCtrl, p->cellPt);
 }

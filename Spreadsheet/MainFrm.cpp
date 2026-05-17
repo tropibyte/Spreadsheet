@@ -70,6 +70,7 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWndEx)
         ON_COMMAND(ID_EDIT_SELECT_ALL, &CMainFrame::OnEditSelectAll)
         ON_COMMAND(ID_EDIT_CLEAR,      &CMainFrame::OnEditClear)
         ON_COMMAND(ID_FORMAT_PAINTER,  &CMainFrame::OnFormatPainter)
+        ON_UPDATE_COMMAND_UI(ID_FORMAT_PAINTER, &CMainFrame::OnUpdateFormatPainter)
         ON_REGISTERED_MESSAGE(WM_FINDREPLACE_REG, &CMainFrame::OnFindReplaceMsg)
         ON_COMMAND(ID_CELL_FONT,       &CMainFrame::OnCellFont)
         ON_COMMAND(ID_DLG_ALIGNMENT,   &CMainFrame::OnDlgAlignment)
@@ -964,12 +965,35 @@ void CMainFrame::OnEditSelectAll()
 
 void CMainFrame::OnFormatPainter()
 {
-        // Real Format Painter needs Grid32 to fire a "next cell click" notification
-        // back into the host so we can grab the target and apply the captured
-        // FONTINFO. Booked under the dialog/model roadmap. Stub for visual fidelity.
-        AfxMessageBox(_T("Format Painter is coming soon. ")
-                      _T("Will copy formatting from the current cell to the next cell you click."),
-                      MB_OK | MB_ICONINFORMATION);
+        // Toggle: a second click while armed disarms without doing anything,
+        // matching Excel's behavior.
+        if (m_bFormatPainterArmed)
+        {
+                m_bFormatPainterArmed = FALSE;
+                return;
+        }
+        CGridCtrl* g = ActiveGrid();
+        if (!g) return;
+        if (!g->GetCurrentCellFontInfo(m_capturedFont)) return;
+        m_bFormatPainterArmed = TRUE;
+}
+
+void CMainFrame::OnUpdateFormatPainter(CCmdUI* pCmdUI)
+{
+        pCmdUI->Enable(ActiveGrid() != nullptr);
+        pCmdUI->SetCheck(m_bFormatPainterArmed ? 1 : 0);
+}
+
+bool CMainFrame::ConsumeGridClick(CGridCtrl* g, const GRIDPOINT& /*cell*/)
+{
+        if (!m_bFormatPainterArmed || !g)
+                return false;
+        // Apply the captured font to the cell (or drag-selected range) that
+        // the user just clicked on. NM_CLICK fires after OnLButtonUp finalizes
+        // the selection, so SetSelectionFormat covers single-click and drag.
+        g->SetSelectionFormat(m_capturedFont);
+        m_bFormatPainterArmed = FALSE;
+        return true;
 }
 
 void CMainFrame::OnEditClear()
