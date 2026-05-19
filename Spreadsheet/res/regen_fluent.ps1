@@ -28,8 +28,11 @@ Add-Type -AssemblyName PresentationCore, PresentationFramework, WindowsBase, Sys
 #                                    __glyph_%, Calendar LTR   (regular)
 #   batch 2026-05-16  slots 33..34:  Circle Eraser (filled, src=20),
 #                                    Paint Brush (filled)
+#   batch 2026-05-18  slots 35..40:  Arrow Sort Up (filled, src=24),
+#                                    Arrow Sort Down (filled, src=24),
+#                                    Arrow Down/Right/Up/Left (filled)
 $newIcons = @(
-    # Next batch goes here. Currently empty — strip is up to date at slot 34.
+    # Next batch goes here. Currently empty — strip is up to date at slot 40.
 )
 
 $baseUrl = 'https://raw.githubusercontent.com/microsoft/fluentui-system-icons/main/assets'

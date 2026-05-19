@@ -71,7 +71,9 @@ protected:  // control bar embedded members
     //FONTINFO          m_currFontInfo;
     COLORREF          m_cellBkg;
     CFindReplaceDialog* m_pFindReplace = nullptr;  // modeless; self-deletes on close
-    BOOL m_bFormatPainterArmed = FALSE;
+    BOOL  m_bFormatPainterArmed = FALSE;
+    BOOL  m_bFormatPainterPersistent = FALSE;
+    DWORD m_dwFormatPainterArmTime = 0;   // GetTickCount of last arm; used to detect double-click promotion
     FONTINFO m_capturedFont;
 public:
     // Called by CGridView when a cell is clicked. Returns true if the click

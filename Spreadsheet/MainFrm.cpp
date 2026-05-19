@@ -18,6 +18,7 @@
 #include "MainFrm.h"
 #include "GridView.h"
 #include "GotoDlg.h"
+#include "AlignmentDlg.h"
 #include <atlconv.h>
 
 #ifdef _DEBUG
@@ -553,7 +554,8 @@ BOOL CMainFrame::LoadFrame(UINT nIDResource, DWORD dwDefaultStyle, CWnd* pParent
 //        align_bottom(19) text_wrap(20) merge(21) picture(22) date(23) object(24)
 //        find(25) replace(26) goto(27)
 //        fmt_general(28) fmt_number(29) fmt_currency(30) fmt_percent(31) fmt_date(32)
-//        eraser(33) paint_brush(34)
+//        eraser(33) paint_brush(34) sort_up(35) sort_down(36)
+//        fill_down(37) fill_right(38) fill_up(39) fill_left(40)
 namespace FluentIdx {
         constexpr int Bold        = 4;
         constexpr int Italic      = 5;
@@ -580,6 +582,12 @@ namespace FluentIdx {
         constexpr int FmtDate     = 32;
         constexpr int Eraser      = 33;   // Fluent System Icons: ic_fluent_eraser_segment_*_filled
         constexpr int PaintBrush  = 34;   // Fluent System Icons: ic_fluent_paint_brush_*_filled
+        constexpr int SortUp      = 35;   // Fluent: ic_fluent_arrow_sort_up_*_filled
+        constexpr int SortDown    = 36;   // Fluent: ic_fluent_arrow_sort_down_*_filled
+        constexpr int FillDown    = 37;   // Fluent: ic_fluent_arrow_down_*_filled
+        constexpr int FillRight   = 38;
+        constexpr int FillUp      = 39;
+        constexpr int FillLeft    = 40;
 }
 
 static CMFCRibbonPanel* FindHomePanel(CMFCRibbonBar& bar, LPCTSTR pszName)
@@ -835,25 +843,25 @@ void CMainFrame::SetupSortFillPanel()
         CMFCRibbonPanel* pSort = pCategory->AddPanel(_T("Sort"));
         // Use \u2192 (RIGHTWARDS ARROW) explicitly. Literal UTF-8 bytes in source
         // got mis-rendered as "Aâ†Z" when MSVC read the file as Windows-1252.
-        pSort->Add(MakeBtn(ID_SORT_ASC,  L"Sort A\u2192Z", -1,
-                _T("Sort ascending"),  _T("Sort the current column from smallest to largest.")));
-        pSort->Add(MakeBtn(ID_SORT_DESC, L"Sort Z\u2192A", -1,
-                _T("Sort descending"), _T("Sort the current column from largest to smallest.")));
+        pSort->Add(MakeBtn(ID_SORT_ASC,  _T("Sort ascending"),  FluentIdx::SortUp,
+                _T("Sort A\u2192Z"),  _T("Sort the current column from smallest to largest.")));
+        pSort->Add(MakeBtn(ID_SORT_DESC, _T("Sort descending"), FluentIdx::SortDown,
+                _T("Sort Z\u2192A"),  _T("Sort the current column from largest to smallest.")));
         pSort->EnableLaunchButton(ID_DLG_SORT);
 
         // Fill panel — separate launcher for the (forthcoming) Fill Series dialog.
         CMFCRibbonPanel* pFill = pCategory->AddPanel(_T("Fill"));
         CMFCRibbonButtonsGroup* pTopRow = new CMFCRibbonButtonsGroup();
-        pTopRow->AddButton(MakeBtn(ID_FILL_DOWN,  _T("Fill down"),  FluentIdx::AlignBottom,
+        pTopRow->AddButton(MakeBtn(ID_FILL_DOWN,  _T("Fill down"),  FluentIdx::FillDown,
                 _T("Fill down"),  _T("Copy the topmost cell of the selection into every cell below it.")));
-        pTopRow->AddButton(MakeBtn(ID_FILL_RIGHT, _T("Fill right"), FluentIdx::AlignRight,
+        pTopRow->AddButton(MakeBtn(ID_FILL_RIGHT, _T("Fill right"), FluentIdx::FillRight,
                 _T("Fill right"), _T("Copy the leftmost cell of the selection into every cell to its right.")));
         pFill->Add(pTopRow);
 
         CMFCRibbonButtonsGroup* pBottomRow = new CMFCRibbonButtonsGroup();
-        pBottomRow->AddButton(MakeBtn(ID_FILL_UP,    _T("Fill up"),    FluentIdx::AlignTop,
+        pBottomRow->AddButton(MakeBtn(ID_FILL_UP,    _T("Fill up"),    FluentIdx::FillUp,
                 _T("Fill up"),    _T("Copy the bottommost cell of the selection into every cell above it.")));
-        pBottomRow->AddButton(MakeBtn(ID_FILL_LEFT,  _T("Fill left"),  FluentIdx::AlignLeft,
+        pBottomRow->AddButton(MakeBtn(ID_FILL_LEFT,  _T("Fill left"),  FluentIdx::FillLeft,
                 _T("Fill left"),  _T("Copy the rightmost cell of the selection into every cell to its left.")));
         pFill->Add(pBottomRow);
         pFill->EnableLaunchButton(ID_DLG_FILL);
@@ -967,17 +975,28 @@ void CMainFrame::OnEditSelectAll()
 
 void CMainFrame::OnFormatPainter()
 {
-        // Toggle: a second click while armed disarms without doing anything,
-        // matching Excel's behavior.
+        // Excel semantics:
+        //   - First click  arms one-shot
+        //   - Second click within the double-click window promotes to persistent
+        //   - Any later click disarms
         if (m_bFormatPainterArmed)
         {
+                const DWORD elapsed = GetTickCount() - m_dwFormatPainterArmTime;
+                if (!m_bFormatPainterPersistent && elapsed < GetDoubleClickTime())
+                {
+                        m_bFormatPainterPersistent = TRUE;
+                        return;
+                }
                 m_bFormatPainterArmed = FALSE;
+                m_bFormatPainterPersistent = FALSE;
                 return;
         }
         CGridCtrl* g = ActiveGrid();
         if (!g) return;
         if (!g->GetCurrentCellFontInfo(m_capturedFont)) return;
         m_bFormatPainterArmed = TRUE;
+        m_bFormatPainterPersistent = FALSE;
+        m_dwFormatPainterArmTime = GetTickCount();
 }
 
 void CMainFrame::OnUpdateFormatPainter(CCmdUI* pCmdUI)
@@ -994,7 +1013,10 @@ bool CMainFrame::ConsumeGridClick(CGridCtrl* g, const GRIDPOINT& /*cell*/)
         // the user just clicked on. NM_CLICK fires after OnLButtonUp finalizes
         // the selection, so SetSelectionFormat covers single-click and drag.
         g->SetSelectionFormat(m_capturedFont);
-        m_bFormatPainterArmed = FALSE;
+        // Persistent mode (entered via double-click of the button) keeps the
+        // painter armed across applications; single-shot disarms here.
+        if (!m_bFormatPainterPersistent)
+                m_bFormatPainterArmed = FALSE;
         return true;
 }
 
@@ -1058,9 +1080,22 @@ void CMainFrame::OnCellFont()
 
 void CMainFrame::OnDlgAlignment()
 {
-        AfxMessageBox(_T("A full Cell Alignment dialog is coming soon. ")
-                      _T("For now, use the Alignment panel buttons."),
-                      MB_OK | MB_ICONINFORMATION);
+        CGridCtrl* g = ActiveGrid();
+        if (!g) return;
+
+        CAlignmentDlg dlg(this);
+        dlg.m_hAlign = g->GetCurrentCellHAlign();
+        dlg.m_vAlign = g->GetCurrentCellVAlign();
+        dlg.m_bWrap  = g->GetCurrentCellWrap();
+        if (!dlg.m_hAlign) dlg.m_hAlign = DT_LEFT;
+        if (!dlg.m_vAlign) dlg.m_vAlign = DT_VCENTER;
+
+        if (dlg.DoModal() != IDOK)
+                return;
+
+        g->SetSelectionHAlign(dlg.m_hAlign);
+        g->SetSelectionVAlign(dlg.m_vAlign);
+        g->SetSelectionWrap(dlg.m_bWrap);
 }
 
 void CMainFrame::OnDlgNumber()
