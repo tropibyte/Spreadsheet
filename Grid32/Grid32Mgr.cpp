@@ -1988,6 +1988,16 @@ bool CGrid32Mgr::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
     case VK_NEXT:
         IncrementSelectedPage(1, 0);
         return true;
+    case VK_TAB:
+        // Tab from the grid (no edit open) navigates like Excel: right by
+        // default, left with Shift held. Without this, the default char-input
+        // path below would treat \t as whitespace and spuriously open the
+        // editor.
+        if (GetAsyncKeyState(VK_SHIFT) & 0x8000)
+            IncrementSelectedCell(0, -1);
+        else
+            IncrementSelectedCell(0, 1);
+        return true;
     case VK_DELETE:
         ClearCellText(m_currentCell.nRow, m_currentCell.nCol);
         Invalidate();

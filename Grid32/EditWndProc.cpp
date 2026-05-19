@@ -49,14 +49,32 @@ LRESULT CALLBACK CGrid32Mgr::EditCtrl_WndProc(HWND hWnd, UINT message, WPARAM wP
     try {
         switch (message) {
     case WM_KEYDOWN:
-        // Handle keydown events
+        // Navigation keys commit the edit by bouncing focus to the grid
+        // (WM_KILLFOCUS runs setcurcelltext), then move the current cell.
+        // SetFocus must come BEFORE IncrementSelectedCell so the commit
+        // writes to the original cell, not the cell we just moved to.
         switch (wParam)
         {
         case VK_RETURN:
+            // Per host spec: Enter commits in place, marker stays.
+            SetFocus(GetParent(hWnd));
+            return 0;
         case VK_DOWN:
             SetFocus(GetParent(hWnd));
             pMgr->IncrementSelectedCell(1, 0);
-            break;
+            return 0;
+        case VK_UP:
+            SetFocus(GetParent(hWnd));
+            pMgr->IncrementSelectedCell(-1, 0);
+            return 0;
+        case VK_TAB:
+            // Tab = commit + right, Shift+Tab = commit + left.
+            SetFocus(GetParent(hWnd));
+            if (GetKeyState(VK_SHIFT) & 0x8000)
+                pMgr->IncrementSelectedCell(0, -1);
+            else
+                pMgr->IncrementSelectedCell(0, 1);
+            return 0;
         case VK_LEFT:
         {
             DWORD startPos, endPos;
@@ -64,12 +82,10 @@ LRESULT CALLBACK CGrid32Mgr::EditCtrl_WndProc(HWND hWnd, UINT message, WPARAM wP
             if (startPos == 0) {
                 SetFocus(GetParent(hWnd));
                 pMgr->IncrementSelectedCell(0, -1);
+                return 0;
             }
-            else {
-                return CallWindowProc(pMgr->m_editWndProc, hWnd, message, wParam, lParam);
-            }
+            return CallWindowProc(pMgr->m_editWndProc, hWnd, message, wParam, lParam);
         }
-            break;
         case VK_RIGHT:
         {
             int textLength = GetWindowTextLength(hWnd);
@@ -78,16 +94,10 @@ LRESULT CALLBACK CGrid32Mgr::EditCtrl_WndProc(HWND hWnd, UINT message, WPARAM wP
             if (endPos == textLength) {
                 SetFocus(GetParent(hWnd));
                 pMgr->IncrementSelectedCell(0, 1);
+                return 0;
             }
-            else {
-                return CallWindowProc(pMgr->m_editWndProc, hWnd, message, wParam, lParam);
-            }
+            return CallWindowProc(pMgr->m_editWndProc, hWnd, message, wParam, lParam);
         }
-            break;
-        case VK_UP:
-            SetFocus(GetParent(hWnd));
-            pMgr->IncrementSelectedCell(-1, 0);
-            break;
         case VK_ESCAPE:
             // Cancel: arm the commit-suppression flag, then bounce focus to the
             // parent. WM_KILLFOCUS will fire, see the flag, and skip the
