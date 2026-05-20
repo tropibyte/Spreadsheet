@@ -3284,23 +3284,51 @@ BOOL CGrid32Mgr::OnGetCellText(const GRIDPOINT& point, GRID_GETTEXT* text) {
 
 void CGrid32Mgr::ShowEditControl()
 {
-    // This should NEVER happen because we fail the 
+    // This should NEVER happen because we fail the
     // whole creation of the grid if m_hWndEdit is NULL in WM_CREATE
-    if (!m_hWndEdit)  
+    if (!m_hWndEdit)
     {
         return;
     }
 
-    RECT currentCellRect;
-    memset(&currentCellRect, 0, sizeof(RECT));
-    GetCurrentCellRect(currentCellRect);
-    InflateRect(&currentCellRect, -1, -1);
-    // Set the position and size of the edit control
+    RECT cellRect{};
+    GetCurrentCellRect(cellRect);
+    InflateRect(&cellRect, -1, -1);
+
+    // Edit caret position should follow the cell's vertical alignment so the
+    // user's text appears where the committed text would render. Size the
+    // edit just tall enough for its font and slide it within the cell rect
+    // — single-line edits paint text at the top of their client area, so the
+    // alignment shows up as the edit window's vertical offset.
+    PGRIDCELL pCell = GetCellOrDefault(m_currentCell.nRow, m_currentCell.nCol);
+    const int cellH = cellRect.bottom - cellRect.top;
+    int editHeight = cellH;
+
+    HDC hdc = ::GetDC(m_hWndGrid);
+    if (hdc) {
+        const int logPixelsY = GetDeviceCaps(hdc, LOGPIXELSY);
+        const int fontPx = (int)(pCell->fontInfo.m_fPointSize * logPixelsY / 72.0 + 0.5);
+        // Padding gives the caret + any descenders room without clipping.
+        editHeight = fontPx + 6;
+        if (editHeight > cellH) editHeight = cellH;
+        ::ReleaseDC(m_hWndGrid, hdc);
+    }
+
+    const UINT vAlign = pCell->justification & (DT_TOP | DT_VCENTER | DT_BOTTOM);
+    int top = cellRect.top;
+    switch (vAlign)
+    {
+    case DT_VCENTER: top = cellRect.top + (cellH - editHeight) / 2; break;
+    case DT_BOTTOM:  top = cellRect.bottom - editHeight;            break;
+    case DT_TOP:
+    default:         top = cellRect.top;                            break;
+    }
+
     MoveWindow(m_hWndEdit,
-        currentCellRect.left,
-        currentCellRect.top,
-        currentCellRect.right - currentCellRect.left,
-        currentCellRect.bottom - currentCellRect.top,
+        cellRect.left,
+        top,
+        cellRect.right - cellRect.left,
+        editHeight,
         TRUE);
 
     // Show the edit control
