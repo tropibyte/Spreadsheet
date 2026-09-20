@@ -80,6 +80,27 @@ CGrid32Mgr::~CGrid32Mgr()
 }
 
 
+namespace {
+// Suspends per-edit recalculation for the lifetime of the scope. Bulk
+// operations (paste, sort, stream-in) apply many cells at once and want a
+// single recalc at the end rather than one per cell, which is quadratic.
+//
+// Restores the previous value instead of clearing the flag, so a nested bulk
+// operation can't switch recalculation back on while an outer one is still
+// running.
+class DeferRecalcScope
+{
+public:
+    explicit DeferRecalcScope(BOOL& flag) : m_flag(flag), m_previous(flag) { m_flag = TRUE; }
+    ~DeferRecalcScope() { m_flag = m_previous; }
+    DeferRecalcScope(const DeferRecalcScope&) = delete;
+    DeferRecalcScope& operator=(const DeferRecalcScope&) = delete;
+private:
+    BOOL& m_flag;
+    BOOL  m_previous;
+};
+}
+
 bool IsRectInside(const RECT& r1, const RECT& r2) {
     return (r1.left >= r2.left &&
         r1.right <= r2.right &&
@@ -1351,13 +1372,7 @@ void CGrid32Mgr::SetCellText(UINT nRow, UINT nCol, LPCWSTR newText)
     if (newText && newText[0] == L'=') {
         pCell->m_bFormula = true;
         pCell->m_wsFormula = newText + 1;
-        pCell->m_wsText = EvaluateFormula(pCell->m_wsFormula);
-        pCell->m_eType = CT_Formula;
-        // Cache the numeric form when the formula result parses as a number,
-        // so type-aware sort/compare doesn't have to stod the display text.
-        double n = 0.0;
-        if (Grid32Detail::TryParseNumber(pCell->m_wsText, n)) pCell->m_dValue = n;
-        else pCell->m_dValue = 0.0;
+        RefreshFormulaCell(pCell);
     } else {
         pCell->m_bFormula = false;
         pCell->m_wsFormula.clear();
@@ -1375,6 +1390,17 @@ void CGrid32Mgr::SetCellText(UINT nRow, UINT nCol, LPCWSTR newText)
 
     // Record undo operation
     RecordUndoOperation(op);
+
+    // Every other mutator (SetCell, ClearCellText, DeleteCell) recalculates;
+    // this one didn't, and it is the path the edit control and GM_SETCELLTEXT
+    // both take. That left =A1*2 showing a stale result after A1 was typed
+    // into. Bulk callers suppress this with DeferRecalcScope and recalculate
+    // once at the end.
+    //
+    // The undo record is captured above on purpose: it stores the cell's
+    // source, and the display text of every dependent is derived state that
+    // undo re-derives by recalculating again.
+    RecalculateFormulas();
 
     // Redraw the cell
     RECT r;
@@ -2699,25 +2725,26 @@ void CGrid32Mgr::OnPaste()
     UINT rOffset = 0;
     bool record = m_bUndoRecordEnabled;
     m_bUndoRecordEnabled = false;
-    m_bDeferRecalc = TRUE;
-    while (std::getline(rows, line) && sel.start.nRow + rOffset < gcs.nHeight)
     {
-        std::wistringstream cols(line);
-        std::wstring cellText;
-        UINT cOffset = 0;
-        while (std::getline(cols, cellText, L'\t') && sel.start.nCol + cOffset < gcs.nWidth)
+        DeferRecalcScope deferRecalc(m_bDeferRecalc);
+        while (std::getline(rows, line) && sel.start.nRow + rOffset < gcs.nHeight)
         {
-            GRIDPOINT pt{ sel.start.nRow + rOffset, sel.start.nCol + cOffset };
-            PGRIDCELL cell = GetCellOrCreate(pt.nRow, pt.nCol, false);
-            op.oldCells.push_back({ pt, *cell });
-            SetCellText(pt.nRow, pt.nCol, cellText.c_str());
-            cell = GetCellOrDefault(pt.nRow, pt.nCol);
-            op.newCells.push_back({ pt, *cell });
-            ++cOffset;
+            std::wistringstream cols(line);
+            std::wstring cellText;
+            UINT cOffset = 0;
+            while (std::getline(cols, cellText, L'\t') && sel.start.nCol + cOffset < gcs.nWidth)
+            {
+                GRIDPOINT pt{ sel.start.nRow + rOffset, sel.start.nCol + cOffset };
+                PGRIDCELL cell = GetCellOrCreate(pt.nRow, pt.nCol, false);
+                op.oldCells.push_back({ pt, *cell });
+                SetCellText(pt.nRow, pt.nCol, cellText.c_str());
+                cell = GetCellOrDefault(pt.nRow, pt.nCol);
+                op.newCells.push_back({ pt, *cell });
+                ++cOffset;
+            }
+            ++rOffset;
         }
-        ++rOffset;
     }
-    m_bDeferRecalc = FALSE;
     RecalculateFormulas();
     m_bUndoRecordEnabled = record;
     RecordUndoOperation(op);
@@ -3574,17 +3601,18 @@ void CGrid32Mgr::OnSortCells(WPARAM wParam, const GCSORTSTRUCT& sortStruct)
 
     bool record = m_bUndoRecordEnabled;
     m_bUndoRecordEnabled = false;
-    m_bDeferRecalc = TRUE;
-    UINT rIndex = sel.start.nRow;
-    for (auto& row : rows)
     {
-        for (UINT c = 0; c < gcs.nWidth && c < row.second.size(); ++c)
+        DeferRecalcScope deferRecalc(m_bDeferRecalc);
+        UINT rIndex = sel.start.nRow;
+        for (auto& row : rows)
         {
-            SetCell(rIndex, c, row.second[c]);
+            for (UINT c = 0; c < gcs.nWidth && c < row.second.size(); ++c)
+            {
+                SetCell(rIndex, c, row.second[c]);
+            }
+            ++rIndex;
         }
-        ++rIndex;
     }
-    m_bDeferRecalc = FALSE;
     RecalculateFormulas();
     m_bUndoRecordEnabled = record;
     Invalidate();
@@ -4029,59 +4057,67 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
         size_t row = 0, col = 0;
         std::wstring cellText;
         bool inQuotes = false;
-        for (size_t i = 0; i < input.size() && row < gcs.nHeight; ++i)
+        // Import applies one cell at a time; without this the recalc that
+        // SetCellText now performs would run once per imported cell, making a
+        // large file quadratic. The scope closes before the single recalc
+        // below.
         {
-            wchar_t ch = input[i];
-
-            if (inQuotes)
+            DeferRecalcScope deferRecalc(m_bDeferRecalc);
+            for (size_t i = 0; i < input.size() && row < gcs.nHeight; ++i)
             {
-                if (ch == L'"')
+                wchar_t ch = input[i];
+
+                if (inQuotes)
                 {
-                    // RFC 4180: "" inside quoted field = literal "
-                    if (i + 1 < input.size() && input[i + 1] == L'"')
+                    if (ch == L'"')
                     {
-                        cellText.push_back(L'"');
-                        ++i;
+                        // RFC 4180: "" inside quoted field = literal "
+                        if (i + 1 < input.size() && input[i + 1] == L'"')
+                        {
+                            cellText.push_back(L'"');
+                            ++i;
+                        }
+                        else
+                        {
+                            inQuotes = false;
+                        }
                     }
                     else
                     {
-                        inQuotes = false;
+                        cellText.push_back(ch);
                     }
+                    continue;
+                }
+
+                if (ch == L'"' && cellText.empty())
+                {
+                    // Field starts with a quote => quoted field
+                    inQuotes = true;
+                }
+                else if (ch == delim || ch == L'\n')
+                {
+                    SetCellText((UINT)row, (UINT)col, cellText.c_str());
+                    cellText.clear();
+                    ++col;
+                    if (ch == L'\n' || col >= gcs.nWidth)
+                    {
+                        col = 0;
+                        ++row;
+                    }
+                }
+                else if (ch == L'\r')
+                {
+                    // Swallow CR — \r\n line endings handled via the following \n.
                 }
                 else
                 {
                     cellText.push_back(ch);
                 }
-                continue;
             }
-
-            if (ch == L'"' && cellText.empty())
-            {
-                // Field starts with a quote => quoted field
-                inQuotes = true;
-            }
-            else if (ch == delim || ch == L'\n')
-            {
+            if (!cellText.empty() && row < gcs.nHeight && col < gcs.nWidth)
                 SetCellText((UINT)row, (UINT)col, cellText.c_str());
-                cellText.clear();
-                ++col;
-                if (ch == L'\n' || col >= gcs.nWidth)
-                {
-                    col = 0;
-                    ++row;
-                }
-            }
-            else if (ch == L'\r')
-            {
-                // Swallow CR — \r\n line endings handled via the following \n.
-            }
-            else
-            {
-                cellText.push_back(ch);
-            }
         }
-        if (!cellText.empty() && row < gcs.nHeight && col < gcs.nWidth)
-            SetCellText((UINT)row, (UINT)col, cellText.c_str());
+        RecalculateFormulas();
 
         pStream->m_dwError = 0;
         if (pStream->m_pfnCallback)
@@ -4095,56 +4131,61 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
         std::wstring_view xml(pStream->m_pwszBuff, wcsnlen(pStream->m_pwszBuff, maxChars));
         UINT row = 0;
         size_t pos = 0;
-        if (pStream->m_dwFormat == SF_ODF)
+        // As above: one recalc for the import, not one per cell.
         {
-            while ((pos = xml.find(L"<table:table-row", pos)) != std::wstring::npos && row < gcs.nHeight)
+            DeferRecalcScope deferRecalc(m_bDeferRecalc);
+            if (pStream->m_dwFormat == SF_ODF)
             {
-                size_t rowEnd = xml.find(L"</table:table-row>", pos);
-                UINT col = 0;
-                size_t cpos = pos;
-                while ((cpos = xml.find(L"<table:table-cell", cpos)) != std::wstring::npos && cpos < rowEnd && col < gcs.nWidth)
+                while ((pos = xml.find(L"<table:table-row", pos)) != std::wstring::npos && row < gcs.nHeight)
                 {
-                    size_t start = xml.find(L"<text:p>", cpos);
-                    size_t end = xml.find(L"</text:p>", start);
-                    std::wstring text;
-                    if (start != std::wstring::npos && end != std::wstring::npos && end > start)
-                        text = UnescapeXML(std::wstring(xml.substr(start + 8, end - (start + 8))));
-                    SetCellText(row, col, text.c_str());
-                    ++col;
-                    cpos = xml.find(L"</table:table-cell>", cpos);
-                    if (cpos == std::wstring::npos || cpos > rowEnd) break;
-                    cpos += 19;
+                    size_t rowEnd = xml.find(L"</table:table-row>", pos);
+                    UINT col = 0;
+                    size_t cpos = pos;
+                    while ((cpos = xml.find(L"<table:table-cell", cpos)) != std::wstring::npos && cpos < rowEnd && col < gcs.nWidth)
+                    {
+                        size_t start = xml.find(L"<text:p>", cpos);
+                        size_t end = xml.find(L"</text:p>", start);
+                        std::wstring text;
+                        if (start != std::wstring::npos && end != std::wstring::npos && end > start)
+                            text = UnescapeXML(std::wstring(xml.substr(start + 8, end - (start + 8))));
+                        SetCellText(row, col, text.c_str());
+                        ++col;
+                        cpos = xml.find(L"</table:table-cell>", cpos);
+                        if (cpos == std::wstring::npos || cpos > rowEnd) break;
+                        cpos += 19;
+                    }
+                    ++row;
+                    if (rowEnd == std::wstring::npos) break;
+                    pos = rowEnd + 17;
                 }
-                ++row;
-                if (rowEnd == std::wstring::npos) break;
-                pos = rowEnd + 17;
+            }
+            else
+            {
+                while ((pos = xml.find(L"<row", pos)) != std::wstring::npos && row < gcs.nHeight)
+                {
+                    size_t rowEnd = xml.find(L"</row>", pos);
+                    UINT col = 0;
+                    size_t cpos = pos;
+                    while ((cpos = xml.find(L"<c", cpos)) != std::wstring::npos && cpos < rowEnd && col < gcs.nWidth)
+                    {
+                        size_t start = xml.find(L"<t>", cpos);
+                        size_t end = xml.find(L"</t>", start);
+                        std::wstring text;
+                        if (start != std::wstring::npos && end != std::wstring::npos && end > start)
+                            text = UnescapeXML(std::wstring(xml.substr(start + 3, end - (start + 3))));
+                        SetCellText(row, col, text.c_str());
+                        ++col;
+                        cpos = xml.find(L"</c>", cpos);
+                        if (cpos == std::wstring::npos || cpos > rowEnd) break;
+                        cpos += 4;
+                    }
+                    ++row;
+                    if (rowEnd == std::wstring::npos) break;
+                    pos = rowEnd + 6;
+                }
             }
         }
-        else
-        {
-            while ((pos = xml.find(L"<row", pos)) != std::wstring::npos && row < gcs.nHeight)
-            {
-                size_t rowEnd = xml.find(L"</row>", pos);
-                UINT col = 0;
-                size_t cpos = pos;
-                while ((cpos = xml.find(L"<c", cpos)) != std::wstring::npos && cpos < rowEnd && col < gcs.nWidth)
-                {
-                    size_t start = xml.find(L"<t>", cpos);
-                    size_t end = xml.find(L"</t>", start);
-                    std::wstring text;
-                    if (start != std::wstring::npos && end != std::wstring::npos && end > start)
-                        text = UnescapeXML(std::wstring(xml.substr(start + 3, end - (start + 3))));
-                    SetCellText(row, col, text.c_str());
-                    ++col;
-                    cpos = xml.find(L"</c>", cpos);
-                    if (cpos == std::wstring::npos || cpos > rowEnd) break;
-                    cpos += 4;
-                }
-                ++row;
-                if (rowEnd == std::wstring::npos) break;
-                pos = rowEnd + 6;
-            }
-        }
+        RecalculateFormulas();
 
         pStream->m_dwError = 0;
         if (pStream->m_pfnCallback)
@@ -4339,19 +4380,32 @@ std::wstring CGrid32Mgr::EvaluateFormula(const std::wstring& expr)
     return ss.str();
 }
 
+// Re-evaluate a formula cell from its source. Both the display text and the
+// cached numeric value are refreshed together: OnSortCells compares CT_Formula
+// cells by m_dValue, so refreshing only the text would sort by whatever the
+// value happened to be when the formula was first entered.
+void CGrid32Mgr::RefreshFormulaCell(PGRIDCELL pCell)
+{
+    if (!pCell || !pCell->m_bFormula)
+        return;
+
+    pCell->m_wsText = EvaluateFormula(pCell->m_wsFormula);
+    pCell->m_eType = CT_Formula;
+    double n = 0.0;
+    pCell->m_dValue = Grid32Detail::TryParseNumber(pCell->m_wsText, n) ? n : 0.0;
+}
+
 void CGrid32Mgr::RecalculateFormulas()
 {
-    // Bulk operations (sort, paste, stream-in) set m_bDeferRecalc to avoid
-    // O(N) recalc per SetCell; they invoke RecalculateFormulas() themselves
-    // once at the end with the flag cleared.
+    // Bulk operations (sort, paste, stream-in) hold a DeferRecalcScope to
+    // avoid a full recalc per cell; they invoke RecalculateFormulas()
+    // themselves once the scope has closed.
     if (m_bDeferRecalc)
         return;
+
+    // Single pass, order-independent: each formula is evaluated from its
+    // source, and a reference to another formula cell recurses into that
+    // cell's source rather than reading its (possibly stale) display text.
     for (auto& entry : mapCells)
-    {
-        PGRIDCELL cell = entry.second;
-        if (cell && cell->m_bFormula)
-        {
-            cell->m_wsText = EvaluateFormula(cell->m_wsFormula);
-        }
-    }
+        RefreshFormulaCell(entry.second);
 }

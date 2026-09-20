@@ -212,6 +212,10 @@ public:
         void OnStreamOut(LPGCSTREAM pStream);
         void OnStreamIn(LPGCSTREAM pStream);
         void RecalculateFormulas();
+        // Re-evaluate one formula cell, refreshing both its display text and
+        // the cached numeric value that sort/compare read. No-op for cells
+        // that aren't formulas.
+        void RefreshFormulaCell(PGRIDCELL pCell);
         std::wstring EvaluateFormula(const std::wstring& expr);
 };
 
