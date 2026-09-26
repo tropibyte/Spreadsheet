@@ -14,6 +14,7 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include <pch.h>
 #include <grid32_internal.h>
+#include "win32shim/win32stubs.h"
 
 #include <iostream>
 #include <functional>
@@ -51,13 +52,17 @@ struct TestReg { TestReg(const char* n, std::function<void()> f) { Tests().push_
     FAIL_HERE("expected " #expr " == " #want); } } while (0)
 
 // ---- fixture ---------------------------------------------------------------
-// A grid with no window behind it. Create() succeeds because every Win32 call
-// it makes is stubbed.
-class Sheet
+// A grid with no real window behind it. Create() succeeds because every Win32
+// call it makes is stubbed. Derives from CGrid32Mgr so the fixture can give
+// m_hWndGrid a non-null value: notifications are suppressed for a null or
+// dead HWND, so without it nothing would be observable.
+class Sheet : private CGrid32Mgr
 {
 public:
     Sheet(size_t cols = 16, size_t rows = 64)
     {
+        static int fakeHwnd = 0;
+        m_hWndGrid = &fakeHwnd;
         GRIDCREATESTRUCT gcs{};
         gcs.cbSize = sizeof(GRIDCREATESTRUCT);
         gcs.nWidth = cols;
@@ -65,24 +70,23 @@ public:
         gcs.nDefColWidth = 100;
         gcs.nDefRowHeight = 20;
         gcs.style = GS_SPREADSHEET;
-        m_ok = m_mgr.Create(&gcs);
+        m_ok = Create(&gcs);
     }
     bool ok() const { return m_ok; }
-    CGrid32Mgr& mgr() { return m_mgr; }
+    CGrid32Mgr& mgr() { return *this; }
 
-    void Set(UINT row, UINT col, const wchar_t* text) { m_mgr.SetCellText(row, col, text); }
+    void Set(UINT row, UINT col, const wchar_t* text) { SetCellText(row, col, text); }
     std::wstring Text(UINT row, UINT col)
     {
-        PGRIDCELL c = m_mgr.GetCell(row, col);
+        PGRIDCELL c = GetCell(row, col);
         return c ? c->m_wsText : std::wstring();
     }
     double Value(UINT row, UINT col)
     {
-        PGRIDCELL c = m_mgr.GetCell(row, col);
+        PGRIDCELL c = GetCell(row, col);
         return c ? c->m_dValue : 0.0;
     }
 private:
-    CGrid32Mgr m_mgr;
     bool m_ok;
 };
 
@@ -238,6 +242,92 @@ TEST(StreamIn_RecalculatesOnce_AndFormulasSeeTheImport)
     s.Set(5, 0, L"=A1+B1");
     StreamInCsv(s, L"1,2\n3,4\n");
     ASSERT_WSTR(s.Text(5, 0), L"3");
+}
+
+// ---- content-changed notification (AUDIT_2026-09.md B4) --------------------
+// The host marks its document dirty off GN_CONTENTCHANGED, so every edit that
+// alters what StreamOut would write has to send one.
+static size_t Notifications() { return StubCountNotifications(GN_CONTENTCHANGED); }
+
+TEST(Notify_TypingSendsOne)
+{
+    Sheet s;
+    StubMessageLogClear();
+    s.Set(0, 0, L"hello");
+    ASSERT_TRUE(Notifications() == 1);
+}
+
+TEST(Notify_EachEditSendsOne)
+{
+    Sheet s;
+    StubMessageLogClear();
+    s.Set(0, 0, L"1");
+    s.Set(1, 0, L"2");
+    s.Set(2, 0, L"3");
+    ASSERT_TRUE(Notifications() == 3);
+}
+
+TEST(Notify_ClearAndDeleteSend)
+{
+    Sheet s;
+    s.Set(0, 0, L"x");
+    StubMessageLogClear();
+    s.mgr().ClearCellText(0, 0);
+    ASSERT_TRUE(Notifications() == 1);
+
+    s.Set(1, 0, L"y");
+    StubMessageLogClear();
+    s.mgr().DeleteCell(1, 0);
+    ASSERT_TRUE(Notifications() == 1);
+}
+
+TEST(Notify_FormattingSends)
+{
+    Sheet s;
+    s.Set(0, 0, L"1234.5");
+    StubMessageLogClear();
+    s.mgr().SetCellNumberFormat(0, 0, FMT_CURRENCY);
+    ASSERT_TRUE(Notifications() == 1);
+
+    FONTINFO fi{};
+    fi.m_wsFontFace = L"Arial";
+    fi.m_fPointSize = 12.0f;
+    StubMessageLogClear();
+    s.mgr().SetCellFormat(0, 0, fi);
+    ASSERT_TRUE(Notifications() == 1);
+}
+
+TEST(Notify_BulkImportSendsExactlyOne)
+{
+    // 4 cells imported, but it is one user action: the bulk scope suppresses
+    // the per-cell notifications and the import sends a single one.
+    Sheet s;
+    StubMessageLogClear();
+    StreamInCsv(s, L"1,2\n3,4\n");
+    ASSERT_TRUE(Notifications() == 1);
+}
+
+TEST(Notify_NavigationDoesNotSend)
+{
+    // Moving the cursor or the selection is not a document change.
+    Sheet s;
+    s.Set(0, 0, L"x");
+    StubMessageLogClear();
+    s.mgr().SetCurrentCell(2, 2);
+    GRIDSELECTION sel{ {0, 0}, {3, 3} };
+    s.mgr().OnSetSelection(&sel);
+    ASSERT_TRUE(Notifications() == 0);
+}
+
+TEST(Notify_FailedReadsDoNotSend)
+{
+    Sheet s;
+    s.Set(0, 0, L"5");
+    StubMessageLogClear();
+    s.Text(0, 0);
+    s.Value(0, 0);
+    s.mgr().GetCell(9, 9);
+    ASSERT_TRUE(Notifications() == 0);
 }
 
 // ---- runner ----------------------------------------------------------------

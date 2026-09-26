@@ -46,6 +46,7 @@ protected:
 	POINT m_scrollDifference;
 	BOOL m_bRedraw, m_bResizable, m_bUndoRecordEnabled;
 	BOOL m_bDeferRecalc;
+	BOOL m_bSuppressChangeNotify;
 	DWORD dwError;
 	GRIDSELECTION m_selectionRect;
 	BOOL m_bSelecting, m_bSizing;
@@ -188,6 +189,11 @@ public:
 	BOOL OnGetCellText(const GRIDPOINT& point, GRID_GETTEXT* text);
 	void ShowEditControl();
 	void SendGridNotification(INT code, GRIDNMHDR* pNMHDRInfo = nullptr);
+	// Tell the host that persisted content changed, so it can mark its
+	// document dirty. Every mutator that alters what StreamOut would write
+	// must call this; bulk operations hold a BulkEditScope and send one
+	// notification when the scope closes instead of one per cell.
+	void NotifyContentChanged();
 	void GetMousePosition(POINT& pt);
 	void OnTimer(UINT_PTR idEvent);
 	bool IsOverColumnDivider(int x, int y);

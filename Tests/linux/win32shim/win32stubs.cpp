@@ -2,6 +2,7 @@
 // Only enough behaviour to let the real Grid32 code run headless.
 #include <windows.h>
 #include <gdiplus.h>
+#include "win32stubs.h"
 
 HBRUSH CreateSolidBrush(COLORREF) { return nullptr; }
 HPEN CreatePen(int, int, COLORREF) { return nullptr; }
@@ -39,14 +40,43 @@ BOOL DestroyWindow(HWND) { return 0; }
 BOOL ShowWindow(HWND, int) { return 0; }
 BOOL MoveWindow(HWND,int,int,int,int,BOOL) { return 0; }
 HWND SetFocus(HWND) { return nullptr; }
-HWND GetParent(HWND) { return nullptr; }
-BOOL IsWindow(HWND) { return 0; }
+// SendGridNotification only posts when the grid has a parent.
+static int g_fakeParent = 0;
+HWND GetParent(HWND) { return &g_fakeParent; }
+// Code guards notifications with IsWindow; answering FALSE would silence
+// everything the tests are trying to observe.
+BOOL IsWindow(HWND h) { return h != nullptr; }
 BOOL BringWindowToTop(HWND) { return 0; }
 HCURSOR SetCursor(HCURSOR) { return nullptr; }
 HCURSOR LoadCursor(HINSTANCE, LPCWSTR) { return nullptr; }
 LONG_PTR GetWindowLongPtr(HWND, int) { return 0; }
 LONG_PTR SetWindowLongPtr(HWND, int, LONG_PTR) { return 1; }
-LRESULT SendMessage(HWND, UINT, WPARAM, LPARAM) { return 0; }
+std::vector<StubSentMessage>& StubMessageLog()
+{
+    static std::vector<StubSentMessage> log;
+    return log;
+}
+
+void StubMessageLogClear() { StubMessageLog().clear(); }
+
+size_t StubCountNotifications(UINT code)
+{
+    size_t n = 0;
+    for (const StubSentMessage& m : StubMessageLog())
+        if (m.msg == WM_NOTIFY && m.notifyCode == code) ++n;
+    return n;
+}
+
+// Recorded rather than ignored: WM_NOTIFY carries a pointer to a caller stack
+// frame, so the code is read here, while the call is still on the stack.
+LRESULT SendMessage(HWND h, UINT msg, WPARAM w, LPARAM l)
+{
+    StubSentMessage rec{ h, msg, w, l, 0 };
+    if (msg == WM_NOTIFY && l != 0)
+        rec.notifyCode = reinterpret_cast<tagNMHDR*>(l)->code;
+    StubMessageLog().push_back(rec);
+    return 0;
+}
 BOOL PostMessage(HWND, UINT, WPARAM, LPARAM) { return 0; }
 LRESULT DefWindowProc(HWND, UINT, WPARAM, LPARAM) { return 0; }
 LRESULT CallWindowProc(WNDPROC, HWND, UINT, WPARAM, LPARAM) { return 0; }

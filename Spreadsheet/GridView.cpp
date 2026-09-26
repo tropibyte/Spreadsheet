@@ -28,6 +28,7 @@ BEGIN_MESSAGE_MAP(CGridView, CView)
     ON_WM_INPUT()
     ON_WM_SYSKEYUP()
     ON_WM_SYSKEYDOWN()
+    ON_NOTIFY(GN_CONTENTCHANGED, GRIDCTRL_ID, &CGridView::OnGridContentChanged)
 END_MESSAGE_MAP()
 
 
@@ -263,4 +264,15 @@ void CGridView::OnSysKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 void CGridView::ApplyFont(const FONTINFO& fi)
 {
     m_wndGridCtrl.SetCurrentCellFormat(fi);
+}
+
+// The grid owns the data, so the document has no other way to know it changed:
+// nothing routes edits through CDocument. Without this the modified flag was
+// never set, and closing after editing threw the work away without asking.
+void CGridView::OnGridContentChanged(NMHDR* /*pNMHDR*/, LRESULT* pResult)
+{
+    if (CDocument* pDoc = GetDocument())
+        pDoc->SetModifiedFlag(TRUE);
+    if (pResult)
+        *pResult = 0;
 }

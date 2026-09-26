@@ -30,7 +30,7 @@ CGrid32Mgr::CGrid32Mgr() : pRowInfoArray(nullptr), pColInfoArray(nullptr),
 m_hWndGrid(NULL), nColHeaderHeight(40), nRowHeaderWidth(70), m_editWndProc(nullptr),
 m_nMouseHoverDelay(400), m_npHoverDelaySet(0), m_nToBeSized(~0),
 m_rgbSizingLine(RGB(0, 0, 64)), m_nSizingLine(0), m_bResizable(true), m_bUndoRecordEnabled(TRUE),
-m_bDeferRecalc(FALSE),
+m_bDeferRecalc(FALSE), m_bSuppressChangeNotify(FALSE),
 m_bSizing(false), m_bSelecting(false), m_hDefaultFont(NULL),
 m_clientRect{ 0, 0, 0, 0 }, m_gdiplusToken(0), m_gridHitTest(0),
 m_hWndEdit(NULL), m_lastClickTime(0), totalGridCellRect{ 0, 0, 0, 0 }
@@ -81,23 +81,35 @@ CGrid32Mgr::~CGrid32Mgr()
 
 
 namespace {
-// Suspends per-edit recalculation for the lifetime of the scope. Bulk
-// operations (paste, sort, stream-in) apply many cells at once and want a
-// single recalc at the end rather than one per cell, which is quadratic.
+// Marks a region that applies many cells as one user-visible operation.
 //
-// Restores the previous value instead of clearing the flag, so a nested bulk
-// operation can't switch recalculation back on while an outer one is still
-// running.
-class DeferRecalcScope
+// It suspends two things: per-edit recalculation, which would otherwise be
+// quadratic over the edit, and the content-changed notification, which the
+// caller sends once when the scope closes instead of once per cell.
+//
+// Both flags are restored to their previous value rather than cleared, so a
+// nested bulk operation can't re-enable either while an outer one is still
+// running, and an exception can't leave them stuck on.
+class BulkEditScope
 {
 public:
-    explicit DeferRecalcScope(BOOL& flag) : m_flag(flag), m_previous(flag) { m_flag = TRUE; }
-    ~DeferRecalcScope() { m_flag = m_previous; }
-    DeferRecalcScope(const DeferRecalcScope&) = delete;
-    DeferRecalcScope& operator=(const DeferRecalcScope&) = delete;
+    BulkEditScope(BOOL& deferRecalc, BOOL& suppressNotify)
+        : m_deferRecalc(deferRecalc), m_prevDefer(deferRecalc),
+          m_suppressNotify(suppressNotify), m_prevSuppress(suppressNotify)
+    {
+        m_deferRecalc = TRUE;
+        m_suppressNotify = TRUE;
+    }
+    ~BulkEditScope()
+    {
+        m_deferRecalc = m_prevDefer;
+        m_suppressNotify = m_prevSuppress;
+    }
+    BulkEditScope(const BulkEditScope&) = delete;
+    BulkEditScope& operator=(const BulkEditScope&) = delete;
 private:
-    BOOL& m_flag;
-    BOOL  m_previous;
+    BOOL& m_deferRecalc;    BOOL m_prevDefer;
+    BOOL& m_suppressNotify; BOOL m_prevSuppress;
 };
 }
 
@@ -1076,6 +1088,7 @@ void CGrid32Mgr::SetCell(UINT nRow, UINT nCol, const GRIDCELL& gc)
     // Record undo/redo
     RecordUndoOperation(op);
     RecalculateFormulas();
+    NotifyContentChanged();
     SetLastError(0);
 }
 
@@ -1151,6 +1164,7 @@ void CGrid32Mgr::SetCellFormat(UINT nRow, UINT nCol, const FONTINFO& fi)
     RECT r;
     GetCurrentCellRect(r);
     Invalidate();
+    NotifyContentChanged();
     SetLastError(0);
 }
 
@@ -1185,6 +1199,7 @@ void CGrid32Mgr::SetRangeFormat(const GRIDSELECTION& selRange, const FONTINFO& f
     }
     m_bUndoRecordEnabled = record;
     Invalidate();
+    NotifyContentChanged();
     SetLastError(0);
 }
 
@@ -1211,6 +1226,7 @@ void CGrid32Mgr::SetCellNumberFormat(UINT nRow, UINT nCol, UINT format)
     op.newState = *pCell;
     RecordUndoOperation(op);
     Invalidate();
+    NotifyContentChanged();
     SetLastError(0);
 }
 
@@ -1220,15 +1236,19 @@ void CGrid32Mgr::SetSelectionNumberFormat(UINT format)
     NormalizeSelectionRect(sel);
     bool record = m_bUndoRecordEnabled;
     m_bUndoRecordEnabled = false;
-    for (UINT r = sel.start.nRow; r <= sel.end.nRow && r < gcs.nHeight; ++r)
     {
-        for (UINT c = sel.start.nCol; c <= sel.end.nCol && c < gcs.nWidth; ++c)
+        BulkEditScope bulkEdit(m_bDeferRecalc, m_bSuppressChangeNotify);
+        for (UINT r = sel.start.nRow; r <= sel.end.nRow && r < gcs.nHeight; ++r)
         {
-            SetCellNumberFormat(r, c, format);
+            for (UINT c = sel.start.nCol; c <= sel.end.nCol && c < gcs.nWidth; ++c)
+            {
+                SetCellNumberFormat(r, c, format);
+            }
         }
     }
     m_bUndoRecordEnabled = record;
     Invalidate();
+    NotifyContentChanged();
     SetLastError(0);
 }
 
@@ -1273,6 +1293,7 @@ void CGrid32Mgr::SetSelectionHAlign(UINT halign)
             if (pCell) ApplyAlignBits(pCell->justification, GA_HORIZ, halign);
         }
     Invalidate();
+    NotifyContentChanged();
     SetLastError(0);
 }
 
@@ -1287,6 +1308,7 @@ void CGrid32Mgr::SetSelectionVAlign(UINT valign)
             if (pCell) ApplyAlignBits(pCell->justification, GA_VERT, valign);
         }
     Invalidate();
+    NotifyContentChanged();
     SetLastError(0);
 }
 
@@ -1301,6 +1323,7 @@ void CGrid32Mgr::SetSelectionWrap(BOOL wrap)
             if (pCell) ApplyAlignBits(pCell->justification, GA_WRAP, wrap ? 1 : 0);
         }
     Invalidate();
+    NotifyContentChanged();
     SetLastError(0);
 }
 
@@ -1394,13 +1417,14 @@ void CGrid32Mgr::SetCellText(UINT nRow, UINT nCol, LPCWSTR newText)
     // Every other mutator (SetCell, ClearCellText, DeleteCell) recalculates;
     // this one didn't, and it is the path the edit control and GM_SETCELLTEXT
     // both take. That left =A1*2 showing a stale result after A1 was typed
-    // into. Bulk callers suppress this with DeferRecalcScope and recalculate
+    // into. Bulk callers suppress this with BulkEditScope and recalculate
     // once at the end.
     //
     // The undo record is captured above on purpose: it stores the cell's
     // source, and the display text of every dependent is derived state that
     // undo re-derives by recalculating again.
     RecalculateFormulas();
+    NotifyContentChanged();
 
     // Redraw the cell
     RECT r;
@@ -1435,6 +1459,7 @@ void CGrid32Mgr::ClearCellText(UINT nRow, UINT nCol)
         // Record undo operation
         RecordUndoOperation(op);
         RecalculateFormulas();
+        NotifyContentChanged();
 
         // Redraw the cell
         RECT r;
@@ -1468,6 +1493,7 @@ void CGrid32Mgr::DeleteCell(UINT nRow, UINT nCol)
         // Record undo operation
         RecordUndoOperation(op);
         RecalculateFormulas();
+        NotifyContentChanged();
         SetLastError(0);
     }
 }
@@ -2581,24 +2607,29 @@ void CGrid32Mgr::OnClear()
     bool record = m_bUndoRecordEnabled;
     m_bUndoRecordEnabled = false;
 
-    for (UINT r = sel.start.nRow; r <= sel.end.nRow && r < gcs.nHeight; ++r)
     {
-        for (UINT c = sel.start.nCol; c <= sel.end.nCol && c < gcs.nWidth; ++c)
+        BulkEditScope bulkEdit(m_bDeferRecalc, m_bSuppressChangeNotify);
+        for (UINT r = sel.start.nRow; r <= sel.end.nRow && r < gcs.nHeight; ++r)
         {
-            GRIDPOINT pt{ r, c };
-            PGRIDCELL cell = GetCell(r, c);
-            if (cell)
+            for (UINT c = sel.start.nCol; c <= sel.end.nCol && c < gcs.nWidth; ++c)
             {
-                op.oldCells.push_back({ pt, *cell });
-                DeleteCell(r, c);
+                GRIDPOINT pt{ r, c };
+                PGRIDCELL cell = GetCell(r, c);
+                if (cell)
+                {
+                    op.oldCells.push_back({ pt, *cell });
+                    DeleteCell(r, c);
+                }
+                else
+                {
+                    op.oldCells.push_back({ pt, m_defaultGridCell });
+                }
+                op.newCells.push_back({ pt, m_defaultGridCell });
             }
-            else
-            {
-                op.oldCells.push_back({ pt, m_defaultGridCell });
-            }
-            op.newCells.push_back({ pt, m_defaultGridCell });
         }
     }
+    RecalculateFormulas();
+    NotifyContentChanged();
 
     m_bUndoRecordEnabled = record;
     RecordUndoOperation(op);
@@ -2681,11 +2712,16 @@ void CGrid32Mgr::OnCut()
 
     bool record = m_bUndoRecordEnabled;
     m_bUndoRecordEnabled = false;
-    for (auto& entry : op.oldCells)
     {
-        ClearCellText(entry.first.nRow, entry.first.nCol);
-        op.newCells.push_back({ entry.first, m_defaultGridCell });
+        BulkEditScope bulkEdit(m_bDeferRecalc, m_bSuppressChangeNotify);
+        for (auto& entry : op.oldCells)
+        {
+            ClearCellText(entry.first.nRow, entry.first.nCol);
+            op.newCells.push_back({ entry.first, m_defaultGridCell });
+        }
     }
+    RecalculateFormulas();
+    NotifyContentChanged();
     m_bUndoRecordEnabled = record;
 
     RecordUndoOperation(op);
@@ -2726,7 +2762,7 @@ void CGrid32Mgr::OnPaste()
     bool record = m_bUndoRecordEnabled;
     m_bUndoRecordEnabled = false;
     {
-        DeferRecalcScope deferRecalc(m_bDeferRecalc);
+        BulkEditScope bulkEdit(m_bDeferRecalc, m_bSuppressChangeNotify);
         while (std::getline(rows, line) && sel.start.nRow + rOffset < gcs.nHeight)
         {
             std::wistringstream cols(line);
@@ -2746,6 +2782,7 @@ void CGrid32Mgr::OnPaste()
         }
     }
     RecalculateFormulas();
+    NotifyContentChanged();
     m_bUndoRecordEnabled = record;
     RecordUndoOperation(op);
     Invalidate();
@@ -3249,6 +3286,19 @@ void CGrid32Mgr::SendGridNotification(INT code, GRIDNMHDR* pNMHDRInfo)
 }
 
 
+void CGrid32Mgr::NotifyContentChanged()
+{
+    // Inside a bulk edit the caller sends one notification when the scope
+    // closes, so individual cell writes stay quiet.
+    if (m_bSuppressChangeNotify)
+        return;
+    // DeleteAllCells runs from the destructor, by which point the window may
+    // already be going away; never notify through a dead HWND.
+    if (!m_hWndGrid || !IsWindow(m_hWndGrid))
+        return;
+    SendGridNotification(GN_CONTENTCHANGED);
+}
+
 void CGrid32Mgr::GetMousePosition(POINT& pt)
 {
     GetCursorPos(&pt);
@@ -3545,6 +3595,7 @@ void CGrid32Mgr::OnFillCells(WPARAM wParam, const GCFILLSTRUCT& fillStruct)
     }
     m_bUndoRecordEnabled = record;
     Invalidate();
+    NotifyContentChanged();
     SetLastError(0);
 }
 
@@ -3602,7 +3653,7 @@ void CGrid32Mgr::OnSortCells(WPARAM wParam, const GCSORTSTRUCT& sortStruct)
     bool record = m_bUndoRecordEnabled;
     m_bUndoRecordEnabled = false;
     {
-        DeferRecalcScope deferRecalc(m_bDeferRecalc);
+        BulkEditScope bulkEdit(m_bDeferRecalc, m_bSuppressChangeNotify);
         UINT rIndex = sel.start.nRow;
         for (auto& row : rows)
         {
@@ -3614,6 +3665,7 @@ void CGrid32Mgr::OnSortCells(WPARAM wParam, const GCSORTSTRUCT& sortStruct)
         }
     }
     RecalculateFormulas();
+    NotifyContentChanged();
     m_bUndoRecordEnabled = record;
     Invalidate();
     SetLastError(0);
@@ -4062,7 +4114,7 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
         // large file quadratic. The scope closes before the single recalc
         // below.
         {
-            DeferRecalcScope deferRecalc(m_bDeferRecalc);
+            BulkEditScope bulkEdit(m_bDeferRecalc, m_bSuppressChangeNotify);
             for (size_t i = 0; i < input.size() && row < gcs.nHeight; ++i)
             {
                 wchar_t ch = input[i];
@@ -4118,6 +4170,7 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
                 SetCellText((UINT)row, (UINT)col, cellText.c_str());
         }
         RecalculateFormulas();
+        NotifyContentChanged();
 
         pStream->m_dwError = 0;
         if (pStream->m_pfnCallback)
@@ -4133,7 +4186,7 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
         size_t pos = 0;
         // As above: one recalc for the import, not one per cell.
         {
-            DeferRecalcScope deferRecalc(m_bDeferRecalc);
+            BulkEditScope bulkEdit(m_bDeferRecalc, m_bSuppressChangeNotify);
             if (pStream->m_dwFormat == SF_ODF)
             {
                 while ((pos = xml.find(L"<table:table-row", pos)) != std::wstring::npos && row < gcs.nHeight)
@@ -4186,6 +4239,7 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
             }
         }
         RecalculateFormulas();
+        NotifyContentChanged();
 
         pStream->m_dwError = 0;
         if (pStream->m_pfnCallback)
@@ -4345,6 +4399,7 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
 
     // Refresh evaluated text for any formula cells loaded above.
     RecalculateFormulas();
+    NotifyContentChanged();
 
     pStream->m_dwError = 0;
     if (pStream->m_pfnCallback)
@@ -4397,7 +4452,7 @@ void CGrid32Mgr::RefreshFormulaCell(PGRIDCELL pCell)
 
 void CGrid32Mgr::RecalculateFormulas()
 {
-    // Bulk operations (sort, paste, stream-in) hold a DeferRecalcScope to
+    // Bulk operations (sort, paste, stream-in) hold a BulkEditScope to
     // avoid a full recalc per cell; they invoke RecalculateFormulas()
     // themselves once the scope has closed.
     if (m_bDeferRecalc)

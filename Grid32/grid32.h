@@ -256,6 +256,12 @@ typedef struct tagGCCELLCHARFORMAT
 } GCCELLCHARFORMAT, *LPGCCELLCHARFORMAT;
 
 
+// Grid32 WM_NOTIFY codes. Placed well below the standard NM_* range so they
+// cannot collide with a common-control code. The 'U' matters: NM_FIRST is
+// unsigned, and NMHDR::code is UINT, so the arithmetic must stay unsigned for
+// the value the grid sends to match the value a handler compares against.
+#define GN_CONTENTCHANGED   (NM_FIRST - 100U)
+
 typedef struct tagGRIDNMHDR : tagNMHDR {
 	// Add custom members for your notification data
 	// For example:
