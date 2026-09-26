@@ -42,34 +42,18 @@ jobs:
 
       - uses: microsoft/setup-msbuild@v2
 
-      # Grid32 is a plain Win32 DLL with no MFC dependency, so this is the
-      # part of the build that must always work.
+      # Grid32 is a plain Win32 DLL with no MFC dependency. Both platforms
+      # are built: several of the open audit items are size_t/LONG truncations
+      # that only bite on one of them.
       - name: Build Grid32 (x64 Release)
         run: msbuild Grid32\Grid32.vcxproj /p:Configuration=Release /p:Platform=x64 /m /v:minimal
 
-      # The runner image ships no MFC (MSB8041), and Spreadsheet.vcxproj sets
-      # UseOfMfc=Dynamic, so the component has to be added before it will build.
-      - name: Install ATL/MFC
-        shell: pwsh
-        run: |
-          $vswhere   = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
-          $vs = & $vswhere -latest -property installationPath
-          Write-Host "Visual Studio: $vs"
-          $t0 = Get-Date
-          $p = Start-Process -FilePath $installer -Wait -PassThru -ArgumentList @(
-              'modify', '--installPath', "`"$vs`"",
-              '--add', 'Microsoft.VisualStudio.Component.VC.ATLMFC',
-              '--quiet', '--norestart', '--nocache')
-          Write-Host "vs_installer exit $($p.ExitCode) after $([int]((Get-Date)-$t0).TotalSeconds)s"
-          # 3010 = success, reboot requested. Anything else is a real failure.
-          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { exit $p.ExitCode }
+      - name: Build Grid32 (Win32 Release)
+        run: msbuild Grid32\Grid32.vcxproj /p:Configuration=Release /p:Platform=Win32 /m /v:minimal
 
-      - name: Build solution (x64 Release)
-        run: msbuild Spreadsheet.sln /p:Configuration=Release /p:Platform=x64 /m /v:minimal
-
-      # The same two suites the Linux job runs, here under MSVC. GridMgrTests
-      # is Linux-only: it defines Win32 symbols that collide with the real ones.
+      # The same two suites the Linux job runs, here compiled by cl.exe rather
+      # than GCC. GridMgrTests is Linux-only: it defines Win32 symbols that
+      # would collide with the real ones.
       - name: Grid32 helper tests
         shell: cmd
         run: Tests\run_tests.bat
@@ -77,3 +61,20 @@ jobs:
       - name: Formulator tests
         shell: cmd
         run: Tests\run_formulator_tests.bat
+
+      # NOT BUILT HERE: Spreadsheet.vcxproj, the MFC host.
+      #
+      # It sets UseOfMfc=Dynamic with PlatformToolset=v143, and the
+      # windows-latest image ships no MFC for that toolset, so msbuild fails
+      # with MSB8041. Adding the generic ATL/MFC component
+      # (Microsoft.VisualStudio.Component.VC.ATLMFC) was measured at 227s per
+      # run and does not fix it — it installs MFC for the image's newest
+      # toolset (v170), not for v143, so MSB8041 still fires.
+      #
+      # Making it build would mean pinning the version-specific component for
+      # whichever v143 toolset the image carries, and paying ~4 minutes on
+      # every run. If that trade is worth it later, add a step before the
+      # build that runs vs_installer with
+      #   --add Microsoft.VisualStudio.Component.VC.<version>.MFC
+      # and then `msbuild Spreadsheet.sln`. Until then the MFC host is
+      # compiled only on developer machines.

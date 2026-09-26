@@ -46,11 +46,16 @@ It proves the logic is right and that the code compiles as C++17 under GCC's
 warning set — which is stricter than the project's `/W3` in places, and has
 already caught real bugs.
 
-It does **not** prove the MSVC build works, and it says nothing about anything
-whose behaviour lives in Win32 itself: painting, hit-testing, scrolling,
-the clipboard, the edit-control subclass, or the MFC host. Those still need a
-Windows build and a human at the keyboard. Treat a green run here as "the
-logic is sound", not "it ships".
+It does **not** prove anything about behaviour that lives in Win32 itself:
+painting, hit-testing, scrolling, the clipboard, or the edit-control subclass.
+Those still need a Windows build and a human at the keyboard. Treat a green run
+here as "the logic is sound", not "it ships".
+
+The MSVC build is covered separately by the `windows-build` job in
+`.github/workflows/ci.yml`, which compiles Grid32 for x64 and Win32 and runs
+the two portable suites under `cl.exe`. That job deliberately does not build
+the MFC host — see the comment at the end of the workflow for why, and what it
+would cost to add.
 
 ## Note on `-O0`
 
