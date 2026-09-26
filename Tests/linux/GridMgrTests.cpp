@@ -244,6 +244,123 @@ TEST(StreamIn_RecalculatesOnce_AndFormulasSeeTheImport)
     ASSERT_WSTR(s.Text(5, 0), L"3");
 }
 
+// ---- undo / redo (AUDIT_2026-09.md B5) -------------------------------------
+TEST(Undo_RestoresAFormula)
+{
+    Sheet s;
+    s.Set(0, 0, L"4");            // A1
+    s.Set(1, 0, L"=A1+1");        // A2 = 5
+    ASSERT_WSTR(s.Text(1, 0), L"5");
+
+    s.Set(1, 0, L"99");           // overwrite the formula with a literal
+    ASSERT_WSTR(s.Text(1, 0), L"99");
+    ASSERT_TRUE(!s.mgr().GetCell(1, 0)->m_bFormula);
+
+    s.mgr().OnUndo();
+    // Used to come back as the literal text "5" with the formula gone.
+    ASSERT_TRUE(s.mgr().GetCell(1, 0)->m_bFormula);
+    ASSERT_WSTR(s.mgr().GetCell(1, 0)->m_wsFormula, L"A1+1");
+    ASSERT_WSTR(s.Text(1, 0), L"5");
+}
+
+TEST(Undo_RestoredFormulaIsLive)
+{
+    // The real test of B5: a restored formula must recalculate, not just look
+    // like a formula. Restoring the display text would pass the check above
+    // if it happened to match, but would fail this one.
+    Sheet s;
+    s.Set(0, 0, L"4");
+    s.Set(1, 0, L"=A1+1");
+    s.Set(1, 0, L"99");
+    s.mgr().OnUndo();
+
+    s.Set(0, 0, L"10");           // move the source
+    ASSERT_WSTR(s.Text(1, 0), L"11");
+    ASSERT_NEAR(s.Value(1, 0), 11.0, 1e-9);
+}
+
+TEST(Redo_ReappliesTheOverwrite)
+{
+    Sheet s;
+    s.Set(0, 0, L"4");
+    s.Set(1, 0, L"=A1+1");
+    s.Set(1, 0, L"99");
+    s.mgr().OnUndo();
+    ASSERT_TRUE(s.mgr().GetCell(1, 0)->m_bFormula);
+
+    s.mgr().OnRedo();
+    ASSERT_TRUE(!s.mgr().GetCell(1, 0)->m_bFormula);
+    ASSERT_WSTR(s.Text(1, 0), L"99");
+}
+
+TEST(Undo_RestoresNumberFormat)
+{
+    // SetFormat undo restored fontInfo only, so the number format stayed put.
+    Sheet s;
+    s.Set(0, 0, L"1234.5");
+    ASSERT_WSTR(s.Text(0, 0), L"1234.5");
+
+    s.mgr().SetCellNumberFormat(0, 0, FMT_CURRENCY);
+    ASSERT_WSTR(s.Text(0, 0), L"$1,234.50");
+
+    s.mgr().OnUndo();
+    ASSERT_TRUE(s.mgr().GetCell(0, 0)->m_nFormat == FMT_GENERAL);
+    ASSERT_WSTR(s.Text(0, 0), L"1234.5");
+}
+
+TEST(Undo_RestoresDeletedCell)
+{
+    Sheet s;
+    s.Set(0, 0, L"=1+2");
+    ASSERT_WSTR(s.Text(0, 0), L"3");
+    s.mgr().DeleteCell(0, 0);
+    ASSERT_TRUE(s.mgr().GetCell(0, 0) == nullptr);
+
+    s.mgr().OnUndo();
+    ASSERT_TRUE(s.mgr().GetCell(0, 0) != nullptr);
+    ASSERT_TRUE(s.mgr().GetCell(0, 0)->m_bFormula);
+    ASSERT_WSTR(s.Text(0, 0), L"3");
+}
+
+TEST(Undo_RefreshesDependents)
+{
+    Sheet s;
+    s.Set(0, 0, L"5");
+    s.Set(1, 0, L"=A1*2");        // 10
+    s.Set(0, 0, L"7");            // dependent becomes 14
+    ASSERT_WSTR(s.Text(1, 0), L"14");
+
+    s.mgr().OnUndo();             // A1 back to 5
+    ASSERT_WSTR(s.Text(0, 0), L"5");
+    ASSERT_WSTR(s.Text(1, 0), L"10");
+}
+
+TEST(Undo_StackDepthTracksEdits)
+{
+    Sheet s;
+    ASSERT_TRUE(s.mgr().OnCanUndo() == 0);
+    s.Set(0, 0, L"a");
+    s.Set(0, 0, L"b");
+    ASSERT_TRUE(s.mgr().OnCanUndo() == 2);
+
+    s.mgr().OnUndo();
+    ASSERT_TRUE(s.mgr().OnCanUndo() == 1);
+    ASSERT_TRUE(s.mgr().OnCanRedo() == 1);
+
+    s.mgr().OnRedo();
+    ASSERT_TRUE(s.mgr().OnCanUndo() == 2);
+    ASSERT_TRUE(s.mgr().OnCanRedo() == 0);
+}
+
+TEST(Undo_SendsOneNotification)
+{
+    Sheet s;
+    s.Set(0, 0, L"x");
+    StubMessageLogClear();
+    s.mgr().OnUndo();
+    ASSERT_TRUE(StubCountNotifications(GN_CONTENTCHANGED) == 1);
+}
+
 // ---- content-changed notification (AUDIT_2026-09.md B4) --------------------
 // The host marks its document dirty off GN_CONTENTCHANGED, so every edit that
 // alters what StreamOut would write has to send one.

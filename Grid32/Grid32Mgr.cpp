@@ -90,6 +90,20 @@ namespace {
 // Both flags are restored to their previous value rather than cleared, so a
 // nested bulk operation can't re-enable either while an outer one is still
 // running, and an exception can't leave them stuck on.
+// Sets a BOOL member for the lifetime of the scope and puts the old value
+// back on the way out, including when the body throws.
+class FlagScope
+{
+public:
+    FlagScope(BOOL& flag, BOOL value) : m_flag(flag), m_previous(flag) { m_flag = value; }
+    ~FlagScope() { m_flag = m_previous; }
+    FlagScope(const FlagScope&) = delete;
+    FlagScope& operator=(const FlagScope&) = delete;
+private:
+    BOOL& m_flag;
+    BOOL  m_previous;
+};
+
 class BulkEditScope
 {
 public:
@@ -2789,6 +2803,45 @@ void CGrid32Mgr::OnPaste()
 }
 
 // Undo the last edit operation
+// Put back the cell snapshot an edit operation recorded. SetCell replaces the
+// whole GRIDCELL, so the formula source, cell type, cached numeric value,
+// number format and character formatting all come back together.
+//
+// Restoring only part of the snapshot was the bug: the SetText path put back
+// m_wsText, which for a formula cell is its *evaluated* result, so undoing an
+// edit made over "=B1+1" resurrected the literal "5" it happened to be
+// displaying and the formula was gone for good. SetFormat had the same shape,
+// restoring fontInfo while leaving the number format and alignment behind.
+// Both states were in the record all along; neither was read.
+void CGrid32Mgr::RestoreCells(const GridEditOperation& op, bool bUndo)
+{
+    {
+        // Restoring must not itself be recorded, and a multi-cell restore is
+        // one user action: one recalc and one change notification, not one
+        // per cell.
+        FlagScope noRecord(m_bUndoRecordEnabled, FALSE);
+        BulkEditScope bulkEdit(m_bDeferRecalc, m_bSuppressChangeNotify);
+
+        if (op.type == EditOperationType::Clipboard)
+        {
+            for (const auto& entry : (bUndo ? op.oldCells : op.newCells))
+                SetCell(entry.first.nRow, entry.first.nCol, entry.second);
+        }
+        else if (!bUndo && op.type == EditOperationType::Delete)
+        {
+            // Redoing a delete removes the cell again rather than restoring it.
+            DeleteCell(op.row, op.col);
+        }
+        else
+        {
+            SetCell(op.row, op.col, bUndo ? op.oldState : op.newState);
+        }
+    }
+
+    RecalculateFormulas();
+    NotifyContentChanged();
+}
+
 void CGrid32Mgr::OnUndo()
 {
     if (m_undoStack.empty())
@@ -2801,60 +2854,13 @@ void CGrid32Mgr::OnUndo()
 
     try
     {
-    switch (op.type)
-    {
-    case EditOperationType::SetText:
-        // Revert text change
-        // Use SetCellText which records undo, so bypass recording here
-    {
-        // Temporary disable recording
-        bool record = m_bUndoRecordEnabled;
-        m_bUndoRecordEnabled = false;
-        SetCellText(op.row, op.col, op.oldState.m_wsText.c_str());
-        m_bUndoRecordEnabled = record;
+        RestoreCells(op, /*bUndo*/ true);
     }
-    break;
-
-    case EditOperationType::SetFormat:
+    catch (...)
     {
-        bool record = m_bUndoRecordEnabled;
-        m_bUndoRecordEnabled = false;
-        SetCellFormat(op.row, op.col, op.oldState.fontInfo);
-        m_bUndoRecordEnabled = record;
-    }
-    break;
-
-    case EditOperationType::SetFullCell:
-    {
-        bool record = m_bUndoRecordEnabled;
-        m_bUndoRecordEnabled = false;
-        SetCell(op.row, op.col, op.oldState);
-        m_bUndoRecordEnabled = record;
-    }
-    break;
-
-    case EditOperationType::Delete:
-    {
-        // Undo delete: recreate the cell
-        bool record = m_bUndoRecordEnabled;
-        m_bUndoRecordEnabled = false;
-        SetCell(op.row, op.col, op.oldState);
-        m_bUndoRecordEnabled = record;
-    }
-    break;
-
-    case EditOperationType::Clipboard:
-    {
-        bool record = m_bUndoRecordEnabled;
-        m_bUndoRecordEnabled = false;
-        for (auto& entry : op.oldCells)
-        {
-            const GRIDPOINT& pt = entry.first;
-            SetCell(pt.nRow, pt.nCol, entry.second);
-        }
-        m_bUndoRecordEnabled = record;
-    }
-    break;
+        // Restore threw; leave undo stack intact so the user can retry.
+        SetLastError(GRID_ERROR_NOT_IMPLEMENTED);
+        return;
     }
 
     // Restore succeeded — move the op from undo to redo atomically.
@@ -2862,12 +2868,6 @@ void CGrid32Mgr::OnUndo()
     m_redoStack.push(op);
     Invalidate();
     SetLastError(0);
-    }
-    catch (...)
-    {
-        // Restore threw; leave undo stack intact so the user can retry.
-        SetLastError(GRID_ERROR_NOT_IMPLEMENTED);
-    }
 }
 
 // Redo the last undone operation
@@ -2876,63 +2876,22 @@ void CGrid32Mgr::OnRedo()
     if (m_redoStack.empty())
         return;
 
+    // Held until the restore succeeds, mirroring OnUndo. Redo previously
+    // popped first and had no exception guard at all, so a throw mid-restore
+    // lost the operation and left the grid half-restored (M5).
     GridEditOperation op = m_redoStack.top();
+
+    try
+    {
+        RestoreCells(op, /*bUndo*/ false);
+    }
+    catch (...)
+    {
+        SetLastError(GRID_ERROR_NOT_IMPLEMENTED);
+        return;
+    }
+
     m_redoStack.pop();
-
-    switch (op.type)
-    {
-    case EditOperationType::SetText:
-    {
-        bool record = m_bUndoRecordEnabled;
-        m_bUndoRecordEnabled = false;
-        SetCellText(op.row, op.col, op.newState.m_wsText.c_str());
-        m_bUndoRecordEnabled = record;
-    }
-    break;
-
-    case EditOperationType::SetFormat:
-    {
-        bool record = m_bUndoRecordEnabled;
-        m_bUndoRecordEnabled = false;
-        SetCellFormat(op.row, op.col, op.newState.fontInfo);
-        m_bUndoRecordEnabled = record;
-    }
-    break;
-
-    case EditOperationType::SetFullCell:
-    {
-        bool record = m_bUndoRecordEnabled;
-        m_bUndoRecordEnabled = false;
-        SetCell(op.row, op.col, op.newState);
-        m_bUndoRecordEnabled = record;
-    }
-    break;
-
-    case EditOperationType::Delete:
-    {
-        bool record = m_bUndoRecordEnabled;
-        m_bUndoRecordEnabled = false;
-        // Redo delete: remove cell
-        DeleteCell(op.row, op.col);
-        m_bUndoRecordEnabled = record;
-    }
-    break;
-
-    case EditOperationType::Clipboard:
-    {
-        bool record = m_bUndoRecordEnabled;
-        m_bUndoRecordEnabled = false;
-        for (auto& entry : op.newCells)
-        {
-            const GRIDPOINT& pt = entry.first;
-            SetCell(pt.nRow, pt.nCol, entry.second);
-        }
-        m_bUndoRecordEnabled = record;
-    }
-    break;
-    }
-
-    // After redo, push back onto undo stack
     m_undoStack.push(op);
     Invalidate();
     SetLastError(0);

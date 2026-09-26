@@ -214,6 +214,9 @@ public:
         bool OnFindText(const GCFINDSTRUCT& findStruct);
         bool OnReplaceText(const GCREPLACESTRUCT& replaceStruct);
         void RecordUndoOperation(const GridEditOperation& op);
+        // Re-apply one edit operation's recorded cell snapshot. bUndo selects
+        // the old state, otherwise the new one.
+        void RestoreCells(const GridEditOperation& op, bool bUndo);
         void CopyGridCell(GRIDCELL& dest, GRIDCELL& src);
         void OnStreamOut(LPGCSTREAM pStream);
         void OnStreamIn(LPGCSTREAM pStream);
