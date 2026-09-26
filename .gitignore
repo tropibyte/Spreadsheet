@@ -374,3 +374,6 @@ Spreadsheet/res/fluent_cache/
 # Linux test build output (Tests/linux)
 Tests/linux/build/
 Tests/linux/warnings.txt
+
+# Windows test build output (Tests)
+Tests/build/

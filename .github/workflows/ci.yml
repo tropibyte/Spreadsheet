@@ -33,3 +33,31 @@ jobs:
               -Iwin32shim -I../../Grid32 \
               ../../Grid32/Grid32Mgr.cpp ../../Grid32/Formulator.cpp 2>&1 | tee warnings.txt
           echo "warning count: $(grep -c 'warning:' warnings.txt || true)"
+
+  windows-build:
+    name: Build + tests (Windows, MSVC)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: microsoft/setup-msbuild@v2
+
+      # Grid32 is a plain Win32 DLL with no MFC dependency, so this is the
+      # part of the build that must always work.
+      - name: Build Grid32 (x64 Release)
+        run: msbuild Grid32\Grid32.vcxproj /p:Configuration=Release /p:Platform=x64 /m /v:minimal
+
+      # The MFC host. UseOfMfc is Dynamic, so this needs the ATL/MFC component
+      # to be present on the runner image.
+      - name: Build solution (x64 Release)
+        run: msbuild Spreadsheet.sln /p:Configuration=Release /p:Platform=x64 /m /v:minimal
+
+      # The same two suites the Linux job runs, here under MSVC. GridMgrTests
+      # is Linux-only: it defines Win32 symbols that collide with the real ones.
+      - name: Grid32 helper tests
+        shell: cmd
+        run: Tests\run_tests.bat
+
+      - name: Formulator tests
+        shell: cmd
+        run: Tests\run_formulator_tests.bat
