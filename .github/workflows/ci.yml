@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, 'claude/**' ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux-tests:
+    name: Tests (Linux, Win32 shim)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show compiler
+        run: g++ --version
+
+      - name: Build and run test suites
+        working-directory: Tests/linux
+        run: make check
+
+      # The shim compiles the Win32 sources under GCC's warning set, which is
+      # stricter than the project's /W3 in places. Informational only: the
+      # existing sources have pre-existing warnings, so this does not gate.
+      - name: Warning report (informational)
+        if: always()
+        working-directory: Tests/linux
+        continue-on-error: true
+        run: |
+          g++ -fsyntax-only -std=c++17 -Wall -Wextra \
+              -Wno-unknown-pragmas -Wno-reorder -Wno-unused-parameter \
+              -Iwin32shim -I../../Grid32 \
+              ../../Grid32/Grid32Mgr.cpp ../../Grid32/Formulator.cpp 2>&1 | tee warnings.txt
+          echo "warning count: $(grep -c 'warning:' warnings.txt || true)"

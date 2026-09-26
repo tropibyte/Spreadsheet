@@ -371,3 +371,6 @@ Tests/build/
 
 # Fluent icon SVG cache (downloaded by Spreadsheet/res/regen_fluent.ps1)
 Spreadsheet/res/fluent_cache/
+# Linux test build output (Tests/linux)
+Tests/linux/build/
+Tests/linux/warnings.txt
