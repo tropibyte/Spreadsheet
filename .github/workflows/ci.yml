@@ -47,8 +47,24 @@ jobs:
       - name: Build Grid32 (x64 Release)
         run: msbuild Grid32\Grid32.vcxproj /p:Configuration=Release /p:Platform=x64 /m /v:minimal
 
-      # The MFC host. UseOfMfc is Dynamic, so this needs the ATL/MFC component
-      # to be present on the runner image.
+      # The runner image ships no MFC (MSB8041), and Spreadsheet.vcxproj sets
+      # UseOfMfc=Dynamic, so the component has to be added before it will build.
+      - name: Install ATL/MFC
+        shell: pwsh
+        run: |
+          $vswhere   = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installer = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vs_installer.exe"
+          $vs = & $vswhere -latest -property installationPath
+          Write-Host "Visual Studio: $vs"
+          $t0 = Get-Date
+          $p = Start-Process -FilePath $installer -Wait -PassThru -ArgumentList @(
+              'modify', '--installPath', "`"$vs`"",
+              '--add', 'Microsoft.VisualStudio.Component.VC.ATLMFC',
+              '--quiet', '--norestart', '--nocache')
+          Write-Host "vs_installer exit $($p.ExitCode) after $([int]((Get-Date)-$t0).TotalSeconds)s"
+          # 3010 = success, reboot requested. Anything else is a real failure.
+          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { exit $p.ExitCode }
+
       - name: Build solution (x64 Release)
         run: msbuild Spreadsheet.sln /p:Configuration=Release /p:Platform=x64 /m /v:minimal
 
