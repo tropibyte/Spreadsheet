@@ -28,10 +28,14 @@ bool InitializeGridLibrary(HMODULE hModule)
     if (!RegisterGrid32Class(hModule))
         return false;
 
+    if (!RegisterPhotoGalleryClass(hModule))
+        return false;
+
     return true;
 }
 
 bool UnInitializeGridLibrary(HMODULE hModule)
 {
-    return UnregisterClass(GRID_WNDCLASS_NAME, hModule) != NULL;
+    bool bGallery = UnregisterPhotoGalleryClass(hModule);
+    return UnregisterClass(GRID_WNDCLASS_NAME, hModule) != NULL && bGallery;
 }

@@ -161,6 +161,12 @@
     <ClInclude Include="Grid32Mgr.h" />
     <ClInclude Include="grid32_internal.h" />
     <ClInclude Include="pch.h" />
+    <ClInclude Include="photogallery.h" />
+    <ClInclude Include="PhotoGalleryCtrl.h" />
+    <ClInclude Include="PhotoGalleryLayout.h" />
+    <ClInclude Include="PhotoGalleryLoader.h" />
+    <ClInclude Include="PhotoGalleryMgr.h" />
+    <ClInclude Include="PhotoGalleryThumbs.h" />
     <ClInclude Include="resource.h" />
   </ItemGroup>
   <ItemGroup>
@@ -170,6 +176,11 @@
     <ClCompile Include="grid32.cpp" />
     <ClCompile Include="Grid32Mgr.cpp" />
     <ClCompile Include="grid32_wndproc.cpp" />
+    <ClCompile Include="photogallery_wndproc.cpp" />
+    <ClCompile Include="PhotoGalleryLayout.cpp" />
+    <ClCompile Include="PhotoGalleryLoader.cpp" />
+    <ClCompile Include="PhotoGalleryMgr.cpp" />
+    <ClCompile Include="PhotoGalleryThumbs.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>

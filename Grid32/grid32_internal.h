@@ -6,6 +6,8 @@
 
 bool InitializeGridLibrary(HMODULE hModule);
 bool UnInitializeGridLibrary(HMODULE hModule);
+bool RegisterPhotoGalleryClass(HINSTANCE hInstance);      // photogallery_wndproc.cpp
+bool UnregisterPhotoGalleryClass(HINSTANCE hInstance);
 
 // ---- Cell type inference (header-defined so tests can call without
 //      linking against the manager impl) -----------------------------------
