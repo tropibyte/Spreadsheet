@@ -114,6 +114,25 @@ public:
         m.nAspectY = y;
         return SetTileMetrics(m);
     }
+    // Space between tiles in DIPs (0 = tiles touch). The gaps show the
+    // background color (PGGCLR_BK).
+    BOOL SetSpacing(int cxGap, int cyGap)
+    {
+        PGGTILEMETRICS m{ sizeof(PGGTILEMETRICS), PGGTM_SPACING };
+        m.cxGap = cxGap;
+        m.cyGap = cyGap;
+        return SetTileMetrics(m);
+    }
+    BOOL SetSpacing(int gap) { return SetSpacing(gap, gap); }
+    BOOL GetSpacing(int& cxGap, int& cyGap) const
+    {
+        PGGTILEMETRICS m{};
+        if (!GetTileMetrics(m))
+            return FALSE;
+        cxGap = m.cxGap;
+        cyGap = m.cyGap;
+        return TRUE;
+    }
     BOOL SetLayout(UINT layout, UINT flags = 0) { return (BOOL)Send(PGGM_SETLAYOUT, layout, flags); }
     UINT GetLayout() const { return (UINT)Send(PGGM_GETLAYOUT, 0, 0); }
     BOOL SetColors(const PGGCOLORS& c) { return (BOOL)Send(PGGM_SETCOLORS, 0, (LPARAM)&c); }
