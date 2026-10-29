@@ -31,6 +31,7 @@ BEGIN_MESSAGE_MAP(CGridView, CView)
     ON_WM_SYSKEYUP()
     ON_WM_SYSKEYDOWN()
     ON_NOTIFY(NM_CLICK, GRIDCTRL_ID, &CGridView::OnGridClick)
+    ON_NOTIFY(GN_CONTENTCHANGED, GRIDCTRL_ID, &CGridView::OnGridContentChanged)
 END_MESSAGE_MAP()
 
 
@@ -277,4 +278,15 @@ void CGridView::OnGridClick(NMHDR* pNMHDR, LRESULT* pResult)
     // into a dispatch table.
     if (CMainFrame* pFrame = DYNAMIC_DOWNCAST(CMainFrame, AfxGetMainWnd()))
         pFrame->ConsumeGridClick(&m_wndGridCtrl, p->cellPt);
+}
+
+// The grid owns the data, so the document has no other way to know it changed:
+// nothing routes edits through CDocument. Without this the modified flag was
+// never set, and closing after editing threw the work away without asking.
+void CGridView::OnGridContentChanged(NMHDR* /*pNMHDR*/, LRESULT* pResult)
+{
+    if (CDocument* pDoc = GetDocument())
+        pDoc->SetModifiedFlag(TRUE);
+    if (pResult)
+        *pResult = 0;
 }

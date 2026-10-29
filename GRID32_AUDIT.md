@@ -2,6 +2,9 @@
 
 Findings from the audit performed on 2026-05-15. Each item carries a checkbox; commits referencing the fix should tick the box.
 
+All items below are closed. See [`AUDIT_2026-09.md`](AUDIT_2026-09.md) for the
+round-2 audit covering correctness, MFC host wiring, scale and feature gaps.
+
 ## Critical
 
 - [x] **C1** `IsCellVisible` always returns true (`Grid32Mgr.cpp:1696-1707`) — `cellPos` initialized to `{0,0}` and never mutated; programmatic scroll-to-cell silently broken.

@@ -125,7 +125,13 @@ BOOL CSpreadsheetDoc::OnOpenDocument(LPCTSTR lpszPathName)
 	stream.m_cbBuffSize = (UINT)((nWChars + 1) * sizeof(wchar_t));
 	stream.m_dwFormat = SF_SSF;
 	pGrid->StreamIn(stream);
-	return stream.m_dwError == 0;
+	if (stream.m_dwError != 0)
+		return FALSE;
+
+	// Loading fires GN_CONTENTCHANGED, which marks the document dirty; a
+	// freshly opened file is not modified.
+	SetModifiedFlag(FALSE);
+	return TRUE;
 }
 
 BOOL CSpreadsheetDoc::OnSaveDocument(LPCTSTR lpszPathName)
@@ -165,6 +171,11 @@ BOOL CSpreadsheetDoc::OnSaveDocument(LPCTSTR lpszPathName)
 	if (actualWChars > 0)
 		file.Write(buffer.data(), (UINT)(actualWChars * sizeof(wchar_t)));
 	file.Close();
+
+	// CDocument::OnSaveDocument would normally clear this, but it is not
+	// called: the base writes the file itself through Serialize(), which is a
+	// stub here, so invoking it would truncate what we just wrote.
+	SetModifiedFlag(FALSE);
 	return TRUE;
 }
 

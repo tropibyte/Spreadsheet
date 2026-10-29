@@ -157,6 +157,24 @@ namespace {
         return day + frac;
     }
 
+    // Keeps a cell on the current evaluation path for the guard's lifetime.
+    // The path set is what detects genuine cycles (a cell that references
+    // itself, directly or through a chain); it must NOT accumulate every cell
+    // ever seen, or a value referenced twice in one formula evaluates as 0 the
+    // second time. Erasing in the destructor also unwinds correctly if an
+    // evaluation throws.
+    struct PathGuard {
+        std::set<std::pair<UINT, UINT>>& path;
+        std::pair<UINT, UINT> key;
+        PathGuard(std::set<std::pair<UINT, UINT>>& p, const std::pair<UINT, UINT>& k)
+            : path(p), key(k) { path.insert(key); }
+        ~PathGuard() { path.erase(key); }
+        PathGuard(const PathGuard&) = delete;
+        PathGuard& operator=(const PathGuard&) = delete;
+    };
+
+    // Comparison operators, lowest precedence in the grammar.
+    enum class CompareOp { None, Lt, Gt, Le, Ge, Eq, Ne };
 }
 
 
@@ -166,40 +184,75 @@ void CFormulator::SkipSpaces(const std::wstring& s, size_t& pos) {
 
 bool CFormulator::ParseCellRef(const std::wstring& token, UINT& row, UINT& col) {
     size_t i = 0;
-    col = 0;
+    unsigned long long c = 0;
     while (i < token.size() && iswalpha(token[i])) {
-        col = col * 26 + (towupper(token[i]) - L'A' + 1);
+        c = c * 26 + (unsigned long long)(towupper(token[i]) - L'A' + 1);
+        if (c > 0xFFFFFFFFull) return false;   // column index overflow
         ++i;
     }
     if (i == 0 || i >= token.size()) return false;
+
+    // The remainder must be digits and nothing else. std::stoul stops at the
+    // first non-digit without complaining, so without this check "A1:B10"
+    // parses as a valid reference to A1 and every range collapses to its
+    // first cell; "A1B" would likewise be accepted as A1.
+    for (size_t j = i; j < token.size(); ++j)
+        if (!iswdigit(token[j])) return false;
+
+    unsigned long long r = 0;
     try {
-        row = (UINT)std::stoul(token.substr(i)) - 1;
+        r = std::stoull(token.substr(i));
     }
     catch (...) {
         return false;
     }
-    col -= 1;
+    // Rows are 1-based in reference syntax; "A0" has no zero-based index.
+    if (r == 0 || r > 0x100000000ull) return false;
+
+    row = (UINT)(r - 1);
+    col = (UINT)(c - 1);
     return true;
+}
+
+bool CFormulator::ParseRange(const std::wstring& arg, UINT& sr, UINT& sc,
+    UINT& er, UINT& ec)
+{
+    size_t colon = arg.find(L':');
+    if (colon == std::wstring::npos)
+    {
+        if (!ParseCellRef(TrimWs(arg), sr, sc)) return false;
+        er = sr; ec = sc;
+    }
+    else
+    {
+        if (!ParseCellRef(TrimWs(arg.substr(0, colon)), sr, sc)) return false;
+        if (!ParseCellRef(TrimWs(arg.substr(colon + 1)), er, ec)) return false;
+    }
+    // Normalize so callers can always iterate start..end inclusive; a range
+    // written "A3:A1" is the same range as "A1:A3".
+    if (sr > er) std::swap(sr, er);
+    if (sc > ec) std::swap(sc, ec);
+    return true;
+}
+
+// True when a cell carries something that should take part in an aggregate.
+// Blank cells are skipped by MIN/MAX/AVERAGE (matching Excel) — now that
+// ranges really do span their whole rectangle, treating an untouched cell as
+// 0 would drag MIN to 0 and AVERAGE's denominator to the full cell count.
+static bool CellHasValue(CGrid32Mgr* mgr, UINT row, UINT col)
+{
+    if (!mgr) return false;
+    PGRIDCELL cell = mgr->GetCell(row, col);
+    if (!cell) return false;
+    return cell->m_bFormula || !cell->m_wsText.empty();
 }
 
 double CFormulator::SumRange(CGrid32Mgr* mgr, const std::wstring& arg,
     std::set<std::pair<UINT, UINT>>& visited)
 {
-    UINT sr, sc, er, ec;
-    if (!ParseCellRef(arg, sr, sc))
-    {
-        size_t colon = arg.find(L':');
-        if (colon == std::wstring::npos)
-            return 0.0;
-        std::wstring s1 = arg.substr(0, colon);
-        std::wstring s2 = arg.substr(colon + 1);
-        if (!ParseCellRef(s1, sr, sc) || !ParseCellRef(s2, er, ec))
-            return 0.0;
-    }
-    else
-    {
-        er = sr; ec = sc;
-    }
+    UINT sr = 0, sc = 0, er = 0, ec = 0;
+    if (!ParseRange(arg, sr, sc, er, ec))
+        return 0.0;
 
     double total = 0.0;
     for (UINT r = sr; r <= er; ++r)
@@ -208,78 +261,80 @@ double CFormulator::SumRange(CGrid32Mgr* mgr, const std::wstring& arg,
     return total;
 }
 
-double CFormulator::MinMaxRange(CGrid32Mgr* mgr, const std::wstring& arg,
-    std::set<std::pair<UINT, UINT>>& visited, bool bMax)
+double CFormulator::AverageRange(CGrid32Mgr* mgr, const std::wstring& arg,
+    std::set<std::pair<UINT, UINT>>& visited)
 {
-    UINT sr, sc, er, ec;
-    if (!ParseCellRef(arg, sr, sc))
-    {
-        size_t colon = arg.find(L':');
-        if (colon == std::wstring::npos)
-            return 0.0;
-        std::wstring s1 = arg.substr(0, colon);
-        std::wstring s2 = arg.substr(colon + 1);
-        if (!ParseCellRef(s1, sr, sc) || !ParseCellRef(s2, er, ec))
-            return 0.0;
-    }
-    else
-    {
-        er = sr; ec = sc;
-    }
+    UINT sr = 0, sc = 0, er = 0, ec = 0;
+    if (!ParseRange(arg, sr, sc, er, ec))
+        return 0.0;
 
-    double best = bMax ? -std::numeric_limits<double>::infinity()
-        : std::numeric_limits<double>::infinity();
+    double total = 0.0;
+    UINT count = 0;
     for (UINT r = sr; r <= er; ++r)
         for (UINT c = sc; c <= ec; ++c)
         {
-            double v = GetCellValue(mgr, r, c, visited);
-            if (bMax)
-                best = max(best, v);
-            else
-                best = min(best, v);
+            if (!CellHasValue(mgr, r, c)) continue;
+            total += GetCellValue(mgr, r, c, visited);
+            ++count;
         }
-    return best;
+    return count ? total / count : 0.0;
+}
+
+double CFormulator::MinMaxRange(CGrid32Mgr* mgr, const std::wstring& arg,
+    std::set<std::pair<UINT, UINT>>& visited, bool bMax)
+{
+    UINT sr = 0, sc = 0, er = 0, ec = 0;
+    if (!ParseRange(arg, sr, sc, er, ec))
+        return 0.0;
+
+    double best = bMax ? -std::numeric_limits<double>::infinity()
+        : std::numeric_limits<double>::infinity();
+    bool any = false;
+    for (UINT r = sr; r <= er; ++r)
+        for (UINT c = sc; c <= ec; ++c)
+        {
+            if (!CellHasValue(mgr, r, c)) continue;
+            double v = GetCellValue(mgr, r, c, visited);
+            if (!any) { best = v; any = true; }
+            else if (bMax) { if (v > best) best = v; }
+            else           { if (v < best) best = v; }
+        }
+    // An all-blank range has no minimum or maximum; report 0 rather than
+    // leaking an infinity into the sheet.
+    return any ? best : 0.0;
 }
 
 double CFormulator::CountRange(CGrid32Mgr* mgr, const std::wstring& arg,
     std::set<std::pair<UINT, UINT>>& visited)
 {
-    UINT sr, sc, er, ec;
-    if (!ParseCellRef(arg, sr, sc))
-    {
-        size_t colon = arg.find(L':');
-        if (colon == std::wstring::npos)
-            return 0.0;
-        std::wstring s1 = arg.substr(0, colon);
-        std::wstring s2 = arg.substr(colon + 1);
-        if (!ParseCellRef(s1, sr, sc) || !ParseCellRef(s2, er, ec))
-            return 0.0;
-    }
-    else
-    {
-        er = sr; ec = sc;
-    }
+    // COUNT no longer evaluates the cells it counts (see below), so the
+    // evaluation path is unused here. The parameter stays for signature
+    // symmetry with the other range helpers.
+    UNREFERENCED_PARAMETER(visited);
 
+    UINT sr = 0, sc = 0, er = 0, ec = 0;
+    if (!ParseRange(arg, sr, sc, er, ec))
+        return 0.0;
+    if (!mgr)
+        return 0.0;
+
+    // COUNT tallies cells holding a number. A formula cell always yields a
+    // number in this engine, so it counts without being evaluated — which
+    // also keeps COUNT free of any cycle concern.
     double count = 0.0;
     for (UINT r = sr; r <= er; ++r)
         for (UINT c = sc; c <= ec; ++c)
         {
-            auto key = std::make_pair(r, c);
-            if (visited.count(key))
-                continue;
             PGRIDCELL cell = mgr->GetCell(r, c);
             if (!cell)
                 continue;
             if (cell->m_bFormula)
             {
-                visited.insert(key);
-                size_t p = 0;
-                ParseExpression(mgr, cell->m_wsFormula, p, visited);
                 ++count;
             }
             else if (!cell->m_wsText.empty())
             {
-                try { UNREFERENCED_PARAMETER( std::stod(cell->m_wsText)); ++count; }
+                try { UNREFERENCED_PARAMETER(std::stod(cell->m_wsText)); ++count; }
                 catch (...) {}
             }
         }
@@ -317,10 +372,8 @@ double CFormulator::EvalArg(CGrid32Mgr* mgr, const std::wstring& s,
     return ParseExpression(mgr, s, p, visited);
 }
 
-double CFormulator::ParseExpression(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos,
+double CFormulator::ParseAdditive(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos,
     std::set<std::pair<UINT, UINT>>& visited) {
-    FormulaDepthGuard depth;
-    if (depth.overflowed) return 0.0;
     double value = ParseTerm(mgr, expr, pos, visited);
     while (true) {
         SkipSpaces(expr, pos);
@@ -334,8 +387,63 @@ double CFormulator::ParseExpression(CGrid32Mgr* mgr, const std::wstring& expr, s
     return value;
 }
 
+// Top of the grammar: an additive expression optionally compared against
+// another. Comparisons bind less tightly than + - * /, so "A1+1 > B1*2"
+// compares the two arithmetic results. Excel's comparisons don't chain, so a
+// single optional operator is the whole rule.
+//
+// The result is 1.0 (true) or 0.0 (false), which is exactly what IF / IFS /
+// AND / OR / NOT already test with "!= 0.0".
+double CFormulator::ParseExpression(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos,
+    std::set<std::pair<UINT, UINT>>& visited) {
+    FormulaDepthGuard depth;
+    if (depth.overflowed) return 0.0;
+
+    double lhs = ParseAdditive(mgr, expr, pos, visited);
+
+    SkipSpaces(expr, pos);
+    if (pos >= expr.size()) return lhs;
+
+    // Two-character operators first, so "<=" isn't read as "<" followed by a
+    // stray "=".
+    CompareOp op = CompareOp::None;
+    if (expr.compare(pos, 2, L"<>") == 0)      { op = CompareOp::Ne; pos += 2; }
+    else if (expr.compare(pos, 2, L"<=") == 0) { op = CompareOp::Le; pos += 2; }
+    else if (expr.compare(pos, 2, L">=") == 0) { op = CompareOp::Ge; pos += 2; }
+    else if (expr[pos] == L'<')                { op = CompareOp::Lt; ++pos; }
+    else if (expr[pos] == L'>')                { op = CompareOp::Gt; ++pos; }
+    else if (expr[pos] == L'=')                { op = CompareOp::Eq; ++pos; }
+    else return lhs;
+
+    double rhs = ParseAdditive(mgr, expr, pos, visited);
+
+    // Compare with a small relative tolerance. Cell values arrive as doubles
+    // parsed from text, so an exact == would make =A1=0.3 false whenever A1
+    // was computed as 0.1+0.2.
+    double scale = std::fabs(lhs) > std::fabs(rhs) ? std::fabs(lhs) : std::fabs(rhs);
+    if (!(scale > 1.0)) scale = 1.0;          // also pins NaN to 1.0
+    const double eps = 1e-9 * scale;
+
+    switch (op)
+    {
+    case CompareOp::Lt: return (lhs < rhs - eps) ? 1.0 : 0.0;
+    case CompareOp::Gt: return (lhs > rhs + eps) ? 1.0 : 0.0;
+    case CompareOp::Le: return (lhs <= rhs + eps) ? 1.0 : 0.0;
+    case CompareOp::Ge: return (lhs >= rhs - eps) ? 1.0 : 0.0;
+    case CompareOp::Eq: return (std::fabs(lhs - rhs) <= eps) ? 1.0 : 0.0;
+    case CompareOp::Ne: return (std::fabs(lhs - rhs) > eps) ? 1.0 : 0.0;
+    default:            return lhs;
+    }
+}
+
 double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos,
     std::set<std::pair<UINT, UINT>>& visited) {
+    // Unary +/- below recurses straight back into ParseFactor, which would
+    // otherwise sidestep ParseExpression's guard and let "=-----...-1" run the
+    // stack out.
+    FormulaDepthGuard depth;
+    if (depth.overflowed) return 0.0;
+
     SkipSpaces(expr, pos);
     if (pos >= expr.size()) return 0.0;
     if (expr[pos] == L'(') {
@@ -377,26 +485,7 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
         }
         else if (_wcsicmp(token.c_str(), L"AVERAGE") == 0)
         {
-            double sum = SumRange(mgr, arg, visited);
-            UINT sr, sc, er, ec;
-            if (ParseCellRef(arg, sr, sc))
-            {
-                er = sr; ec = sc;
-            }
-            else
-            {
-                size_t colon = arg.find(L':');
-                if (colon != std::wstring::npos && ParseCellRef(arg.substr(0, colon), sr, sc) &&
-                    ParseCellRef(arg.substr(colon + 1), er, ec))
-                {
-                }
-                else
-                {
-                    sr = sc = er = ec = 0;
-                }
-            }
-            UINT count = (er - sr + 1) * (ec - sc + 1);
-            res = count ? sum / count : 0.0;
+            res = AverageRange(mgr, arg, visited);
         }
         else if (_wcsicmp(token.c_str(), L"MIN") == 0)
         {
@@ -706,12 +795,23 @@ double CFormulator::GetCellValue(CGrid32Mgr* mgr, UINT row, UINT col,
     std::set<std::pair<UINT, UINT>>& visited) {
     FormulaDepthGuard depth;
     if (depth.overflowed) return 0.0;
+    if (!mgr) return 0.0;
+
     auto key = std::make_pair(row, col);
+    // `visited` is the chain of formula cells currently being evaluated, not
+    // a log of every cell touched. Finding this cell already on the chain is a
+    // real cycle (A1 -> B1 -> A1) and yields 0; finding it a second time
+    // *alongside* the first (=A1+A1, or A1 read by two different formulas in
+    // one recalc) must evaluate normally.
     if (visited.count(key)) return 0.0;
-    visited.insert(key);
+
     PGRIDCELL cell = mgr->GetCell(row, col);
     if (!cell) return 0.0;
     if (cell->m_bFormula) {
+        // Only formula cells can recurse, so only they need to go on the
+        // chain. PathGuard removes the entry again on the way out, including
+        // when the nested evaluation throws.
+        PathGuard guard(visited, key);
         size_t p = 0;
         return ParseExpression(mgr, cell->m_wsFormula, p, visited);
     }

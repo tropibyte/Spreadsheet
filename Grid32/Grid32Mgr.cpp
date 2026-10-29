@@ -30,7 +30,7 @@ CGrid32Mgr::CGrid32Mgr() : pRowInfoArray(nullptr), pColInfoArray(nullptr),
 m_hWndGrid(NULL), nColHeaderHeight(40), nRowHeaderWidth(70), m_editWndProc(nullptr),
 m_nMouseHoverDelay(400), m_npHoverDelaySet(0), m_nToBeSized(~0), m_resizeStartSize(0), m_bSuppressEditCommit(FALSE),
 m_rgbSizingLine(RGB(0, 0, 64)), m_nSizingLine(0), m_bResizable(true), m_bUndoRecordEnabled(TRUE),
-m_bDeferRecalc(FALSE),
+m_bDeferRecalc(FALSE), m_bSuppressChangeNotify(FALSE),
 m_bSizing(false), m_bSelecting(false), m_hDefaultFont(NULL),
 m_clientRect{ 0, 0, 0, 0 }, m_gdiplusToken(0), m_gridHitTest(0),
 m_hWndEdit(NULL), m_lastClickTime(0), totalGridCellRect{ 0, 0, 0, 0 }
@@ -79,6 +79,53 @@ CGrid32Mgr::~CGrid32Mgr()
     delete[] pColInfoArray;
 }
 
+
+namespace {
+// Marks a region that applies many cells as one user-visible operation.
+//
+// It suspends two things: per-edit recalculation, which would otherwise be
+// quadratic over the edit, and the content-changed notification, which the
+// caller sends once when the scope closes instead of once per cell.
+//
+// Both flags are restored to their previous value rather than cleared, so a
+// nested bulk operation can't re-enable either while an outer one is still
+// running, and an exception can't leave them stuck on.
+// Sets a BOOL member for the lifetime of the scope and puts the old value
+// back on the way out, including when the body throws.
+class FlagScope
+{
+public:
+    FlagScope(BOOL& flag, BOOL value) : m_flag(flag), m_previous(flag) { m_flag = value; }
+    ~FlagScope() { m_flag = m_previous; }
+    FlagScope(const FlagScope&) = delete;
+    FlagScope& operator=(const FlagScope&) = delete;
+private:
+    BOOL& m_flag;
+    BOOL  m_previous;
+};
+
+class BulkEditScope
+{
+public:
+    BulkEditScope(BOOL& deferRecalc, BOOL& suppressNotify)
+        : m_deferRecalc(deferRecalc), m_prevDefer(deferRecalc),
+          m_suppressNotify(suppressNotify), m_prevSuppress(suppressNotify)
+    {
+        m_deferRecalc = TRUE;
+        m_suppressNotify = TRUE;
+    }
+    ~BulkEditScope()
+    {
+        m_deferRecalc = m_prevDefer;
+        m_suppressNotify = m_prevSuppress;
+    }
+    BulkEditScope(const BulkEditScope&) = delete;
+    BulkEditScope& operator=(const BulkEditScope&) = delete;
+private:
+    BOOL& m_deferRecalc;    BOOL m_prevDefer;
+    BOOL& m_suppressNotify; BOOL m_prevSuppress;
+};
+}
 
 bool IsRectInside(const RECT& r1, const RECT& r2) {
     return (r1.left >= r2.left &&
@@ -1055,6 +1102,7 @@ void CGrid32Mgr::SetCell(UINT nRow, UINT nCol, const GRIDCELL& gc)
     // Record undo/redo
     RecordUndoOperation(op);
     RecalculateFormulas();
+    NotifyContentChanged();
     SetLastError(0);
 }
 
@@ -1130,6 +1178,7 @@ void CGrid32Mgr::SetCellFormat(UINT nRow, UINT nCol, const FONTINFO& fi)
     RECT r;
     GetCurrentCellRect(r);
     Invalidate();
+    NotifyContentChanged();
     SetLastError(0);
 }
 
@@ -1164,6 +1213,7 @@ void CGrid32Mgr::SetRangeFormat(const GRIDSELECTION& selRange, const FONTINFO& f
     }
     m_bUndoRecordEnabled = record;
     Invalidate();
+    NotifyContentChanged();
     SetLastError(0);
 }
 
@@ -1190,6 +1240,7 @@ void CGrid32Mgr::SetCellNumberFormat(UINT nRow, UINT nCol, UINT format)
     op.newState = *pCell;
     RecordUndoOperation(op);
     Invalidate();
+    NotifyContentChanged();
     SetLastError(0);
 }
 
@@ -1199,15 +1250,19 @@ void CGrid32Mgr::SetSelectionNumberFormat(UINT format)
     NormalizeSelectionRect(sel);
     bool record = m_bUndoRecordEnabled;
     m_bUndoRecordEnabled = false;
-    for (UINT r = sel.start.nRow; r <= sel.end.nRow && r < gcs.nHeight; ++r)
     {
-        for (UINT c = sel.start.nCol; c <= sel.end.nCol && c < gcs.nWidth; ++c)
+        BulkEditScope bulkEdit(m_bDeferRecalc, m_bSuppressChangeNotify);
+        for (UINT r = sel.start.nRow; r <= sel.end.nRow && r < gcs.nHeight; ++r)
         {
-            SetCellNumberFormat(r, c, format);
+            for (UINT c = sel.start.nCol; c <= sel.end.nCol && c < gcs.nWidth; ++c)
+            {
+                SetCellNumberFormat(r, c, format);
+            }
         }
     }
     m_bUndoRecordEnabled = record;
     Invalidate();
+    NotifyContentChanged();
     SetLastError(0);
 }
 
@@ -1252,6 +1307,7 @@ void CGrid32Mgr::SetSelectionHAlign(UINT halign)
             if (pCell) ApplyAlignBits(pCell->justification, GA_HORIZ, halign);
         }
     Invalidate();
+    NotifyContentChanged();
     SetLastError(0);
 }
 
@@ -1266,6 +1322,7 @@ void CGrid32Mgr::SetSelectionVAlign(UINT valign)
             if (pCell) ApplyAlignBits(pCell->justification, GA_VERT, valign);
         }
     Invalidate();
+    NotifyContentChanged();
     SetLastError(0);
 }
 
@@ -1280,6 +1337,7 @@ void CGrid32Mgr::SetSelectionWrap(BOOL wrap)
             if (pCell) ApplyAlignBits(pCell->justification, GA_WRAP, wrap ? 1 : 0);
         }
     Invalidate();
+    NotifyContentChanged();
     SetLastError(0);
 }
 
@@ -1351,13 +1409,7 @@ void CGrid32Mgr::SetCellText(UINT nRow, UINT nCol, LPCWSTR newText)
     if (newText && newText[0] == L'=') {
         pCell->m_bFormula = true;
         pCell->m_wsFormula = newText + 1;
-        pCell->m_wsText = EvaluateFormula(pCell->m_wsFormula);
-        pCell->m_eType = CT_Formula;
-        // Cache the numeric form when the formula result parses as a number,
-        // so type-aware sort/compare doesn't have to stod the display text.
-        double n = 0.0;
-        if (Grid32Detail::TryParseNumber(pCell->m_wsText, n)) pCell->m_dValue = n;
-        else pCell->m_dValue = 0.0;
+        RefreshFormulaCell(pCell);
     } else {
         pCell->m_bFormula = false;
         pCell->m_wsFormula.clear();
@@ -1375,6 +1427,18 @@ void CGrid32Mgr::SetCellText(UINT nRow, UINT nCol, LPCWSTR newText)
 
     // Record undo operation
     RecordUndoOperation(op);
+
+    // Every other mutator (SetCell, ClearCellText, DeleteCell) recalculates;
+    // this one didn't, and it is the path the edit control and GM_SETCELLTEXT
+    // both take. That left =A1*2 showing a stale result after A1 was typed
+    // into. Bulk callers suppress this with BulkEditScope and recalculate
+    // once at the end.
+    //
+    // The undo record is captured above on purpose: it stores the cell's
+    // source, and the display text of every dependent is derived state that
+    // undo re-derives by recalculating again.
+    RecalculateFormulas();
+    NotifyContentChanged();
 
     // Redraw the cell
     RECT r;
@@ -1409,6 +1473,7 @@ void CGrid32Mgr::ClearCellText(UINT nRow, UINT nCol)
         // Record undo operation
         RecordUndoOperation(op);
         RecalculateFormulas();
+        NotifyContentChanged();
 
         // Redraw the cell
         RECT r;
@@ -1442,6 +1507,7 @@ void CGrid32Mgr::DeleteCell(UINT nRow, UINT nCol)
         // Record undo operation
         RecordUndoOperation(op);
         RecalculateFormulas();
+        NotifyContentChanged();
         SetLastError(0);
     }
 }
@@ -2665,24 +2731,29 @@ void CGrid32Mgr::OnClear()
     bool record = m_bUndoRecordEnabled;
     m_bUndoRecordEnabled = false;
 
-    for (UINT r = sel.start.nRow; r <= sel.end.nRow && r < gcs.nHeight; ++r)
     {
-        for (UINT c = sel.start.nCol; c <= sel.end.nCol && c < gcs.nWidth; ++c)
+        BulkEditScope bulkEdit(m_bDeferRecalc, m_bSuppressChangeNotify);
+        for (UINT r = sel.start.nRow; r <= sel.end.nRow && r < gcs.nHeight; ++r)
         {
-            GRIDPOINT pt{ r, c };
-            PGRIDCELL cell = GetCell(r, c);
-            if (cell)
+            for (UINT c = sel.start.nCol; c <= sel.end.nCol && c < gcs.nWidth; ++c)
             {
-                op.oldCells.push_back({ pt, *cell });
-                DeleteCell(r, c);
+                GRIDPOINT pt{ r, c };
+                PGRIDCELL cell = GetCell(r, c);
+                if (cell)
+                {
+                    op.oldCells.push_back({ pt, *cell });
+                    DeleteCell(r, c);
+                }
+                else
+                {
+                    op.oldCells.push_back({ pt, m_defaultGridCell });
+                }
+                op.newCells.push_back({ pt, m_defaultGridCell });
             }
-            else
-            {
-                op.oldCells.push_back({ pt, m_defaultGridCell });
-            }
-            op.newCells.push_back({ pt, m_defaultGridCell });
         }
     }
+    RecalculateFormulas();
+    NotifyContentChanged();
 
     m_bUndoRecordEnabled = record;
     RecordUndoOperation(op);
@@ -2765,11 +2836,16 @@ void CGrid32Mgr::OnCut()
 
     bool record = m_bUndoRecordEnabled;
     m_bUndoRecordEnabled = false;
-    for (auto& entry : op.oldCells)
     {
-        ClearCellText(entry.first.nRow, entry.first.nCol);
-        op.newCells.push_back({ entry.first, m_defaultGridCell });
+        BulkEditScope bulkEdit(m_bDeferRecalc, m_bSuppressChangeNotify);
+        for (auto& entry : op.oldCells)
+        {
+            ClearCellText(entry.first.nRow, entry.first.nCol);
+            op.newCells.push_back({ entry.first, m_defaultGridCell });
+        }
     }
+    RecalculateFormulas();
+    NotifyContentChanged();
     m_bUndoRecordEnabled = record;
 
     RecordUndoOperation(op);
@@ -2809,32 +2885,73 @@ void CGrid32Mgr::OnPaste()
     UINT rOffset = 0;
     bool record = m_bUndoRecordEnabled;
     m_bUndoRecordEnabled = false;
-    m_bDeferRecalc = TRUE;
-    while (std::getline(rows, line) && sel.start.nRow + rOffset < gcs.nHeight)
     {
-        std::wistringstream cols(line);
-        std::wstring cellText;
-        UINT cOffset = 0;
-        while (std::getline(cols, cellText, L'\t') && sel.start.nCol + cOffset < gcs.nWidth)
+        BulkEditScope bulkEdit(m_bDeferRecalc, m_bSuppressChangeNotify);
+        while (std::getline(rows, line) && sel.start.nRow + rOffset < gcs.nHeight)
         {
-            GRIDPOINT pt{ sel.start.nRow + rOffset, sel.start.nCol + cOffset };
-            PGRIDCELL cell = GetCellOrCreate(pt.nRow, pt.nCol, false);
-            op.oldCells.push_back({ pt, *cell });
-            SetCellText(pt.nRow, pt.nCol, cellText.c_str());
-            cell = GetCellOrDefault(pt.nRow, pt.nCol);
-            op.newCells.push_back({ pt, *cell });
-            ++cOffset;
+            std::wistringstream cols(line);
+            std::wstring cellText;
+            UINT cOffset = 0;
+            while (std::getline(cols, cellText, L'\t') && sel.start.nCol + cOffset < gcs.nWidth)
+            {
+                GRIDPOINT pt{ sel.start.nRow + rOffset, sel.start.nCol + cOffset };
+                PGRIDCELL cell = GetCellOrCreate(pt.nRow, pt.nCol, false);
+                op.oldCells.push_back({ pt, *cell });
+                SetCellText(pt.nRow, pt.nCol, cellText.c_str());
+                cell = GetCellOrDefault(pt.nRow, pt.nCol);
+                op.newCells.push_back({ pt, *cell });
+                ++cOffset;
+            }
+            ++rOffset;
         }
-        ++rOffset;
     }
-    m_bDeferRecalc = FALSE;
     RecalculateFormulas();
+    NotifyContentChanged();
     m_bUndoRecordEnabled = record;
     RecordUndoOperation(op);
     Invalidate();
 }
 
 // Undo the last edit operation
+// Put back the cell snapshot an edit operation recorded. SetCell replaces the
+// whole GRIDCELL, so the formula source, cell type, cached numeric value,
+// number format and character formatting all come back together.
+//
+// Restoring only part of the snapshot was the bug: the SetText path put back
+// m_wsText, which for a formula cell is its *evaluated* result, so undoing an
+// edit made over "=B1+1" resurrected the literal "5" it happened to be
+// displaying and the formula was gone for good. SetFormat had the same shape,
+// restoring fontInfo while leaving the number format and alignment behind.
+// Both states were in the record all along; neither was read.
+void CGrid32Mgr::RestoreCells(const GridEditOperation& op, bool bUndo)
+{
+    {
+        // Restoring must not itself be recorded, and a multi-cell restore is
+        // one user action: one recalc and one change notification, not one
+        // per cell.
+        FlagScope noRecord(m_bUndoRecordEnabled, FALSE);
+        BulkEditScope bulkEdit(m_bDeferRecalc, m_bSuppressChangeNotify);
+
+        if (op.type == EditOperationType::Clipboard)
+        {
+            for (const auto& entry : (bUndo ? op.oldCells : op.newCells))
+                SetCell(entry.first.nRow, entry.first.nCol, entry.second);
+        }
+        else if (!bUndo && op.type == EditOperationType::Delete)
+        {
+            // Redoing a delete removes the cell again rather than restoring it.
+            DeleteCell(op.row, op.col);
+        }
+        else
+        {
+            SetCell(op.row, op.col, bUndo ? op.oldState : op.newState);
+        }
+    }
+
+    RecalculateFormulas();
+    NotifyContentChanged();
+}
+
 void CGrid32Mgr::OnUndo()
 {
     if (m_undoStack.empty())
@@ -2847,60 +2964,13 @@ void CGrid32Mgr::OnUndo()
 
     try
     {
-    switch (op.type)
-    {
-    case EditOperationType::SetText:
-        // Revert text change
-        // Use SetCellText which records undo, so bypass recording here
-    {
-        // Temporary disable recording
-        bool record = m_bUndoRecordEnabled;
-        m_bUndoRecordEnabled = false;
-        SetCellText(op.row, op.col, op.oldState.m_wsText.c_str());
-        m_bUndoRecordEnabled = record;
+        RestoreCells(op, /*bUndo*/ true);
     }
-    break;
-
-    case EditOperationType::SetFormat:
+    catch (...)
     {
-        bool record = m_bUndoRecordEnabled;
-        m_bUndoRecordEnabled = false;
-        SetCellFormat(op.row, op.col, op.oldState.fontInfo);
-        m_bUndoRecordEnabled = record;
-    }
-    break;
-
-    case EditOperationType::SetFullCell:
-    {
-        bool record = m_bUndoRecordEnabled;
-        m_bUndoRecordEnabled = false;
-        SetCell(op.row, op.col, op.oldState);
-        m_bUndoRecordEnabled = record;
-    }
-    break;
-
-    case EditOperationType::Delete:
-    {
-        // Undo delete: recreate the cell
-        bool record = m_bUndoRecordEnabled;
-        m_bUndoRecordEnabled = false;
-        SetCell(op.row, op.col, op.oldState);
-        m_bUndoRecordEnabled = record;
-    }
-    break;
-
-    case EditOperationType::Clipboard:
-    {
-        bool record = m_bUndoRecordEnabled;
-        m_bUndoRecordEnabled = false;
-        for (auto& entry : op.oldCells)
-        {
-            const GRIDPOINT& pt = entry.first;
-            SetCell(pt.nRow, pt.nCol, entry.second);
-        }
-        m_bUndoRecordEnabled = record;
-    }
-    break;
+        // Restore threw; leave undo stack intact so the user can retry.
+        SetLastError(GRID_ERROR_NOT_IMPLEMENTED);
+        return;
     }
 
     // Restore succeeded — move the op from undo to redo atomically.
@@ -2908,12 +2978,6 @@ void CGrid32Mgr::OnUndo()
     m_redoStack.push(op);
     Invalidate();
     SetLastError(0);
-    }
-    catch (...)
-    {
-        // Restore threw; leave undo stack intact so the user can retry.
-        SetLastError(GRID_ERROR_NOT_IMPLEMENTED);
-    }
 }
 
 // Redo the last undone operation
@@ -2922,63 +2986,22 @@ void CGrid32Mgr::OnRedo()
     if (m_redoStack.empty())
         return;
 
+    // Held until the restore succeeds, mirroring OnUndo. Redo previously
+    // popped first and had no exception guard at all, so a throw mid-restore
+    // lost the operation and left the grid half-restored (M5).
     GridEditOperation op = m_redoStack.top();
+
+    try
+    {
+        RestoreCells(op, /*bUndo*/ false);
+    }
+    catch (...)
+    {
+        SetLastError(GRID_ERROR_NOT_IMPLEMENTED);
+        return;
+    }
+
     m_redoStack.pop();
-
-    switch (op.type)
-    {
-    case EditOperationType::SetText:
-    {
-        bool record = m_bUndoRecordEnabled;
-        m_bUndoRecordEnabled = false;
-        SetCellText(op.row, op.col, op.newState.m_wsText.c_str());
-        m_bUndoRecordEnabled = record;
-    }
-    break;
-
-    case EditOperationType::SetFormat:
-    {
-        bool record = m_bUndoRecordEnabled;
-        m_bUndoRecordEnabled = false;
-        SetCellFormat(op.row, op.col, op.newState.fontInfo);
-        m_bUndoRecordEnabled = record;
-    }
-    break;
-
-    case EditOperationType::SetFullCell:
-    {
-        bool record = m_bUndoRecordEnabled;
-        m_bUndoRecordEnabled = false;
-        SetCell(op.row, op.col, op.newState);
-        m_bUndoRecordEnabled = record;
-    }
-    break;
-
-    case EditOperationType::Delete:
-    {
-        bool record = m_bUndoRecordEnabled;
-        m_bUndoRecordEnabled = false;
-        // Redo delete: remove cell
-        DeleteCell(op.row, op.col);
-        m_bUndoRecordEnabled = record;
-    }
-    break;
-
-    case EditOperationType::Clipboard:
-    {
-        bool record = m_bUndoRecordEnabled;
-        m_bUndoRecordEnabled = false;
-        for (auto& entry : op.newCells)
-        {
-            const GRIDPOINT& pt = entry.first;
-            SetCell(pt.nRow, pt.nCol, entry.second);
-        }
-        m_bUndoRecordEnabled = record;
-    }
-    break;
-    }
-
-    // After redo, push back onto undo stack
     m_undoStack.push(op);
     Invalidate();
     SetLastError(0);
@@ -3365,6 +3388,19 @@ void CGrid32Mgr::SendGridNotification(INT code, GRIDNMHDR* pNMHDRInfo)
 }
 
 
+void CGrid32Mgr::NotifyContentChanged()
+{
+    // Inside a bulk edit the caller sends one notification when the scope
+    // closes, so individual cell writes stay quiet.
+    if (m_bSuppressChangeNotify)
+        return;
+    // DeleteAllCells runs from the destructor, by which point the window may
+    // already be going away; never notify through a dead HWND.
+    if (!m_hWndGrid || !IsWindow(m_hWndGrid))
+        return;
+    SendGridNotification(GN_CONTENTCHANGED);
+}
+
 void CGrid32Mgr::GetMousePosition(POINT& pt)
 {
     GetCursorPos(&pt);
@@ -3661,6 +3697,7 @@ void CGrid32Mgr::OnFillCells(WPARAM wParam, const GCFILLSTRUCT& fillStruct)
     }
     m_bUndoRecordEnabled = record;
     Invalidate();
+    NotifyContentChanged();
     SetLastError(0);
 }
 
@@ -3717,18 +3754,20 @@ void CGrid32Mgr::OnSortCells(WPARAM wParam, const GCSORTSTRUCT& sortStruct)
 
     bool record = m_bUndoRecordEnabled;
     m_bUndoRecordEnabled = false;
-    m_bDeferRecalc = TRUE;
-    UINT rIndex = sel.start.nRow;
-    for (auto& row : rows)
     {
-        for (UINT c = 0; c < gcs.nWidth && c < row.second.size(); ++c)
+        BulkEditScope bulkEdit(m_bDeferRecalc, m_bSuppressChangeNotify);
+        UINT rIndex = sel.start.nRow;
+        for (auto& row : rows)
         {
-            SetCell(rIndex, c, row.second[c]);
+            for (UINT c = 0; c < gcs.nWidth && c < row.second.size(); ++c)
+            {
+                SetCell(rIndex, c, row.second[c]);
+            }
+            ++rIndex;
         }
-        ++rIndex;
     }
-    m_bDeferRecalc = FALSE;
     RecalculateFormulas();
+    NotifyContentChanged();
     m_bUndoRecordEnabled = record;
     Invalidate();
     SetLastError(0);
@@ -4178,59 +4217,68 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
         size_t row = 0, col = 0;
         std::wstring cellText;
         bool inQuotes = false;
-        for (size_t i = 0; i < input.size() && row < gcs.nHeight; ++i)
+        // Import applies one cell at a time; without this the recalc that
+        // SetCellText now performs would run once per imported cell, making a
+        // large file quadratic. The scope closes before the single recalc
+        // below.
         {
-            wchar_t ch = input[i];
-
-            if (inQuotes)
+            BulkEditScope bulkEdit(m_bDeferRecalc, m_bSuppressChangeNotify);
+            for (size_t i = 0; i < input.size() && row < gcs.nHeight; ++i)
             {
-                if (ch == L'"')
+                wchar_t ch = input[i];
+
+                if (inQuotes)
                 {
-                    // RFC 4180: "" inside quoted field = literal "
-                    if (i + 1 < input.size() && input[i + 1] == L'"')
+                    if (ch == L'"')
                     {
-                        cellText.push_back(L'"');
-                        ++i;
+                        // RFC 4180: "" inside quoted field = literal "
+                        if (i + 1 < input.size() && input[i + 1] == L'"')
+                        {
+                            cellText.push_back(L'"');
+                            ++i;
+                        }
+                        else
+                        {
+                            inQuotes = false;
+                        }
                     }
                     else
                     {
-                        inQuotes = false;
+                        cellText.push_back(ch);
                     }
+                    continue;
+                }
+
+                if (ch == L'"' && cellText.empty())
+                {
+                    // Field starts with a quote => quoted field
+                    inQuotes = true;
+                }
+                else if (ch == delim || ch == L'\n')
+                {
+                    SetCellText((UINT)row, (UINT)col, cellText.c_str());
+                    cellText.clear();
+                    ++col;
+                    if (ch == L'\n' || col >= gcs.nWidth)
+                    {
+                        col = 0;
+                        ++row;
+                    }
+                }
+                else if (ch == L'\r')
+                {
+                    // Swallow CR — \r\n line endings handled via the following \n.
                 }
                 else
                 {
                     cellText.push_back(ch);
                 }
-                continue;
             }
-
-            if (ch == L'"' && cellText.empty())
-            {
-                // Field starts with a quote => quoted field
-                inQuotes = true;
-            }
-            else if (ch == delim || ch == L'\n')
-            {
+            if (!cellText.empty() && row < gcs.nHeight && col < gcs.nWidth)
                 SetCellText((UINT)row, (UINT)col, cellText.c_str());
-                cellText.clear();
-                ++col;
-                if (ch == L'\n' || col >= gcs.nWidth)
-                {
-                    col = 0;
-                    ++row;
-                }
-            }
-            else if (ch == L'\r')
-            {
-                // Swallow CR — \r\n line endings handled via the following \n.
-            }
-            else
-            {
-                cellText.push_back(ch);
-            }
         }
-        if (!cellText.empty() && row < gcs.nHeight && col < gcs.nWidth)
-            SetCellText((UINT)row, (UINT)col, cellText.c_str());
+        RecalculateFormulas();
+        NotifyContentChanged();
 
         pStream->m_dwError = 0;
         if (pStream->m_pfnCallback)
@@ -4244,56 +4292,62 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
         std::wstring_view xml(pStream->m_pwszBuff, wcsnlen(pStream->m_pwszBuff, maxChars));
         UINT row = 0;
         size_t pos = 0;
-        if (pStream->m_dwFormat == SF_ODF)
+        // As above: one recalc for the import, not one per cell.
         {
-            while ((pos = xml.find(L"<table:table-row", pos)) != std::wstring::npos && row < gcs.nHeight)
+            BulkEditScope bulkEdit(m_bDeferRecalc, m_bSuppressChangeNotify);
+            if (pStream->m_dwFormat == SF_ODF)
             {
-                size_t rowEnd = xml.find(L"</table:table-row>", pos);
-                UINT col = 0;
-                size_t cpos = pos;
-                while ((cpos = xml.find(L"<table:table-cell", cpos)) != std::wstring::npos && cpos < rowEnd && col < gcs.nWidth)
+                while ((pos = xml.find(L"<table:table-row", pos)) != std::wstring::npos && row < gcs.nHeight)
                 {
-                    size_t start = xml.find(L"<text:p>", cpos);
-                    size_t end = xml.find(L"</text:p>", start);
-                    std::wstring text;
-                    if (start != std::wstring::npos && end != std::wstring::npos && end > start)
-                        text = UnescapeXML(std::wstring(xml.substr(start + 8, end - (start + 8))));
-                    SetCellText(row, col, text.c_str());
-                    ++col;
-                    cpos = xml.find(L"</table:table-cell>", cpos);
-                    if (cpos == std::wstring::npos || cpos > rowEnd) break;
-                    cpos += 19;
+                    size_t rowEnd = xml.find(L"</table:table-row>", pos);
+                    UINT col = 0;
+                    size_t cpos = pos;
+                    while ((cpos = xml.find(L"<table:table-cell", cpos)) != std::wstring::npos && cpos < rowEnd && col < gcs.nWidth)
+                    {
+                        size_t start = xml.find(L"<text:p>", cpos);
+                        size_t end = xml.find(L"</text:p>", start);
+                        std::wstring text;
+                        if (start != std::wstring::npos && end != std::wstring::npos && end > start)
+                            text = UnescapeXML(std::wstring(xml.substr(start + 8, end - (start + 8))));
+                        SetCellText(row, col, text.c_str());
+                        ++col;
+                        cpos = xml.find(L"</table:table-cell>", cpos);
+                        if (cpos == std::wstring::npos || cpos > rowEnd) break;
+                        cpos += 19;
+                    }
+                    ++row;
+                    if (rowEnd == std::wstring::npos) break;
+                    pos = rowEnd + 17;
                 }
-                ++row;
-                if (rowEnd == std::wstring::npos) break;
-                pos = rowEnd + 17;
+            }
+            else
+            {
+                while ((pos = xml.find(L"<row", pos)) != std::wstring::npos && row < gcs.nHeight)
+                {
+                    size_t rowEnd = xml.find(L"</row>", pos);
+                    UINT col = 0;
+                    size_t cpos = pos;
+                    while ((cpos = xml.find(L"<c", cpos)) != std::wstring::npos && cpos < rowEnd && col < gcs.nWidth)
+                    {
+                        size_t start = xml.find(L"<t>", cpos);
+                        size_t end = xml.find(L"</t>", start);
+                        std::wstring text;
+                        if (start != std::wstring::npos && end != std::wstring::npos && end > start)
+                            text = UnescapeXML(std::wstring(xml.substr(start + 3, end - (start + 3))));
+                        SetCellText(row, col, text.c_str());
+                        ++col;
+                        cpos = xml.find(L"</c>", cpos);
+                        if (cpos == std::wstring::npos || cpos > rowEnd) break;
+                        cpos += 4;
+                    }
+                    ++row;
+                    if (rowEnd == std::wstring::npos) break;
+                    pos = rowEnd + 6;
+                }
             }
         }
-        else
-        {
-            while ((pos = xml.find(L"<row", pos)) != std::wstring::npos && row < gcs.nHeight)
-            {
-                size_t rowEnd = xml.find(L"</row>", pos);
-                UINT col = 0;
-                size_t cpos = pos;
-                while ((cpos = xml.find(L"<c", cpos)) != std::wstring::npos && cpos < rowEnd && col < gcs.nWidth)
-                {
-                    size_t start = xml.find(L"<t>", cpos);
-                    size_t end = xml.find(L"</t>", start);
-                    std::wstring text;
-                    if (start != std::wstring::npos && end != std::wstring::npos && end > start)
-                        text = UnescapeXML(std::wstring(xml.substr(start + 3, end - (start + 3))));
-                    SetCellText(row, col, text.c_str());
-                    ++col;
-                    cpos = xml.find(L"</c>", cpos);
-                    if (cpos == std::wstring::npos || cpos > rowEnd) break;
-                    cpos += 4;
-                }
-                ++row;
-                if (rowEnd == std::wstring::npos) break;
-                pos = rowEnd + 6;
-            }
-        }
+        RecalculateFormulas();
+        NotifyContentChanged();
 
         pStream->m_dwError = 0;
         if (pStream->m_pfnCallback)
@@ -4453,6 +4507,7 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
 
     // Refresh evaluated text for any formula cells loaded above.
     RecalculateFormulas();
+    NotifyContentChanged();
 
     pStream->m_dwError = 0;
     if (pStream->m_pfnCallback)
@@ -4488,19 +4543,32 @@ std::wstring CGrid32Mgr::EvaluateFormula(const std::wstring& expr)
     return ss.str();
 }
 
+// Re-evaluate a formula cell from its source. Both the display text and the
+// cached numeric value are refreshed together: OnSortCells compares CT_Formula
+// cells by m_dValue, so refreshing only the text would sort by whatever the
+// value happened to be when the formula was first entered.
+void CGrid32Mgr::RefreshFormulaCell(PGRIDCELL pCell)
+{
+    if (!pCell || !pCell->m_bFormula)
+        return;
+
+    pCell->m_wsText = EvaluateFormula(pCell->m_wsFormula);
+    pCell->m_eType = CT_Formula;
+    double n = 0.0;
+    pCell->m_dValue = Grid32Detail::TryParseNumber(pCell->m_wsText, n) ? n : 0.0;
+}
+
 void CGrid32Mgr::RecalculateFormulas()
 {
-    // Bulk operations (sort, paste, stream-in) set m_bDeferRecalc to avoid
-    // O(N) recalc per SetCell; they invoke RecalculateFormulas() themselves
-    // once at the end with the flag cleared.
+    // Bulk operations (sort, paste, stream-in) hold a BulkEditScope to
+    // avoid a full recalc per cell; they invoke RecalculateFormulas()
+    // themselves once the scope has closed.
     if (m_bDeferRecalc)
         return;
+
+    // Single pass, order-independent: each formula is evaluated from its
+    // source, and a reference to another formula cell recurses into that
+    // cell's source rather than reading its (possibly stale) display text.
     for (auto& entry : mapCells)
-    {
-        PGRIDCELL cell = entry.second;
-        if (cell && cell->m_bFormula)
-        {
-            cell->m_wsText = EvaluateFormula(cell->m_wsFormula);
-        }
-    }
+        RefreshFormulaCell(entry.second);
 }

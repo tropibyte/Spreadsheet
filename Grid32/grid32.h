@@ -273,6 +273,7 @@ typedef struct tagGCCELLCHARFORMAT
 //   GN_COLHEADERCLICK                            -> cellPt.nCol, pt
 //   GN_ROWHEADERCLICK                            -> cellPt.nRow, pt
 //   GN_CORNERCLICK                               -> pt
+//   GN_CONTENTCHANGED                            -> (header only) any edit; hosts mark the document dirty
 typedef struct tagGRIDNMHDR : tagNMHDR {
 	POINT         pt;          // mouse position (client coords)
 	GRIDPOINT     cellPt;      // primary cell the event refers to
@@ -286,7 +287,9 @@ typedef struct tagGRIDNMHDR : tagNMHDR {
 } GRIDNMHDR, * LPGRIDNMHDR;
 
 // Grid notification codes. Below NM_LAST and below LVN_/TVN_/etc. common-control
-// ranges so there's no collision with anything a host already handles.
+// ranges so there's no collision with anything a host already handles. The 'U'
+// matters: NMHDR::code is UINT, so the arithmetic must stay unsigned for the
+// value the grid sends to match the value a handler compares against.
 #define GN_FIRST              (0U - 2000U)
 #define GN_SELCHANGE          (GN_FIRST -  0)
 #define GN_CELLCHANGED        (GN_FIRST -  1)
@@ -298,6 +301,7 @@ typedef struct tagGRIDNMHDR : tagNMHDR {
 #define GN_COLHEADERCLICK     (GN_FIRST -  7)
 #define GN_ROWHEADERCLICK     (GN_FIRST -  8)
 #define GN_CORNERCLICK        (GN_FIRST -  9)
+#define GN_CONTENTCHANGED     (GN_FIRST - 10)  // any edit, paste, fill, sort, undo, load
 
 typedef DWORD(CALLBACK* GCSTREAMCALLBACK)(struct tagGCSTREAM *);
 

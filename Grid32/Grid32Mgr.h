@@ -46,6 +46,7 @@ protected:
 	POINT m_scrollDifference;
 	BOOL m_bRedraw, m_bResizable, m_bUndoRecordEnabled;
 	BOOL m_bDeferRecalc;
+	BOOL m_bSuppressChangeNotify;
 	DWORD dwError;
 	GRIDSELECTION m_selectionRect;
 	BOOL m_bSelecting, m_bSizing;
@@ -191,6 +192,11 @@ public:
 	BOOL OnGetCellText(const GRIDPOINT& point, GRID_GETTEXT* text);
 	void ShowEditControl();
 	void SendGridNotification(INT code, GRIDNMHDR* pNMHDRInfo = nullptr);
+	// Tell the host that persisted content changed, so it can mark its
+	// document dirty. Every mutator that alters what StreamOut would write
+	// must call this; bulk operations hold a BulkEditScope and send one
+	// notification when the scope closes instead of one per cell.
+	void NotifyContentChanged();
 	void GetMousePosition(POINT& pt);
 	void OnTimer(UINT_PTR idEvent);
 	bool IsOverColumnDivider(int x, int y);
@@ -211,10 +217,17 @@ public:
         bool OnFindText(const GCFINDSTRUCT& findStruct);
         bool OnReplaceText(const GCREPLACESTRUCT& replaceStruct);
         void RecordUndoOperation(const GridEditOperation& op);
+        // Re-apply one edit operation's recorded cell snapshot. bUndo selects
+        // the old state, otherwise the new one.
+        void RestoreCells(const GridEditOperation& op, bool bUndo);
         void CopyGridCell(GRIDCELL& dest, GRIDCELL& src);
         void OnStreamOut(LPGCSTREAM pStream);
         void OnStreamIn(LPGCSTREAM pStream);
         void RecalculateFormulas();
+        // Re-evaluate one formula cell, refreshing both its display text and
+        // the cached numeric value that sort/compare read. No-op for cells
+        // that aren't formulas.
+        void RefreshFormulaCell(PGRIDCELL pCell);
         std::wstring EvaluateFormula(const std::wstring& expr);
 };
 
