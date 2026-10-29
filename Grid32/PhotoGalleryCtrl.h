@@ -155,6 +155,11 @@ public:
     }
 
     // ---- Selection, hit testing, scrolling ----
+    // The check circle in each tile's corner (PGGS_CHECKBOXES). It only shows
+    // with PGGS_MULTISELECT, since toggling one item is what it is for.
+    // Safe to flip at any time: the control reacts to WM_STYLECHANGED.
+    void ShowCheckCircles(BOOL bShow) { ModifyStyle(bShow ? 0 : PGGS_CHECKBOXES, bShow ? PGGS_CHECKBOXES : 0); }
+    BOOL HasCheckCircles() const { return (GetStyle() & PGGS_CHECKBOXES) != 0; }
     BOOL EnsureVisible(int iItem, BOOL bPartialOK = FALSE) { return (BOOL)Send(PGGM_ENSUREVISIBLE, (WPARAM)iItem, bPartialOK); }
     int HitTest(CPoint pt, UINT* pFlags = nullptr) const
     {
