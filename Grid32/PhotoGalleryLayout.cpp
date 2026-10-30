@@ -36,7 +36,8 @@ int PGGeometry::ContentHeight(int nRows) const
 {
     if (nRows <= 0)
         return 0;
-    return 2 * cyMargin + nRows * cellCy + (nRows - 1) * cyGap;
+    // 64-bit: a million tall rows overflow an int (and went negative).
+    return PGClampContent(2LL * cyMargin + (long long)nRows * cellCy + (long long)(nRows - 1) * cyGap);
 }
 
 namespace {
@@ -69,7 +70,7 @@ class CUniformLayout : public CGalleryLayout
     PGGeometry m_geo;
     int m_nItems = 0;
 
-    int Rows() const { return (m_nItems + m_geo.nColumns - 1) / m_geo.nColumns; }
+    int Rows() const { return m_nItems > 0 ? (m_nItems - 1) / m_geo.nColumns + 1 : 0; }   // no overflow near INT_MAX items
 
 public:
     void Arrange(const PGGeometry& geo, int nItems, const std::function<PGSpan(int)>&) override
@@ -101,7 +102,9 @@ public:
             return;
         int r0 = m_geo.RowIndexAt(y0);
         int r1 = (std::min)(m_geo.RowIndexAt(y1 - 1), Rows() - 1);
-        int iEnd = (std::min)(m_nItems, (r1 + 1) * m_geo.nColumns);
+        if (r0 > r1)
+            return;
+        int iEnd = (int)(std::min)((long long)m_nItems, (r1 + 1LL) * m_geo.nColumns);
         for (int i = r0 * m_geo.nColumns; i < iEnd; ++i)
             out.push_back(i);
     }
@@ -112,10 +115,10 @@ public:
         if (c < 0 || pt.y < m_geo.cyMargin)
             return -1;
         int r = m_geo.RowIndexAt(pt.y);
-        if (pt.y >= m_geo.RowTop(r) + m_geo.cellCy)
-            return -1;  // in the gap below the row
-        int i = r * m_geo.nColumns + c;
-        return i < m_nItems ? i : -1;
+        if (r >= Rows() || pt.y >= m_geo.RowTop(r) + m_geo.cellCy)
+            return -1;  // below the last row, or in the gap below the row
+        long long i = (long long)r * m_geo.nColumns + c;
+        return i < m_nItems ? (int)i : -1;
     }
 
     int Navigate(int i, UINT vk, int cyPage) const override

@@ -37,11 +37,13 @@ public:
 
     // ---- Items ----
     int InsertItem(const PGGITEM& item) { return (int)Send(PGGM_INSERTITEM, 0, (LPARAM)&item); }
+    // hbmThumb may be NULL (pixels come later, or from pszPath under
+    // PGGS_AUTOLOAD); a thumbnail already cached under key is then kept.
     int InsertItem(int iItem, HBITMAP hbmThumb, LPCWSTR pszPath = nullptr, LPARAM lParam = 0,
                    ULONGLONG key = 0, BYTE cxSpan = 1, BYTE cySpan = 1)
     {
         PGGITEM it = MakeItem(iItem);
-        it.mask = PGGIF_THUMB | PGGIF_PARAM | PGGIF_SPAN | (key ? PGGIF_KEY : 0) | (pszPath ? PGGIF_PATH : 0);
+        it.mask = PGGIF_PARAM | PGGIF_SPAN | (hbmThumb ? PGGIF_THUMB : 0) | (key ? PGGIF_KEY : 0) | (pszPath ? PGGIF_PATH : 0);
         it.hbmThumb = hbmThumb;
         it.pszPath = const_cast<LPWSTR>(pszPath);
         it.lParam = lParam;

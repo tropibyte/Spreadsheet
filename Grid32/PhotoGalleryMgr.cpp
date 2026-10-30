@@ -75,7 +75,6 @@ CPhotoGalleryMgr::CPhotoGalleryMgr()
     m_cache.SetBudget((size_t)m_loaderSettings.nCacheBudgetMB * 1024 * 1024);
 
     m_layout = CreateUniformLayout();
-    m_pathBuf.assign(32768, L'\0');
 }
 
 CPhotoGalleryMgr::~CPhotoGalleryMgr()
@@ -109,6 +108,7 @@ int CPhotoGalleryMgr::OnCreate(const CREATESTRUCT* pcs)
 void CPhotoGalleryMgr::OnDestroy()
 {
     StopLoader();
+    DestroyTip();
     KillTimer(m_hWnd, IDT_SETTLE);
     KillTimer(m_hWnd, IDT_RETRY);
     // Let the host free per-item data, as ListView does.
@@ -189,6 +189,11 @@ void CPhotoGalleryMgr::ItemsChanged()
     m_bLayoutDirty = true;
     if (m_iHot >= Count())
         m_iHot = -1;
+    if (m_hTip && m_iTipItem >= 0)
+    {
+        m_iTipItem = -1;    // the text may belong to another item now; the next mouse move asks again
+        HideTip();
+    }
     InvalidateRect(m_hWnd, nullptr, FALSE);
 }
 
@@ -234,6 +239,48 @@ bool CPhotoGalleryMgr::GetItemInfo(int i, ItemInfo& info)
     info.iOverlay = di.item.iOverlay;
     info.bCallback = true;
     m_frameInfo[i] = info;
+    return true;
+}
+
+// The item's PGGIF_TEXT (its tooltip): stored in internal mode, asked for in
+// owner-data mode. Returns false if the handler changed the items or killed
+// the control.
+bool CPhotoGalleryMgr::GetItemText(int i, std::wstring& text)
+{
+    text.clear();
+    if (i < 0 || i >= Count())
+        return true;
+    if (!IsOwner())
+    {
+        text = m_items[i].text;
+        return true;
+    }
+
+    // A buffer per request: the handler may pump messages and so start
+    // another request before this one returns.
+    std::wstring buf(INFOTIPSIZE, L'\0');
+    NMPGGDISPINFO di{};
+    di.item.cbSize = sizeof(PGGITEM);
+    di.item.mask = PGGIF_TEXT;
+    di.item.iItem = i;
+    di.item.key = kIndexKeyBit | (ULONGLONG)i;
+    di.item.iOverlay = -1;
+    auto found = m_frameInfo.find(i);
+    if (found != m_frameInfo.end())
+    {
+        di.item.key = found->second.key;
+        di.item.lParam = found->second.lParam;
+        di.item.iOverlay = found->second.iOverlay;
+    }
+    di.item.pszText = &buf[0];
+    di.item.cchTextMax = (int)buf.size();
+    const UINT gen = m_itemsGen;
+    Notify(PGGN_GETDISPINFO, &di.hdr);
+    if (Changed(gen))
+        return false;
+    // As with ListView, the handler may also point pszText at its own string.
+    if (di.item.pszText)
+        text.assign(di.item.pszText, wcsnlen(di.item.pszText, INFOTIPSIZE - 1));
     return true;
 }
 
@@ -525,8 +572,6 @@ bool CPhotoGalleryMgr::ApplyMetrics(const PGGTILEMETRICS& proposedIn, UINT uCaus
     Anchor a = CaptureAnchor(ptAnchor);
     const PGGeometry old = m_geo;
     m_metrics = proposed;
-    if (uCause == PGGMC_HOST)
-        m_hostMetrics = proposed;
     if (uCause != PGGMC_USERZOOM || m_metrics.mode == PGGTS_FIXEDCOLUMNS)
         m_dZoomTile = m_metrics.cxTile;
     m_bLayoutDirty = true;
@@ -1122,7 +1167,7 @@ void CPhotoGalleryMgr::SendCacheHint()
 void CPhotoGalleryMgr::AfterPaint()
 {
     m_visibleKeys.clear();
-    const bool bAuto = m_loader && (m_dwStyle & PGGS_AUTOLOAD);
+    const bool bAuto = AutoLoading();
     if (Count() == 0)
     {
         if (bAuto)
@@ -1159,8 +1204,18 @@ void CPhotoGalleryMgr::AfterPaint()
         ItemInfo info;
         if (!GetItemInfo(i, info))
             return;
+        // The handler may have switched PGGS_AUTOLOAD off, which deletes the
+        // loader. Changing the style repaints, and that paint starts over.
+        if (bAuto && !AutoLoading())
+            return;
         if (o.first == 0)
+        {
             m_visibleKeys[info.key] = i;
+            // On screen counts as used even when this paint did not draw it
+            // (most paints are partial): the trim below must not forget it.
+            if (PGThumb* pt = m_cache.Find(info.key))
+                pt->lastUsed = m_frame;
+        }
         if (!bAuto)
             continue;
 
@@ -1168,8 +1223,10 @@ void CPhotoGalleryMgr::AfterPaint()
         m_layout->ItemRect(i, rc);
         const int w = rc.right - rc.left, h = rc.bottom - rc.top;
         PGThumb* t = EnsureThumb(i, info, w, h);
-        if (Changed(gen))
+        if (Changed(gen) || !AutoLoading())
             return;
+        if (t && o.first == 0)
+            t->lastUsed = m_frame;
         if (!t || t->path.empty() || t->state == PGThumb::Pending || t->state == PGThumb::Failed)
             continue;
         if (t->retryTick && (int)(GetTickCount() - t->retryTick) < 0)
@@ -1186,7 +1243,7 @@ void CPhotoGalleryMgr::AfterPaint()
         job.bFit = bFit;
         jobs.push_back(std::move(job));
     }
-    if (bAuto)
+    if (bAuto && AutoLoading())
         m_loader->SetWanted(std::move(jobs));
     m_cache.Trim(m_frame);
 }
@@ -1236,12 +1293,15 @@ PGThumb* CPhotoGalleryMgr::EnsureThumb(int i, const ItemInfo& info, int w, int h
     di.item.key = info.key;
     di.item.iOverlay = info.iOverlay;
     di.sizeWanted = SIZE{ w, h };
+    // A buffer per request, read back after the notification: a handler that
+    // pumps messages (UpdateWindow) starts nested requests with their own.
+    std::wstring pathBuf;
     if (bAuto && IsOwner())
     {
         di.item.mask |= PGGIF_PATH;
-        m_pathBuf[0] = L'\0';
-        di.item.pszPath = &m_pathBuf[0];
-        di.item.cchPathMax = (int)m_pathBuf.size();
+        pathBuf.assign(32768, L'\0');
+        di.item.pszPath = &pathBuf[0];
+        di.item.cchPathMax = (int)pathBuf.size();
     }
     const UINT gen = m_itemsGen;
     Notify(PGGN_GETDISPINFO, &di.hdr);
@@ -1398,6 +1458,16 @@ void CPhotoGalleryMgr::Unpin(Item& it)
     it.bPinned = false;
 }
 
+// Owner-data items the host gave no PGGIF_KEY are cached under their index.
+// When the host says items changed, those entries may hold another item's
+// picture now: forget them so the host is asked again.
+void CPhotoGalleryMgr::ForgetIndexKeys(int iFirst, int iLast)
+{
+    if (!IsOwner() || iFirst > iLast || iLast < 0)
+        return;
+    m_cache.ForgetRange(kIndexKeyBit | (ULONGLONG)(std::max)(0, iFirst), kIndexKeyBit | (ULONGLONG)iLast);
+}
+
 void CPhotoGalleryMgr::OnLoaderDone()
 {
     if (!m_loader)
@@ -1408,7 +1478,13 @@ void CPhotoGalleryMgr::OnLoaderDone()
     {
         PGThumb* t = m_cache.Find(r.key);
         if (!t || t->epoch != r.epoch)
-            continue;   // evicted or invalidated while loading
+        {
+            // Evicted or invalidated while it loaded. A paint in between could
+            // not queue the key again (it was still in flight), so repaint the
+            // tile: that paint asks for it afresh.
+            InvalidateKey(r.key);
+            continue;
+        }
         if (!r.bOk && r.uReason == PGG_REASON_PENDING && t->nRetries < kMaxRetries)
         {
             // The provider is fetching its preview. Quietly ask again soon.
@@ -1506,7 +1582,8 @@ bool CPhotoGalleryMgr::SetItemStateNotify(int i, UINT state, UINT mask)
     mask &= (PGGIS_SELECTED | PGGIS_FOCUSED);
     const UINT gen = m_itemsGen;
 
-    // Single selection: the previous item lets go first.
+    // Single selection: the previous item lets go first. If it refuses (a
+    // veto), this item does not take the selection either.
     if (!IsMulti() && (mask & state & PGGIS_SELECTED))
     {
         for (int j = OnGetNextItem(-1, PGGNI_SELECTED); j >= 0; j = OnGetNextItem(j, PGGNI_SELECTED))
@@ -1514,11 +1591,17 @@ bool CPhotoGalleryMgr::SetItemStateNotify(int i, UINT state, UINT mask)
             if (j != i && !SetItemStateNotify(j, 0, PGGIS_SELECTED))
                 return false;
         }
+        const int nOthers = m_nSelected - ((m_states[i] & PGGIS_SELECTED) ? 1 : 0);
+        if (nOthers > 0)
+            mask &= ~PGGIS_SELECTED;
     }
+    // Likewise the focus: it moves only if the old focus item lets go.
     if ((mask & state & PGGIS_FOCUSED) && m_iFocus >= 0 && m_iFocus != i)
     {
         if (!SetItemStateNotify(m_iFocus, 0, PGGIS_FOCUSED))
             return false;
+        if (m_iFocus >= 0 && m_iFocus != i)
+            mask &= ~PGGIS_FOCUSED;
     }
     if (Changed(gen))
         return false;
@@ -1603,6 +1686,16 @@ bool CPhotoGalleryMgr::ToggleItem(int i)
     return SetItemStateNotify(i, bSel ? 0 : PGGIS_SELECTED, PGGIS_SELECTED);
 }
 
+// Where a Shift range starts: the anchor or, when there is none yet (the
+// host set the focus, say), the focused item, which becomes the anchor.
+int CPhotoGalleryMgr::ShiftAnchor(int iFallback)
+{
+    const int n = Count();
+    if (m_iAnchor < 0 || m_iAnchor >= n)
+        m_iAnchor = (m_iFocus >= 0 && m_iFocus < n) ? m_iFocus : iFallback;
+    return m_iAnchor;
+}
+
 void CPhotoGalleryMgr::SetHot(int i)
 {
     if (i == m_iHot)
@@ -1619,19 +1712,123 @@ void CPhotoGalleryMgr::SetHot(int i)
     }
 }
 
+// The tiles moved under a still mouse (scroll, zoom): follow it with the hot
+// item and the tooltip.
 void CPhotoGalleryMgr::UpdateHotFromCursor()
 {
-    if (!(m_dwStyle & (PGGS_HOTTRACK | PGGS_CHECKBOXES)) || m_bDead)
+    const bool bHot = (m_dwStyle & (PGGS_HOTTRACK | PGGS_CHECKBOXES)) != 0;
+    if ((!bHot && !m_hTip) || m_bDead)
         return;
     POINT pt;
     GetCursorPos(&pt);
-    if (WindowFromPoint(pt) != m_hWnd)
+    int i = -1;
+    if (WindowFromPoint(pt) == m_hWnd)
     {
-        SetHot(-1);
+        ScreenToClient(m_hWnd, &pt);
+        i = HitTestClient(pt, nullptr);
+    }
+    if (bHot)
+    {
+        const UINT gen = m_itemsGen;
+        SetHot(i);
+        if (Changed(gen))
+            return;
+    }
+    UpdateTip(i, true);
+}
+
+// ---- Tooltips -------------------------------------------------------------------------------
+// One tool covering the tile under the mouse, its text the item's PGGIF_TEXT.
+// Mouse messages are relayed to it, so it pops up and hides the usual way.
+
+TTTOOLINFOW CPhotoGalleryMgr::ToolInfo() const
+{
+    TTTOOLINFOW ti{};
+    ti.cbSize = TTTOOLINFOW_V2_SIZE;    // accepted by every comctl32 version
+    ti.hwnd = m_hWnd;
+    ti.uId = 1;
+    return ti;
+}
+
+bool CPhotoGalleryMgr::EnsureTip()
+{
+    if (m_hTip)
+        return true;
+    INITCOMMONCONTROLSEX icc{ sizeof(icc), ICC_BAR_CLASSES };
+    InitCommonControlsEx(&icc);
+    m_hTip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP,
+                             CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, m_hWnd, nullptr,
+                             reinterpret_cast<HINSTANCE>(GetWindowLongPtr(m_hWnd, GWLP_HINSTANCE)), nullptr);
+    if (!m_hTip)
+        return false;
+    TTTOOLINFOW ti = ToolInfo();
+    ti.lpszText = const_cast<LPWSTR>(L"");
+    SendMessage(m_hTip, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&ti));
+    SendMessage(m_hTip, TTM_SETMAXTIPWIDTH, 0, Px(400));   // long names wrap
+    return true;
+}
+
+// Points the tooltip at item i (-1: none). An item without text shows nothing.
+// bForce: the tiles moved, so refresh the tool's rectangle even for the same item.
+void CPhotoGalleryMgr::UpdateTip(int i, bool bForce)
+{
+    if (i == m_iTipItem && !bForce)
+        return;
+    m_iTipItem = i;
+    std::wstring text;
+    if (!GetItemText(i, text) || m_bDead)
+    {
+        m_iTipItem = -1;    // the items changed under us: ask again on the next move
         return;
     }
-    ScreenToClient(m_hWnd, &pt);
-    SetHot(HitTestClient(pt, nullptr));
+    RECT rc;
+    if (text.empty() || !GetItemClientRect(i, rc))
+    {
+        HideTip();
+        return;
+    }
+    if (!EnsureTip())
+        return;
+    if (text.size() > INFOTIPSIZE - 1)
+        text.resize(INFOTIPSIZE - 1);
+    TTTOOLINFOW ti = ToolInfo();
+    ti.rect = rc;
+    SendMessage(m_hTip, TTM_POP, 0, 0);
+    SendMessage(m_hTip, TTM_NEWTOOLRECTW, 0, reinterpret_cast<LPARAM>(&ti));
+    ti.lpszText = &text[0];
+    SendMessage(m_hTip, TTM_UPDATETIPTEXTW, 0, reinterpret_cast<LPARAM>(&ti));
+    SendMessage(m_hTip, TTM_ACTIVATE, TRUE, 0);
+}
+
+void CPhotoGalleryMgr::HideTip()
+{
+    if (!m_hTip)
+        return;
+    TTTOOLINFOW ti = ToolInfo();
+    ti.lpszText = const_cast<LPWSTR>(L"");
+    SendMessage(m_hTip, TTM_POP, 0, 0);
+    SendMessage(m_hTip, TTM_UPDATETIPTEXTW, 0, reinterpret_cast<LPARAM>(&ti));
+    SendMessage(m_hTip, TTM_ACTIVATE, FALSE, 0);
+}
+
+void CPhotoGalleryMgr::RelayToTip(UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    if (!m_hTip || m_bDead)
+        return;
+    MSG msg{ m_hWnd, uMsg, wParam, lParam, (DWORD)GetMessageTime() };
+    const DWORD pos = GetMessagePos();
+    msg.pt = POINT{ GET_X_LPARAM(pos), GET_Y_LPARAM(pos) };
+    SendMessage(m_hTip, TTM_RELAYEVENT, (WPARAM)GetMessageExtraInfo(), reinterpret_cast<LPARAM>(&msg));
+}
+
+void CPhotoGalleryMgr::DestroyTip()
+{
+    // Windows makes the top-level window, not the control, the owner of a
+    // popup created with a child as parent: it would outlive the control.
+    if (m_hTip && IsWindow(m_hTip))
+        DestroyWindow(m_hTip);
+    m_hTip = nullptr;
+    m_iTipItem = -1;
 }
 
 // ---- Input ------------------------------------------------------------------------------------
@@ -1666,8 +1863,7 @@ void CPhotoGalleryMgr::OnLButtonDown(WPARAM keys, POINT pt)
     }
     if (IsMulti() && bShift)
     {
-        int a = (m_iAnchor >= 0 && m_iAnchor < Count()) ? m_iAnchor : i;
-        if (SelectRange(a, i, bCtrl))
+        if (SelectRange(ShiftAnchor(i), i, bCtrl))
             SetFocusItem(i);
     }
     else if (IsMulti() && bCtrl)
@@ -1693,11 +1889,14 @@ void CPhotoGalleryMgr::OnLButtonDown(WPARAM keys, POINT pt)
 void CPhotoGalleryMgr::OnLButtonUp(WPARAM keys, POINT pt)
 {
     if (!m_press.bActive || m_press.bRight)
+    {
+        // No left press to finish (something cancelled it): never keep the mouse.
+        if (!m_press.bActive && GetCapture() == m_hWnd)
+            ReleaseCapture();
         return;
+    }
     const Press press = m_press;
-    CancelPress();
-    if (GetCapture() == m_hWnd)
-        ReleaseCapture();
+    CancelPress();      // and the capture
 
     UINT uHit = 0;
     const int i = HitTestClient(pt, &uHit);
@@ -1807,26 +2006,32 @@ bool CPhotoGalleryMgr::OnContextMenu(int xScreen, int yScreen)
 
 void CPhotoGalleryMgr::OnMouseMove(WPARAM keys, POINT pt)
 {
+    if (!m_bTrackingLeave)
+    {
+        TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, m_hWnd, 0 };
+        m_bTrackingLeave = TrackMouseEvent(&tme) != FALSE;
+    }
+    // The item under the mouse: hot tracking (by style) and the tooltip (always).
+    const UINT gen = m_itemsGen;
+    int iUnder = HitTestClient(pt, nullptr);
     if (m_dwStyle & (PGGS_HOTTRACK | PGGS_CHECKBOXES))
     {
-        if (!m_bTrackingLeave)
-        {
-            TRACKMOUSEEVENT tme{ sizeof(tme), TME_LEAVE, m_hWnd, 0 };
-            m_bTrackingLeave = TrackMouseEvent(&tme) != FALSE;
-        }
-        SetHot(HitTestClient(pt, nullptr));
+        SetHot(iUnder);
         if (m_bDead)
             return;
+        if (Changed(gen))
+            iUnder = HitTestClient(pt, nullptr);
     }
+    UpdateTip(iUnder);
+    if (m_bDead)
+        return;
 
     if (m_press.bActive && !m_press.bRight && !m_press.bOnCheck && m_press.iItem >= 0 &&
         (abs(pt.x - m_press.pt.x) > GetSystemMetrics(SM_CXDRAG) ||
          abs(pt.y - m_press.pt.y) > GetSystemMetrics(SM_CYDRAG)))
     {
         const Press press = m_press;
-        CancelPress();
-        if (GetCapture() == m_hWnd)
-            ReleaseCapture();
+        CancelPress();      // and the capture: the host's drag loop takes over
         NMPGGITEM nm = MakeItemNotify(press.iItem, &press.pt, PGGHT_ONIMAGE, KeyFlagsFromMouse(keys));
         Notify(PGGN_BEGINDRAG, &nm.hdr);
     }
@@ -1836,6 +2041,8 @@ void CPhotoGalleryMgr::OnMouseLeave()
 {
     m_bTrackingLeave = false;
     SetHot(-1);
+    if (!m_bDead)
+        UpdateTip(-1);
 }
 
 void CPhotoGalleryMgr::OnMouseWheel(WPARAM wParam, POINT ptScreen)
@@ -1938,8 +2145,7 @@ bool CPhotoGalleryMgr::OnKeyDown(UINT vk)
             return true;
         if (IsMulti() && bShift)
         {
-            int a = (m_iAnchor >= 0 && m_iAnchor < Count()) ? m_iAnchor : next;
-            if (!SelectRange(a, next, bCtrl) || !SetFocusItem(next))
+            if (!SelectRange(ShiftAnchor(next), next, bCtrl) || !SetFocusItem(next))
                 return true;
         }
         else if (IsMulti() && bCtrl)
@@ -2057,6 +2263,15 @@ void CPhotoGalleryMgr::OnTimer(UINT_PTR id)
     }
 }
 
+void CPhotoGalleryMgr::CancelPress()
+{
+    m_press = Press();
+    // A left press holds the capture; whatever ends the press (a handler
+    // deleting the items, say) must let go of it too.
+    if (m_hWnd && GetCapture() == m_hWnd)
+        ReleaseCapture();
+}
+
 void CPhotoGalleryMgr::OnFocusChange(bool bGot)
 {
     NMHDR hdr{};
@@ -2088,7 +2303,10 @@ int CPhotoGalleryMgr::OnInsertItem(const PGGITEM* p)
         it.span.cx = (BYTE)Clamp(p->cxSpan, 1, PGG_MAXSPAN);
         it.span.cy = (BYTE)Clamp(p->cySpan, 1, PGG_MAXSPAN);
     }
-    if (p->mask & PGGIF_THUMB)
+    // A new item has no pixels of its own to drop: PGGIF_THUMB with no bitmap
+    // leaves whatever the cache holds for its key (e.g. a thumbnail loaded
+    // before DeleteAllItems) in place.
+    if ((p->mask & PGGIF_THUMB) && p->hbmThumb)
         SetItemThumb(it, p->hbmThumb, p->thumbFlags);
 
     m_items.insert(m_items.begin() + idx, std::move(it));
@@ -2096,6 +2314,7 @@ int CPhotoGalleryMgr::OnInsertItem(const PGGITEM* p)
     auto shift = [idx](int& v) { if (v >= idx) ++v; };
     shift(m_iFocus);
     shift(m_iAnchor);
+    shift(m_press.iItem);   // a press (drag, deferred collapse) stays on its photo
     m_iHot = -1;
     if ((p->mask & PGGIF_STATE) && (p->stateMask & p->state & PGGIS_SELECTED))
     {
@@ -2106,7 +2325,7 @@ int CPhotoGalleryMgr::OnInsertItem(const PGGITEM* p)
         ApplyState(idx, StateOf(idx) | PGGIS_SELECTED);
     }
     if ((p->mask & PGGIF_STATE) && (p->stateMask & p->state & PGGIS_FOCUSED))
-        m_iFocus = idx;
+        m_iFocus = m_iAnchor = idx;     // the host moved the focus: Shift extends from here
     ItemsChanged();
     return idx;
 }
@@ -2232,8 +2451,9 @@ BOOL CPhotoGalleryMgr::OnSetItem(const PGGITEM* p)
         InvalidateItem(i);
     }
     // State last: its notifications may change everything above.
-    if (p->mask & PGGIF_STATE)
-        SetItemStateNotify(i, p->state, p->stateMask);
+    if ((p->mask & PGGIF_STATE) && SetItemStateNotify(i, p->state, p->stateMask) &&
+        (p->stateMask & p->state & PGGIS_FOCUSED) && m_iFocus == i)
+        m_iAnchor = i;      // the host moved the focus: Shift extends from here
     return bOk;
 }
 
@@ -2287,6 +2507,9 @@ BOOL CPhotoGalleryMgr::OnSetItemCount(int n)
     if (m_iAnchor >= n)
         m_iAnchor = -1;
     m_bOwnerSpansValid = false;
+    // Any index may hold a different item now; thumbnails cached by index
+    // (no PGGIF_KEY) cannot be trusted.
+    ForgetIndexKeys(0, INT_MAX);
     CancelPress();
     ItemsChanged();
     EnsureLayout();
@@ -2350,6 +2573,7 @@ BOOL CPhotoGalleryMgr::OnRedrawItems(int iFirst, int iLast)
     {
         for (int i = iFirst; i <= iLast; ++i)
             m_frameInfo.erase(i);
+        ForgetIndexKeys(iFirst, iLast);     // a keyless item's picture is known only by its index
         if (m_layout->NeedsSpans())
         {
             // Spans may have changed: ask again for this range.
@@ -2370,35 +2594,40 @@ BOOL CPhotoGalleryMgr::OnSetTileMetrics(const PGGTILEMETRICS* p)
 {
     if (!p || p->cbSize < sizeof(PGGTILEMETRICS))
         return FALSE;
-    PGGTILEMETRICS m = m_metrics;
-    if (p->mask & PGGTM_MODE)
-        m.mode = p->mode;
-    if (p->mask & PGGTM_SIZE)
-        m.cxTile = p->cxTile;
-    if (p->mask & PGGTM_LIMITS)
-    {
-        m.cxMin = p->cxMin;
-        m.cxMax = p->cxMax;
-    }
-    if (p->mask & PGGTM_COLUMNS)
-        m.nColumns = p->nColumns;
-    if (p->mask & PGGTM_ASPECT)
-    {
-        m.nAspectX = p->nAspectX;
-        m.nAspectY = p->nAspectY;
-    }
-    if (p->mask & PGGTM_SPACING)
-    {
-        m.cxGap = p->cxGap;
-        m.cyGap = p->cyGap;
-    }
-    if (p->mask & PGGTM_MARGINS)
-    {
-        m.cxMargin = p->cxMargin;
-        m.cyMargin = p->cyMargin;
-    }
-    m_hostMetrics = Normalize(m);
-    ApplyMetrics(m, PGGMC_HOST, nullptr);
+    auto merge = [p](PGGTILEMETRICS m) {
+        if (p->mask & PGGTM_MODE)
+            m.mode = p->mode;
+        if (p->mask & PGGTM_SIZE)
+            m.cxTile = p->cxTile;
+        if (p->mask & PGGTM_LIMITS)
+        {
+            m.cxMin = p->cxMin;
+            m.cxMax = p->cxMax;
+        }
+        if (p->mask & PGGTM_COLUMNS)
+            m.nColumns = p->nColumns;
+        if (p->mask & PGGTM_ASPECT)
+        {
+            m.nAspectX = p->nAspectX;
+            m.nAspectY = p->nAspectY;
+        }
+        if (p->mask & PGGTM_SPACING)
+        {
+            m.cxGap = p->cxGap;
+            m.cyGap = p->cyGap;
+        }
+        if (p->mask & PGGTM_MARGINS)
+        {
+            m.cxMargin = p->cxMargin;
+            m.cyMargin = p->cyMargin;
+        }
+        return m;
+    };
+    // The host's fields go into its own baseline (what a zoom reset returns
+    // to) and into what is in effect. The user's zoom lives only in the
+    // latter, so it is never promoted into the baseline.
+    m_hostMetrics = Normalize(merge(m_hostMetrics));
+    ApplyMetrics(merge(m_metrics), PGGMC_HOST, nullptr);
     return TRUE;
 }
 
@@ -2527,7 +2756,8 @@ BOOL CPhotoGalleryMgr::OnSetItemState(int i, const PGGITEM* p)
     }
     if (i < 0 || i >= Count())
         return FALSE;
-    SetItemStateNotify(i, p->state, p->stateMask);
+    if (SetItemStateNotify(i, p->state, p->stateMask) && (p->stateMask & p->state & PGGIS_FOCUSED) && m_iFocus == i)
+        m_iAnchor = i;      // the host moved the focus: Shift extends from here
     return TRUE;
 }
 

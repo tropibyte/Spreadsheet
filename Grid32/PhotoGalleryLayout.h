@@ -7,6 +7,17 @@
 #include <vector>
 #include <memory>
 #include <functional>
+#include <climits>
+
+// Content coordinates are ints (the scroll position is one), so the content
+// stops at this height, with room left for a viewport and a prefetch ring
+// below it. Rows past it pile up at the edge and cannot be scrolled to.
+const int kPGMaxContent = INT_MAX / 2;
+
+inline int PGClampContent(long long y)
+{
+    return y > kPGMaxContent ? kPGMaxContent : (y < 0 ? 0 : (int)y);
+}
 
 // Geometry resolved from PGGTILEMETRICS for the current client width and DPI.
 // In the stretch modes column widths differ by at most one pixel; ColLeft
@@ -22,13 +33,13 @@ struct PGGeometry
     bool stretch = true;
 
     int ColLeft(int c) const;
-    int RowTop(int r) const { return cyMargin + r * RowPitch(); }
+    int RowTop(int r) const { return PGClampContent(cyMargin + (long long)r * RowPitch()); }
     int RowPitch() const { return cellCy + cyGap; }
     int SpanWidth(int c, int cx) const { return ColLeft(c + cx) - cxGap - ColLeft(c); }
     int SpanHeight(int cy) const { return cy * cellCy + (cy - 1) * cyGap; }
     int ColumnAt(int x) const;          // -1 in a gap or outside the grid
     int RowIndexAt(int y) const;        // row whose pitch band holds y (gap included), clamped at 0
-    int ContentHeight(int nRows) const;
+    int ContentHeight(int nRows) const; // clamped to kPGMaxContent
 };
 
 struct PGSpan

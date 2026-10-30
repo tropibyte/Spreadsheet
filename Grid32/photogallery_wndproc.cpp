@@ -122,21 +122,30 @@ LRESULT CPhotoGalleryMgr::Dispatch(UINT uMsg, WPARAM wParam, LPARAM lParam)
         OnMouseWheel(wParam, POINT{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) });
         return 0;
     case WM_LBUTTONDOWN:
+        RelayToTip(uMsg, wParam, lParam);     // a click hides the tooltip
         OnLButtonDown(wParam, POINT{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) });
         return 0;
     case WM_LBUTTONUP:
+        RelayToTip(uMsg, wParam, lParam);
         OnLButtonUp(wParam, POINT{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) });
         return 0;
     case WM_LBUTTONDBLCLK:
+        RelayToTip(uMsg, wParam, lParam);
         OnLButtonDblClk(wParam, POINT{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) });
         return 0;
     case WM_RBUTTONDOWN:
+        RelayToTip(uMsg, wParam, lParam);
         OnRButtonDown(wParam, POINT{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) });
         return 0;
     case WM_RBUTTONUP:
+        RelayToTip(uMsg, wParam, lParam);
         // Unhandled, DefWindowProc turns the release into WM_CONTEXTMENU.
         if (OnRButtonUp(wParam, POINT{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) }))
             return 0;
+        break;
+    case WM_MBUTTONDOWN:
+    case WM_MBUTTONUP:
+        RelayToTip(uMsg, wParam, lParam);
         break;
     case WM_CONTEXTMENU:
         // Unhandled, DefWindowProc passes it on to the parent.
@@ -145,18 +154,18 @@ LRESULT CPhotoGalleryMgr::Dispatch(UINT uMsg, WPARAM wParam, LPARAM lParam)
         break;
     case WM_MOUSEMOVE:
         OnMouseMove(wParam, POINT{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) });
+        RelayToTip(uMsg, wParam, lParam);     // after: the first move creates the tooltip
         return 0;
     case WM_MOUSELEAVE:
         OnMouseLeave();
         return 0;
     case WM_CAPTURECHANGED:
+        // Someone else has the mouse now: the press is over (nothing to release).
         if (reinterpret_cast<HWND>(lParam) != m_hWnd)
-            CancelPress();
+            m_press = Press();
         return 0;
     case WM_CANCELMODE:
-        CancelPress();
-        if (GetCapture() == m_hWnd)
-            ReleaseCapture();
+        CancelPress();      // and the capture
         break;
     case WM_GESTURE:
         // Handled gestures close their handle; the rest go to DefWindowProc,
@@ -169,7 +178,15 @@ LRESULT CPhotoGalleryMgr::Dispatch(UINT uMsg, WPARAM wParam, LPARAM lParam)
             return 0;
         break;
     case WM_GETDLGCODE:
-        return DLGC_WANTARROWS | DLGC_WANTCHARS;
+    {
+        // In a dialog, Enter on a focused item activates it (PGGN_ITEMACTIVATE)
+        // instead of pressing the default button. lParam is the message, or NULL.
+        LRESULT code = DLGC_WANTARROWS | DLGC_WANTCHARS;
+        const MSG* pMsg = reinterpret_cast<const MSG*>(lParam);
+        if (pMsg && pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_RETURN && m_iFocus >= 0 && m_iFocus < Count())
+            code |= DLGC_WANTMESSAGE;
+        return code;
+    }
     case WM_SETFOCUS:
         OnFocusChange(true);
         return 0;

@@ -131,10 +131,13 @@ class CPhotoGalleryMgr
 
     PGGLOADERSETTINGS m_loaderSettings{};
     std::unique_ptr<CThumbLoader> m_loader;
-    std::wstring m_pathBuf;
 
     Press m_press;
     bool  m_bTrackingLeave = false;
+
+    // The tooltip showing the item's PGGIF_TEXT; created on first use.
+    HWND  m_hTip = nullptr;
+    int   m_iTipItem = -1;              // whose text it holds
 
 public:
     CPhotoGalleryMgr();
@@ -160,8 +163,12 @@ private:
     int  Px(int dip) const { return MulDiv(dip, m_dpi, 96); }
     LRESULT Notify(UINT code, NMHDR* pHdr);
     bool Changed(UINT gen) const { return m_bDead || gen != m_itemsGen; }
+    // A handler can switch PGGS_AUTOLOAD (and so the loader) off or on at any
+    // notification: test this again after every one before touching m_loader.
+    bool AutoLoading() const { return m_loader && (m_dwStyle & PGGS_AUTOLOAD) != 0; }
     void ItemsChanged();
     bool GetItemInfo(int i, ItemInfo& info);
+    bool GetItemText(int i, std::wstring& text);
     NMPGGITEM MakeItemNotify(int i, const POINT* ptClient = nullptr, UINT uHit = 0, UINT uKeyFlags = 0);
     UINT StateOf(int i) const;
     int  KeyToIndex(ULONGLONG key);
@@ -223,6 +230,7 @@ private:
     void StoreSource(PGThumb& t, PGPixels&& px, int edge);
     bool SetItemThumb(Item& it, HBITMAP hbm, UINT flags);
     void Unpin(Item& it);
+    void ForgetIndexKeys(int iFirst, int iLast);
     void OnLoaderDone();
     void StartLoader();
     void StopLoader();
@@ -236,8 +244,17 @@ private:
     bool SelectAll() { return Count() > 0 ? SelectRange(0, Count() - 1, false) : true; }
     bool ToggleItem(int i);
     bool SetFocusItem(int i) { return SetItemStateNotify(i, PGGIS_FOCUSED, PGGIS_FOCUSED); }
+    int  ShiftAnchor(int iFallback);
     void SetHot(int i);
     void UpdateHotFromCursor();
+
+    // Tooltips
+    TTTOOLINFOW ToolInfo() const;
+    bool EnsureTip();
+    void UpdateTip(int i, bool bForce = false);
+    void HideTip();
+    void RelayToTip(UINT uMsg, WPARAM wParam, LPARAM lParam);
+    void DestroyTip();
 
     // Input
     void OnLButtonDown(WPARAM keys, POINT pt);
@@ -255,7 +272,7 @@ private:
     void OnSize(int cx, int cy);
     void OnTimer(UINT_PTR id);
     void OnFocusChange(bool bGot);
-    void CancelPress() { m_press = Press(); }
+    void CancelPress();     // ends the press and lets go of the mouse capture
 
     // Messages
     int  OnInsertItem(const PGGITEM* p);

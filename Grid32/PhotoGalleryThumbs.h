@@ -53,9 +53,12 @@ struct PGThumb
     std::unique_ptr<Gdiplus::CachedBitmap> disp;   // src scaled to one tile, device format
     int      dispW = 0, dispH = 0;
     bool     dispFit = false, dispLowQ = false;
-    DWORD    lastUsed = 0;          // paint frame that last drew it
+    DWORD    lastUsed = 0;          // paint frame that last drew it or had it on screen
 
     size_t Bytes() const { return src.bytes() + (disp ? (size_t)dispW * dispH * 4 : 0); }
+    // An answer is on its way (the host promised pixels, or a cloud preview
+    // is being retried): forgetting it would lose the promise or the count.
+    bool Busy() const { return state == Pending || retryTick != 0; }
     void DropDisplay() { disp.reset(); dispW = dispH = 0; dispLowQ = false; }
     void ResetSource();
 };
@@ -74,11 +77,15 @@ public:
     void DropAllDisplays();
     void ResetAll();                // forget every source except pinned host pixels
     void ResetFailed();             // let failed loads try again (e.g. settings changed)
+    // Forget everything about the unpinned keys in [first, last], path
+    // included: for keys that name a position, not a photo.
+    void ForgetRange(ULONGLONG first, ULONGLONG last);
     void SetBudget(size_t bytes) { m_budget = bytes; }
     size_t Budget() const { return m_budget; }
     size_t Count() const { return m_map.size(); }
     size_t TotalBytes() const;
-    // Evict least-recently-drawn entries until under budget. Never touches
-    // what frameNow drew. Rate-limited unless bForce.
+    // Evict least-recently-used entries until under budget. Never touches
+    // what frameNow used (drew, or had on screen) nor entries that are
+    // Busy(). Rate-limited unless bForce.
     void Trim(DWORD frameNow, bool bForce = false);
 };

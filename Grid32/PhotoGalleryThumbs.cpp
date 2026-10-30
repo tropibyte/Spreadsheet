@@ -133,6 +133,18 @@ void CThumbCache::ResetFailed()
     }
 }
 
+void CThumbCache::ForgetRange(ULONGLONG first, ULONGLONG last)
+{
+    for (auto& kv : m_map)
+    {
+        if (kv.first >= first && kv.first <= last && kv.second.nPins == 0)
+        {
+            kv.second.ResetSource();    // bumps the epoch: a load in flight comes back stale
+            kv.second.path.clear();
+        }
+    }
+}
+
 size_t CThumbCache::TotalBytes() const
 {
     size_t total = 0;
@@ -155,7 +167,7 @@ void CThumbCache::Trim(DWORD frameNow, bool bForce)
         for (auto it = m_map.begin(); it != m_map.end();)
         {
             const PGThumb& t = it->second;
-            if (t.Bytes() == 0 && t.nPins == 0 && t.state != PGThumb::Pending && t.lastUsed != frameNow)
+            if (t.Bytes() == 0 && t.nPins == 0 && !t.Busy() && t.lastUsed != frameNow)
                 it = m_map.erase(it);
             else
                 ++it;
@@ -190,7 +202,7 @@ void CThumbCache::Trim(DWORD frameNow, bool bForce)
         if (total <= m_budget)
             return;
         PGThumb& t = m_map[e.second];
-        if (t.nPins == 0 && !t.src.empty())
+        if (t.nPins == 0 && !t.src.empty() && !t.Busy())
         {
             total -= t.src.bytes();
             t.ResetSource();

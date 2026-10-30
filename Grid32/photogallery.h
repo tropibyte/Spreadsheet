@@ -17,6 +17,13 @@
 //                       path and the control builds thumbnails itself on
 //                       worker threads.
 //
+// Keys: give every item a stable PGGIF_KEY (a database id, a path hash); the
+// thumbnail cache is keyed by it. Keep keys below 2^62: the control makes up
+// keys above that for items that have none. Owner-data items without a key
+// are cached by index, which says nothing about which photo is there, so
+// PGGM_SETITEMCOUNT forgets all of those thumbnails and PGGM_REDRAWITEMS
+// those of its range, and the host is asked for them again.
+//
 // Bitmaps: the control never takes ownership of an HBITMAP. It copies the
 // pixels before the call (or notification) returns; free yours afterwards.
 // The bitmap must not be selected into a DC. 32bpp bitmaps whose alpha
@@ -41,12 +48,13 @@
 #define PGGS_USERZOOM       0x0010  // Ctrl+wheel, Ctrl +/-/0 and pinch change the tile size
 #define PGGS_AUTOLOAD       0x0020  // control opens files and builds thumbnails itself
 #define PGGS_CHECKBOXES     0x0040  // check circle on hover toggles selection (with PGGS_MULTISELECT)
-#define PGGS_SHOWSELALWAYS  0x0080  // keep the selection visible without focus
+#define PGGS_SHOWSELALWAYS  0x0080  // the selection keeps its color without focus (otherwise it turns grey)
 
 // ---- Items ------------------------------------------------------------------
 
 #define PGGIF_THUMB         0x0001  // hbmThumb (+ thumbFlags)
-#define PGGIF_TEXT          0x0002  // pszText: tooltip / accessible name
+#define PGGIF_TEXT          0x0002  // pszText: the item's tooltip (owner-data: asked for on hover);
+                                    // no accessible name yet
 #define PGGIF_PATH          0x0004  // pszPath: file loaded under PGGS_AUTOLOAD
 #define PGGIF_PARAM         0x0008  // lParam
 #define PGGIF_STATE         0x0010  // state / stateMask
@@ -96,6 +104,10 @@ typedef struct tagPGGTHUMBNAIL {
 // ---- Tile metrics -------------------------------------------------------------
 // Sizes are in device-independent pixels (96 per inch) and scale with the
 // window's DPI. PGGM_GETTILEMETRICS also reports the geometry in effect.
+//
+// The scroll position is an int, so the scrolled content stops at about one
+// billion physical pixels (INT_MAX / 2): some 3.5 million rows of 300-pixel
+// tiles. Rows past that are laid out but cannot be scrolled to.
 
 #define PGGTM_MODE          0x0001
 #define PGGTM_SIZE          0x0002  // cxTile
