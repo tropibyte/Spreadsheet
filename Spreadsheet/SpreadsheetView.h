@@ -30,12 +30,8 @@ public:
 
 // Overrides
 public:
-	virtual void OnDraw(CDC* pDC);  // overridden to draw this view
 	virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
-protected:
-	virtual BOOL OnPreparePrinting(CPrintInfo* pInfo);
-	virtual void OnBeginPrinting(CDC* pDC, CPrintInfo* pInfo);
-	virtual void OnEndPrinting(CDC* pDC, CPrintInfo* pInfo);
+	// Drawing and printing are CGridView's.
 
 // Implementation
 public:
@@ -53,13 +49,6 @@ protected:
 	afx_msg void OnRButtonUp(UINT nFlags, CPoint point);
 	afx_msg void OnContextMenu(CWnd* pWnd, CPoint point);
 	DECLARE_MESSAGE_MAP()
-public:
-	afx_msg void OnEditPaste();
-	afx_msg void OnEditCut();
-	afx_msg void OnEditCopy();
-	afx_msg void OnEditSelectAll();
-	afx_msg void OnCellGoto();
-	afx_msg void OnCellFont();
 };
 
 #ifndef _DEBUG  // debug version in SpreadsheetView.cpp

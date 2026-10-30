@@ -20,7 +20,7 @@ enum {
   WM_NCHITTEST=132, WM_NCPAINT=133, WM_NCMOUSEMOVE=160, WM_KEYDOWN=256,
   WM_KEYUP=257, WM_CHAR=258, WM_SYSKEYDOWN=260, WM_SYSKEYUP=261,
   WM_TIMER=275, WM_HSCROLL=276, WM_VSCROLL=277, WM_MOUSEMOVE=512,
-  WM_LBUTTONDOWN=513, WM_LBUTTONUP=514, WM_RBUTTONDOWN=516, WM_RBUTTONUP=517,
+  WM_LBUTTONDOWN=513, WM_LBUTTONUP=514, WM_LBUTTONDBLCLK=515, WM_RBUTTONDOWN=516, WM_RBUTTONUP=517,
   WM_MOUSEWHEEL=522, WM_MOUSELEAVE=675, WM_MOUSEHOVER=673,
   WM_CAPTURECHANGED=533, WM_CANCELMODE=31, WM_SETREDRAW=11,
   WM_CUT=768, WM_COPY=769, WM_PASTE=770, WM_CLEAR=771, WM_UNDO=772,
@@ -36,7 +36,7 @@ enum {
   SB_PAGERIGHT=3, SB_LEFT=6, SB_RIGHT=7,
   SIF_RANGE=1, SIF_PAGE=2, SIF_POS=4, SIF_TRACKPOS=16, SIF_ALL=23,
   DT_LEFT=0, DT_CENTER=1, DT_RIGHT=2, DT_TOP=0, DT_VCENTER=4, DT_BOTTOM=8,
-  DT_WORDBREAK=16, DT_SINGLELINE=32, DT_NOCLIP=256, DT_CALCRECT=1024,
+  DT_WORDBREAK=16, DT_SINGLELINE=32, DT_NOCLIP=256, DT_CALCRECT=1024, DT_NOPREFIX=2048,
   PS_SOLID=0, PS_DASH=1, PS_DOT=2, PS_NULL=5,
   TRANSPARENT=1, OPAQUE=2, SRCCOPY=0x00CC0020,
   R2_NOT=6, R2_COPYPEN=13, R2_XORPEN=7,
@@ -52,7 +52,8 @@ enum {
   VK_BACK=8, VK_TAB=9, VK_RETURN=13, VK_SHIFT=16, VK_CONTROL=17,
   VK_ESCAPE=27, VK_SPACE=32, VK_PRIOR=33, VK_NEXT=34, VK_END=35,
   VK_HOME=36, VK_LEFT=37, VK_UP=38, VK_RIGHT=39, VK_DOWN=40,
-  VK_DELETE=46, VK_F1=112,
+  VK_DELETE=46, VK_F1=112, VK_F2=113, MK_SHIFT=4, MK_CONTROL=8,
+  SPI_GETWHEELSCROLLLINES=104, WHEEL_PAGESCROLL=-1,
   WHEEL_DELTA=120, HOVER_DEFAULT=0xFFFFFFFF,
   IDC_ARROW_=32512
 };
@@ -70,6 +71,9 @@ struct TRACKMOUSEEVENT { DWORD cbSize, dwFlags; HWND hwndTrack; DWORD dwHoverTim
 struct CREATESTRUCT { void* lpCreateParams; void* hInstance; HMENU hMenu; HWND hwndParent;
                       int cy, cx, y, x; LONG style; LPCWSTR lpszName, lpszClass; DWORD dwExStyle; };
 struct SIZE { LONG cx, cy; };
+struct TEXTMETRICW { LONG tmHeight, tmAscent, tmDescent, tmInternalLeading, tmExternalLeading,
+                     tmAveCharWidth, tmMaxCharWidth, tmWeight, tmOverhang; };
+#define LF_FACESIZE 32
 struct LOGFONTW { LONG lfHeight, lfWidth, lfEscapement, lfOrientation, lfWeight;
                   BYTE lfItalic, lfUnderline, lfStrikeOut, lfCharSet, lfOutPrecision,
                        lfClipPrecision, lfQuality, lfPitchAndFamily; wchar_t lfFaceName[32]; };
@@ -104,6 +108,9 @@ BOOL   LineTo(HDC,int,int);
 int    SetROP2(HDC,int);
 BOOL   GetTextExtentPoint32W(HDC, LPCWSTR, int, SIZE*);
 BOOL   PatBlt(HDC,int,int,int,int,DWORD);
+BOOL   GetTextMetricsW(HDC, TEXTMETRICW*);
+int    SaveDC(HDC);
+BOOL   RestoreDC(HDC, int);
 
 // ---- User32 ----------------------------------------------------------------
 HDC    GetDC(HWND);
@@ -119,6 +126,7 @@ BOOL   DestroyWindow(HWND);
 BOOL   ShowWindow(HWND, int);
 BOOL   MoveWindow(HWND,int,int,int,int,BOOL);
 HWND   SetFocus(HWND);
+HWND   GetFocus();
 HWND   GetParent(HWND);
 BOOL   IsWindow(HWND);
 BOOL   BringWindowToTop(HWND);
@@ -163,6 +171,9 @@ BOOL   CloseClipboard();
 BOOL   EmptyClipboard();
 HANDLE GetClipboardData(UINT);
 HANDLE SetClipboardData(UINT, HANDLE);
+UINT   RegisterClipboardFormatW(LPCWSTR);
+BOOL   IsClipboardFormatAvailable(UINT);
+size_t GlobalSize(HGLOBAL);
 HGLOBAL GlobalAlloc(UINT, size_t);
 void*  GlobalLock(HGLOBAL);
 BOOL   GlobalUnlock(HGLOBAL);

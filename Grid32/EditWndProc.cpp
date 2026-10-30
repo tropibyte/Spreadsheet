@@ -4,152 +4,85 @@
 #include <new>
 
 
+// The inline cell editor. The grid owns the edit state (BeginEdit /
+// CommitEdit / CancelEdit); this subclass only turns keys and focus changes
+// into those calls.
 LRESULT CALLBACK CGrid32Mgr::EditCtrl_WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     CGrid32Mgr* pMgr = reinterpret_cast<CGrid32Mgr*>(GetWindowLongPtr(GetParent(hWnd), 0));
     if (!pMgr)
         return 0;
 
-    auto setcurcelltext = [&]() {
-        if (pMgr->m_bSuppressEditCommit)
-        {
-            pMgr->m_bSuppressEditCommit = FALSE;
-            return;
-        }
-        int len = GetWindowTextLength(hWnd);
-        try {
-            WCHAR* wsBuff = new WCHAR[(size_t)len + 10];
-            memset(wsBuff, 0, ((size_t)len + 10) * sizeof(WCHAR));
-            GetWindowText(hWnd, wsBuff, (len + 10));
-            pMgr->SetCurrentCellText(wsBuff);
-
-            GRIDNMHDR h{};
-            h.cellPt = pMgr->m_currentCell;
-            h.text   = wsBuff;
-            pMgr->SendGridNotification(GN_EDITCOMMIT, &h);
-            // No payload re-fill: cellPt + range stay accurate for change too.
-            pMgr->SendGridNotification(GN_CELLCHANGED, &h);
-
-            delete[] wsBuff;
-            pMgr->Invalidate();
-        }
-        catch (const std::bad_alloc&) {
-            pMgr->SetLastError(GRID_ERROR_OUT_OF_MEMORY);
-        }
-        catch (...) {
-            pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
-        }
-    };
-
-    auto fireCancel = [&]() {
-        GRIDNMHDR h{};
-        h.cellPt = pMgr->m_currentCell;
-        pMgr->SendGridNotification(GN_EDITCANCEL, &h);
-    };
-
     try {
         switch (message) {
-    case WM_KEYDOWN:
-        // Navigation keys commit the edit by bouncing focus to the grid
-        // (WM_KILLFOCUS runs setcurcelltext), then move the current cell.
-        // SetFocus must come BEFORE IncrementSelectedCell so the commit
-        // writes to the original cell, not the cell we just moved to.
-        switch (wParam)
-        {
-        case VK_RETURN:
-            // Per host spec: Enter commits in place, marker stays.
-            SetFocus(GetParent(hWnd));
-            return 0;
-        case VK_DOWN:
-            SetFocus(GetParent(hWnd));
-            pMgr->IncrementSelectedCell(1, 0);
-            return 0;
-        case VK_UP:
-            SetFocus(GetParent(hWnd));
-            pMgr->IncrementSelectedCell(-1, 0);
-            return 0;
-        case VK_TAB:
-            // Tab = commit + right, Shift+Tab = commit + left.
-            SetFocus(GetParent(hWnd));
-            if (GetKeyState(VK_SHIFT) & 0x8000)
-                pMgr->IncrementSelectedCell(0, -1);
-            else
-                pMgr->IncrementSelectedCell(0, 1);
-            return 0;
-        case VK_LEFT:
-        {
-            DWORD startPos, endPos;
-            SendMessage(hWnd, EM_GETSEL, (WPARAM)&startPos, (LPARAM)&endPos);
-            if (startPos == 0) {
-                SetFocus(GetParent(hWnd));
-                pMgr->IncrementSelectedCell(0, -1);
-                return 0;
-            }
-            return CallWindowProc(pMgr->m_editWndProc, hWnd, message, wParam, lParam);
-        }
-        case VK_RIGHT:
-        {
-            int textLength = GetWindowTextLength(hWnd);
-            DWORD startPos, endPos;
-            SendMessage(hWnd, EM_GETSEL, (WPARAM)&startPos, (LPARAM)&endPos);
-            if (endPos == textLength) {
-                SetFocus(GetParent(hWnd));
-                pMgr->IncrementSelectedCell(0, 1);
-                return 0;
-            }
-            return CallWindowProc(pMgr->m_editWndProc, hWnd, message, wParam, lParam);
-        }
-        case VK_ESCAPE:
-            // Cancel: arm the commit-suppression flag, then bounce focus to the
-            // parent. WM_KILLFOCUS will fire, see the flag, and skip the
-            // commit path — the cell keeps its pre-edit content.
-            fireCancel();
-            pMgr->m_bSuppressEditCommit = TRUE;
-            SetFocus(GetParent(hWnd));
-            return 0;
-        }
-        break;
-    case WM_KILLFOCUS:
-    {
-        setcurcelltext();
-        ShowWindow(hWnd, SW_HIDE);
-        break;
-    }
-    case WM_SHOWWINDOW:
-        if (wParam) { // Being shown
-            // Get the current cell font info and set it to the edit control
-            PGRIDCELL pCell = pMgr->GetCurrentCell();
-            if (pCell) {
-                LOGFONT lf = { 0 };
-                if (!pMgr->IsCellFontDefault(*pCell))
-                {
-                    wcscpy_s(lf.lfFaceName, pCell->fontInfo.m_wsFontFace.c_str());
-                    HDC hdc = GetDC(hWnd);
-                    int logPixels = GetDeviceCaps(hdc, LOGPIXELSY);
-                    ReleaseDC(hWnd, hdc);
-                    lf.lfHeight = (LONG)(pCell->fontInfo.m_fPointSize * logPixels / -72.0);
-                    lf.lfItalic = pCell->fontInfo.bItalic;
-                    lf.lfUnderline = pCell->fontInfo.bUnderline;
-                    lf.lfStrikeOut = pCell->fontInfo.bStrikeThrough;
-                    lf.lfWeight = pCell->fontInfo.bWeight;
-                    HFONT hNewFont = CreateFontIndirect(&lf);
-                    SendMessage(hWnd, WM_SETFONT, (WPARAM)hNewFont, TRUE);
-                }
-            }
-        }
-        else { // Being hidden
-         // Restore the original font
-            HFONT hFont = (HFONT)SendMessage(hWnd, WM_GETFONT, 0, 0);
-            if (hFont != pMgr->m_hDefaultFont)
+        case WM_KEYDOWN:
+            // Navigation keys commit into the cell being edited, then move.
+            switch (wParam)
             {
-                SendMessage(hWnd, WM_SETFONT, (WPARAM)pMgr->m_hDefaultFont, TRUE);
-                DeleteObject(hFont);
+            case VK_RETURN:
+                // Per host spec: Enter commits in place, marker stays.
+                pMgr->CommitEdit();
+                return 0;
+            case VK_DOWN:
+                pMgr->CommitEdit();
+                pMgr->IncrementSelectedCell(1, 0);
+                return 0;
+            case VK_UP:
+                pMgr->CommitEdit();
+                pMgr->IncrementSelectedCell(-1, 0);
+                return 0;
+            case VK_TAB:
+                // Tab = commit + right, Shift+Tab = commit + left.
+                pMgr->CommitEdit();
+                pMgr->IncrementSelectedCell(0, (GetKeyState(VK_SHIFT) & 0x8000) ? -1 : 1);
+                return 0;
+            case VK_LEFT:
+            {
+                DWORD startPos = 0, endPos = 0;
+                SendMessage(hWnd, EM_GETSEL, (WPARAM)&startPos, (LPARAM)&endPos);
+                if (startPos == 0 && endPos == 0) {
+                    pMgr->CommitEdit();
+                    pMgr->IncrementSelectedCell(0, -1);
+                    return 0;
+                }
+                return CallWindowProc(pMgr->m_editWndProc, hWnd, message, wParam, lParam);
             }
+            case VK_RIGHT:
+            {
+                DWORD startPos = 0, endPos = 0;
+                SendMessage(hWnd, EM_GETSEL, (WPARAM)&startPos, (LPARAM)&endPos);
+                if (startPos == endPos && endPos == (DWORD)GetWindowTextLength(hWnd)) {
+                    pMgr->CommitEdit();
+                    pMgr->IncrementSelectedCell(0, 1);
+                    return 0;
+                }
+                return CallWindowProc(pMgr->m_editWndProc, hWnd, message, wParam, lParam);
+            }
+            case VK_ESCAPE:
+                // The cell keeps its pre-edit content.
+                pMgr->CancelEdit();
+                return 0;
+            }
+            break;
+        case WM_CHAR:
+            // Enter, Tab and Escape were handled on key-down; the characters
+            // they translate to would only make the edit control beep.
+            if (wParam == L'\r' || wParam == L'\n' || wParam == L'\t' || wParam == 0x1B)
+                return 0;
+            break;
+        case WM_KILLFOCUS:
+            // Focus left for somewhere else — the ribbon, another window. The
+            // text goes into the cell the edit was opened on. A commit or
+            // cancel that is moving focus itself has already closed the edit,
+            // so this finds nothing to do.
+            pMgr->CommitEdit();
+            break;
+        default:
+            break;
         }
-        break;
-    default:
-        // Pass other messages to the original edit control window procedure
-        return CallWindowProc(pMgr->m_editWndProc, hWnd, message, wParam, lParam);
     }
+    catch (const std::bad_alloc&)
+    {
+        pMgr->SetLastError(GRID_ERROR_OUT_OF_MEMORY);
     }
     catch (const std::exception&)
     {

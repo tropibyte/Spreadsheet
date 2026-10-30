@@ -22,14 +22,23 @@ CGridView::~CGridView()
 {
 }
 
+// Cut, Copy, Paste, Undo and Redo live here, next to the grid they act on.
+// CSpreadsheetView used to bind the same IDs to MessageBox stubs, which won
+// because MFC routes commands to the most-derived view first (H1, H3).
 BEGIN_MESSAGE_MAP(CGridView, CView)
 	ON_WM_CREATE()
 	ON_WM_SIZE()
-    ON_WM_KEYDOWN()
-    ON_WM_KEYUP()
-    ON_WM_INPUT()
-    ON_WM_SYSKEYUP()
-    ON_WM_SYSKEYDOWN()
+	ON_WM_SETFOCUS()
+	ON_COMMAND(ID_EDIT_CUT, &CGridView::OnEditCut)
+	ON_COMMAND(ID_EDIT_COPY, &CGridView::OnEditCopy)
+	ON_COMMAND(ID_EDIT_PASTE, &CGridView::OnEditPaste)
+	ON_COMMAND(ID_EDIT_UNDO, &CGridView::OnEditUndo)
+	ON_COMMAND(ID_EDIT_REDO, &CGridView::OnEditRedo)
+	ON_UPDATE_COMMAND_UI(ID_EDIT_CUT, &CGridView::OnUpdateEditCutCopy)
+	ON_UPDATE_COMMAND_UI(ID_EDIT_COPY, &CGridView::OnUpdateEditCutCopy)
+	ON_UPDATE_COMMAND_UI(ID_EDIT_PASTE, &CGridView::OnUpdateEditPaste)
+	ON_UPDATE_COMMAND_UI(ID_EDIT_UNDO, &CGridView::OnUpdateEditUndo)
+	ON_UPDATE_COMMAND_UI(ID_EDIT_REDO, &CGridView::OnUpdateEditRedo)
     ON_NOTIFY(NM_CLICK, GRIDCTRL_ID, &CGridView::OnGridClick)
     ON_NOTIFY(GN_CONTENTCHANGED, GRIDCTRL_ID, &CGridView::OnGridContentChanged)
 END_MESSAGE_MAP()
@@ -37,10 +46,10 @@ END_MESSAGE_MAP()
 
 // CGridView drawing
 
-void CGridView::OnDraw(CDC* pDC)
+void CGridView::OnDraw(CDC* /*pDC*/)
 {
-	CDocument* pDoc = GetDocument();
-	// TODO: add draw code here
+	// The grid is a child window and paints itself; printing goes through
+	// OnPrint, which renders cells into the printer DC.
 }
 
 
@@ -60,66 +69,10 @@ void CGridView::Dump(CDumpContext& dc) const
 #endif
 #endif //_DEBUG
 
-BOOL CGridView::SetCurrentCell(LPCWSTR pwszRef, short nWhich)
+void CGridView::CommitEdit()
 {
-    return m_wndGridCtrl.SetCurrentCell(pwszRef, nWhich);
-}
-
-BOOL CGridView::SetCurrentCell(UINT nRow, UINT nCol)
-{
-    return m_wndGridCtrl.SetCurrentCell(nRow, nCol);
-}
-
-void CGridView::OnFindNext(LPCTSTR lpszFind, BOOL bNext, BOOL bCase)
-{
-    if (!lpszFind)
-        return;
-    GCFINDSTRUCT fs{};
-    fs.m_cbSize = sizeof(GCFINDSTRUCT);
-    fs.m_wsFindText = lpszFind;
-    fs.m_bMatchCase = bCase;
-    fs.m_bSearchForward = bNext;
-    m_wndGridCtrl.GetCurrentCell(fs.m_startCell);
-    if (!m_wndGridCtrl.FindText(fs))
-        OnTextNotFound(lpszFind);
-}
-void CGridView::OnReplaceSel(LPCTSTR lpszFind, BOOL bNext, BOOL bCase, LPCTSTR lpszReplace)
-{
-    if (!lpszFind || !lpszReplace)
-        return;
-    GCREPLACESTRUCT rs{};
-    rs.m_cbSize = sizeof(GCREPLACESTRUCT);
-    rs.m_wsFindText = lpszFind;
-    rs.m_wsReplaceText = lpszReplace;
-    rs.m_bMatchCase = bCase;
-    rs.m_bSearchForward = bNext;
-    m_wndGridCtrl.GetCurrentCell(rs.m_startCell);
-    if (!m_wndGridCtrl.ReplaceText(rs))
-        OnTextNotFound(lpszFind);
-}
-void CGridView::OnReplaceAll(LPCTSTR lpszFind, LPCTSTR lpszReplace, BOOL bCase)
-{
-    if (!lpszFind || !lpszReplace)
-        return;
-    GCREPLACESTRUCT rs{};
-    rs.m_cbSize = sizeof(GCREPLACESTRUCT);
-    rs.m_wsFindText = lpszFind;
-    rs.m_wsReplaceText = lpszReplace;
-    rs.m_bMatchCase = bCase;
-    rs.m_bSearchForward = TRUE;
-    rs.m_startCell = {0,0};
-    bool replaced = false;
-    while (m_wndGridCtrl.ReplaceText(rs))
-    {
-        replaced = true;
-        m_wndGridCtrl.GetCurrentCell(rs.m_startCell);
-    }
-    if (!replaced)
-        OnTextNotFound(lpszFind);
-}
-
-void CGridView::OnTextNotFound(LPCTSTR lpszFind)
-{
+    if (m_wndGridCtrl.GetSafeHwnd() != NULL)
+        m_wndGridCtrl.CommitEdit(TRUE);
 }
 
 void CGridView::OnEditCut()
@@ -140,38 +93,116 @@ void CGridView::OnEditPaste()
         m_wndGridCtrl.SendMessage(WM_PASTE);
 }
 
-void CGridView::OnEditSelectAll()
-{
-    GRIDSELECTION sel{ {0,0}, { (UINT)-1, (UINT)-1 } };
-    m_wndGridCtrl.SendMessage(GM_SETSELECTION, 0, (LPARAM)&sel);
-}
-
-void CGridView::OnEditClear()
-{
-    if (m_wndGridCtrl.GetSafeHwnd() != NULL)
-        m_wndGridCtrl.SendMessage(WM_CLEAR);
-}
-
 void CGridView::OnEditUndo()
 {
     if (m_wndGridCtrl.GetSafeHwnd() != NULL)
-        m_wndGridCtrl.SendMessage(WM_UNDO);
+        m_wndGridCtrl.Undo();
 }
 
-void CGridView::OnEditFind()
-{
-    OnFindNext(_T(""), TRUE, FALSE);
-}
-
-void CGridView::OnEditReplace()
-{
-    OnReplaceSel(_T(""), TRUE, FALSE, _T(""));
-}
-
-void CGridView::OnEditRepeat()
+void CGridView::OnEditRedo()
 {
     if (m_wndGridCtrl.GetSafeHwnd() != NULL)
-        m_wndGridCtrl.SendMessage(GM_REDO);
+        m_wndGridCtrl.Redo();
+}
+
+// Undo, Redo and Paste are greyed out when there is nothing to do (M17).
+void CGridView::OnUpdateEditCutCopy(CCmdUI* pCmdUI)
+{
+    pCmdUI->Enable(m_wndGridCtrl.GetSafeHwnd() != NULL);
+}
+
+void CGridView::OnUpdateEditPaste(CCmdUI* pCmdUI)
+{
+    static const UINT cfGridCells = ::RegisterClipboardFormat(_T("Grid32.Cells"));
+    pCmdUI->Enable(m_wndGridCtrl.GetSafeHwnd() != NULL &&
+        (::IsClipboardFormatAvailable(CF_UNICODETEXT) || ::IsClipboardFormatAvailable(cfGridCells)));
+}
+
+void CGridView::OnUpdateEditUndo(CCmdUI* pCmdUI)
+{
+    pCmdUI->Enable(m_wndGridCtrl.GetSafeHwnd() != NULL && m_wndGridCtrl.CanUndo());
+}
+
+void CGridView::OnUpdateEditRedo(CCmdUI* pCmdUI)
+{
+    pCmdUI->Enable(m_wndGridCtrl.GetSafeHwnd() != NULL && m_wndGridCtrl.CanRedo());
+}
+
+
+// CGridView printing (H12)
+
+BOOL CGridView::OnPreparePrinting(CPrintInfo* pInfo)
+{
+    CommitEdit();
+    return DoPreparePrinting(pInfo);
+}
+
+// Lay the used part of the sheet out on pages: columns left to right until
+// the page is full, then a new page across; rows likewise down. Pages are
+// numbered down first, then across, as Excel does.
+void CGridView::OnBeginPrinting(CDC* pDC, CPrintInfo* pInfo)
+{
+    m_printColStarts.assign(1, 0);
+    m_printRowStarts.assign(1, 0);
+    GRIDSELECTION used{};
+    if (!m_wndGridCtrl.GetUsedRange(used))
+        used = GRIDSELECTION{};
+    m_printRange = GRIDSELECTION{ { 0, 0 }, used.end };
+
+    const int dpiX = pDC->GetDeviceCaps(LOGPIXELSX);
+    const int dpiY = pDC->GetDeviceCaps(LOGPIXELSY);
+    // Half an inch of margin on every side of the printable area.
+    const long pageW = pDC->GetDeviceCaps(HORZRES) - dpiX;
+    const long pageH = pDC->GetDeviceCaps(VERTRES) - dpiY;
+
+    long width = 0;
+    for (UINT c = 0; c <= used.end.nCol; ++c)
+    {
+        const long w = MulDiv((int)m_wndGridCtrl.GetColumnWidth(c), dpiX, 96);
+        if (width > 0 && width + w > pageW)
+        {
+            m_printColStarts.push_back(c);
+            width = 0;
+        }
+        width += w;
+    }
+    long height = 0;
+    for (UINT r = 0; r <= used.end.nRow; ++r)
+    {
+        const long h = MulDiv((int)m_wndGridCtrl.GetRowHeight(r), dpiY, 96);
+        if (h == 0)
+            continue;   // hidden by a filter
+        if (height > 0 && height + h > pageH)
+        {
+            m_printRowStarts.push_back(r);
+            height = 0;
+        }
+        height += h;
+    }
+    pInfo->SetMaxPage((UINT)(m_printColStarts.size() * m_printRowStarts.size()));
+}
+
+void CGridView::OnPrint(CDC* pDC, CPrintInfo* pInfo)
+{
+    const size_t rowPages = m_printRowStarts.size();
+    const size_t page = pInfo->m_nCurPage - 1;
+    const size_t across = page / rowPages, down = page % rowPages;
+    if (across >= m_printColStarts.size())
+        return;
+
+    GCRENDERSTRUCT rs{};
+    rs.m_cbSize = sizeof(GCRENDERSTRUCT);
+    // In print preview m_hDC is the screen and the attribute DC the printer;
+    // the page is laid out at the printer's resolution either way.
+    rs.m_hDC = pDC->m_hDC;
+    rs.m_nLogPixelsX = pDC->GetDeviceCaps(LOGPIXELSX);
+    rs.m_nLogPixelsY = pDC->GetDeviceCaps(LOGPIXELSY);
+    rs.m_ptOrigin = { rs.m_nLogPixelsX / 2, rs.m_nLogPixelsY / 2 };
+    rs.m_range.start = { m_printRowStarts[down], m_printColStarts[across] };
+    rs.m_range.end.nRow = down + 1 < rowPages ? m_printRowStarts[down + 1] - 1 : m_printRange.end.nRow;
+    rs.m_range.end.nCol = across + 1 < m_printColStarts.size() ? m_printColStarts[across + 1] - 1 : m_printRange.end.nCol;
+    rs.m_bGridLines = TRUE;
+    m_wndGridCtrl.RenderRange(rs);
 }
 
 
@@ -209,64 +240,14 @@ void CGridView::OnSize(UINT nType, int cx, int cy)
     }
 }
 
-
-
-void CGridView::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
+// The view is only a frame for the grid; focus belongs to the grid, which is
+// where typing starts an edit. The view used to keep focus and forward key
+// presses, so characters (WM_CHAR) never reached the grid at all.
+void CGridView::OnSetFocus(CWnd* pOldWnd)
 {
+    CView::OnSetFocus(pOldWnd);
     if (m_wndGridCtrl.GetSafeHwnd() != NULL)
-    {
-        // Forward the WM_KEYDOWN message to the grid control
-        m_wndGridCtrl.SendMessage(WM_KEYDOWN, nChar, MAKELPARAM(nRepCnt, nFlags));
-    }
-    CView::OnKeyDown(nChar, nRepCnt, nFlags);
-}
-
-
-void CGridView::OnKeyUp(UINT nChar, UINT nRepCnt, UINT nFlags)
-{
-    if (m_wndGridCtrl.GetSafeHwnd() != NULL)
-    {
-        // Forward the WM_KEYUP message to the grid control
-        m_wndGridCtrl.SendMessage(WM_KEYUP, nChar, MAKELPARAM(nRepCnt, nFlags));
-    }
-    CView::OnKeyUp(nChar, nRepCnt, nFlags);
-}
-
-
-void CGridView::OnRawInput(UINT nInputcode, HRAWINPUT hRawInput)
-{
-    // This feature requires Windows XP or greater.
-    // The symbol _WIN32_WINNT must be >= 0x0501.
-    // TODO: Add your message handler code here and/or call default
-
-    CView::OnRawInput(nInputcode, hRawInput);
-}
-
-
-void CGridView::OnSysKeyUp(UINT nChar, UINT nRepCnt, UINT nFlags)
-{
-    if (m_wndGridCtrl.GetSafeHwnd() != NULL)
-    {
-        // Forward the WM_SYSKEYUP message to the grid control
-        m_wndGridCtrl.SendMessage(WM_SYSKEYUP, nChar, MAKELPARAM(nRepCnt, nFlags));
-    }
-    CView::OnSysKeyUp(nChar, nRepCnt, nFlags);
-}
-
-
-void CGridView::OnSysKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
-{
-    if (m_wndGridCtrl.GetSafeHwnd() != NULL)
-    {
-        // Forward the WM_SYSKEYDOWN message to the grid control
-        m_wndGridCtrl.SendMessage(WM_SYSKEYDOWN, nChar, MAKELPARAM(nRepCnt, nFlags));
-    }
-    CView::OnSysKeyDown(nChar, nRepCnt, nFlags);
-}
-
-void CGridView::ApplyFont(const FONTINFO& fi)
-{
-    m_wndGridCtrl.SetCurrentCellFormat(fi);
+        m_wndGridCtrl.SetFocus();
 }
 
 void CGridView::OnGridClick(NMHDR* pNMHDR, LRESULT* pResult)

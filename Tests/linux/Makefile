@@ -13,19 +13,15 @@ BUILD    := build
 
 # -Wno-reorder / -Wno-unused-parameter: pre-existing in the Grid32 sources;
 # left off so a real new warning stands out.
-CXXFLAGS := -std=c++17 -g -O0 -Wall -Wextra \
+CXXFLAGS := -std=c++17 -g -O2 -Wall -Wextra \
             -Wno-unknown-pragmas -Wno-reorder -Wno-unused-parameter \
             -I$(SHIM) -I$(GRID32)
-
-# -O0 is deliberate. Grid32FormulaText::ResetText is defined inline in
-# Formulator.cpp but declared extern in Grid32Mgr.cpp; at -O2 the compiler
-# inlines every use and drops the symbol, so the link fails. That is
-# AUDIT_2026-09.md M23 — raise the level once it is fixed.
 
 GRID_SRCS := $(GRID32)/Grid32Mgr.cpp $(GRID32)/Formulator.cpp $(GRID32)/EditWndProc.cpp
 STUBS     := $(SHIM)/win32stubs.cpp
 
-SUITES := $(BUILD)/Grid32Tests $(BUILD)/FormulatorTests $(BUILD)/GridMgrTests
+SUITES := $(BUILD)/Grid32Tests $(BUILD)/FormulatorTests $(BUILD)/GridMgrTests \
+          $(BUILD)/FormulaRecalcTests $(BUILD)/StreamTests
 
 .PHONY: all check clean
 all: $(SUITES)
@@ -43,6 +39,15 @@ $(BUILD)/FormulatorTests: ../FormulatorTests.cpp $(GRID32)/Formulator.cpp | $(BU
 
 # The real manager, linked against no-op Win32 stubs.
 $(BUILD)/GridMgrTests: GridMgrTests.cpp $(STUBS) $(GRID_SRCS) | $(BUILD)
+	$(CXX) $(CXXFLAGS) -o $@ $^
+
+# The formula engine through the real manager: recalculation, number formats
+# on formula cells, grid-bounded references.
+$(BUILD)/FormulaRecalcTests: FormulaRecalcTests.cpp $(STUBS) $(GRID_SRCS) | $(BUILD)
+	$(CXX) $(CXXFLAGS) -o $@ $^
+
+# File import/export (GM_STREAMIN / GM_STREAMOUT / GM_CLEARALL), same linkage.
+$(BUILD)/StreamTests: StreamTests.cpp $(STUBS) $(GRID_SRCS) | $(BUILD)
 	$(CXX) $(CXXFLAGS) -o $@ $^
 
 check: $(SUITES)

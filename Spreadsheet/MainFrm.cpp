@@ -71,6 +71,7 @@ BEGIN_MESSAGE_MAP(CMainFrame, CFrameWndEx)
         ON_COMMAND(ID_EDIT_SELECT_ALL, &CMainFrame::OnEditSelectAll)
         ON_COMMAND(ID_EDIT_CLEAR,      &CMainFrame::OnEditClear)
         ON_COMMAND(ID_FORMAT_PAINTER,  &CMainFrame::OnFormatPainter)
+        ON_COMMAND(ID_FORMAT_PAINTER_LOCK, &CMainFrame::OnFormatPainterLock)
         ON_UPDATE_COMMAND_UI(ID_FORMAT_PAINTER, &CMainFrame::OnUpdateFormatPainter)
         ON_REGISTERED_MESSAGE(WM_FINDREPLACE_REG, &CMainFrame::OnFindReplaceMsg)
         ON_COMMAND(ID_CELL_FONT,       &CMainFrame::OnCellFont)
@@ -417,16 +418,18 @@ CGridCtrl* CMainFrame::ActiveGrid()
         return pView ? &pView->GetGridCtrl() : nullptr;
 }
 
-// Read the current cell's font, apply a mutator, write it back to the selection.
-// Centralizes the read-modify-write pattern for all Font-panel toggles.
+// Read the current cell's font, apply a mutator, and write back only the
+// attribute the command changes (mask, GCFM_*). Writing the whole FONTINFO
+// made Bold on an Arial-12 cell and a Times-20 cell turn both Arial 12 (H7):
+// the active cell decides the new value, each cell keeps the rest of its font.
 template <typename Fn>
-static void MutateCurrentFont(CGridCtrl* g, Fn mutator)
+static void MutateCurrentFont(CGridCtrl* g, DWORD mask, Fn mutator)
 {
         if (!g) return;
         FONTINFO fi{};
         if (!g->GetCurrentCellFontInfo(fi)) return;
         mutator(fi);
-        g->SetSelectionFormat(fi);
+        g->SetSelectionFormat(fi, mask);
 }
 
 void CMainFrame::OnCellGoto()
@@ -437,7 +440,14 @@ void CMainFrame::OnCellGoto()
         CGridCtrl* g = ActiveGrid();
         if (!g) return;
         CT2W wRef(dlg.m_cellRef);
-        g->SetCurrentCell(wRef, dlg.nWhich);
+        if (!g->SetCurrentCell(wRef, dlg.nWhich))
+        {
+                CString msg;
+                msg.Format(dlg.nWhich == SETBYNAME ? _T("No cell is named \"%s\".")
+                                                   : _T("\"%s\" is not a cell on this sheet."),
+                           (LPCTSTR)dlg.m_cellRef);
+                AfxMessageBox(msg, MB_OK | MB_ICONINFORMATION);
+        }
 }
 
 void CMainFrame::OnFontName()
@@ -446,7 +456,7 @@ void CMainFrame::OnFontName()
         if (!pCombo) return;
         CString face = pCombo->GetEditText();
         if (face.IsEmpty()) return;
-        MutateCurrentFont(ActiveGrid(), [&](FONTINFO& fi) { fi.m_wsFontFace = (LPCWSTR)face; });
+        MutateCurrentFont(ActiveGrid(), GCFM_FACE, [&](FONTINFO& fi) { wcsncpy_s(fi.m_szFontFace, (LPCWSTR)face, _TRUNCATE); });
 }
 
 void CMainFrame::OnFontSize()
@@ -455,12 +465,12 @@ void CMainFrame::OnFontSize()
         if (!pCombo) return;
         int size = _ttoi(pCombo->GetEditText());
         if (size <= 0) return;
-        MutateCurrentFont(ActiveGrid(), [&](FONTINFO& fi) { fi.m_fPointSize = (float)size; });
+        MutateCurrentFont(ActiveGrid(), GCFM_SIZE, [&](FONTINFO& fi) { fi.m_fPointSize = (float)size; });
 }
 
 void CMainFrame::OnFontGrow()
 {
-        MutateCurrentFont(ActiveGrid(), [](FONTINFO& fi) {
+        MutateCurrentFont(ActiveGrid(), GCFM_SIZE, [](FONTINFO& fi) {
                 if (fi.m_fPointSize <= 0) fi.m_fPointSize = 10.0f;
                 fi.m_fPointSize += 1.0f;
         });
@@ -468,31 +478,31 @@ void CMainFrame::OnFontGrow()
 
 void CMainFrame::OnFontShrink()
 {
-        MutateCurrentFont(ActiveGrid(), [](FONTINFO& fi) {
+        MutateCurrentFont(ActiveGrid(), GCFM_SIZE, [](FONTINFO& fi) {
                 if (fi.m_fPointSize > 1.0f) fi.m_fPointSize -= 1.0f;
         });
 }
 
 void CMainFrame::OnFontBold()
 {
-        MutateCurrentFont(ActiveGrid(), [](FONTINFO& fi) {
+        MutateCurrentFont(ActiveGrid(), GCFM_BOLD, [](FONTINFO& fi) {
                 fi.bWeight = (fi.bWeight >= 700) ? 400 : 700;
         });
 }
 
 void CMainFrame::OnFontItalic()
 {
-        MutateCurrentFont(ActiveGrid(), [](FONTINFO& fi) { fi.bItalic = !fi.bItalic; });
+        MutateCurrentFont(ActiveGrid(), GCFM_ITALIC, [](FONTINFO& fi) { fi.bItalic = !fi.bItalic; });
 }
 
 void CMainFrame::OnFontUnderline()
 {
-        MutateCurrentFont(ActiveGrid(), [](FONTINFO& fi) { fi.bUnderline = !fi.bUnderline; });
+        MutateCurrentFont(ActiveGrid(), GCFM_UNDERLINE, [](FONTINFO& fi) { fi.bUnderline = !fi.bUnderline; });
 }
 
 void CMainFrame::OnFontStrikethrough()
 {
-        MutateCurrentFont(ActiveGrid(), [](FONTINFO& fi) { fi.bStrikeThrough = !fi.bStrikeThrough; });
+        MutateCurrentFont(ActiveGrid(), GCFM_STRIKE, [](FONTINFO& fi) { fi.bStrikeThrough = !fi.bStrikeThrough; });
 }
 
 void CMainFrame::OnFontColor()
@@ -500,7 +510,7 @@ void CMainFrame::OnFontColor()
         CMFCRibbonColorButton* pBtn = DYNAMIC_DOWNCAST(CMFCRibbonColorButton, m_wndRibbonBar.FindByID(ID_FONT_COLOR));
         if (!pBtn) return;
         COLORREF c = pBtn->GetColor();
-        MutateCurrentFont(ActiveGrid(), [&](FONTINFO& fi) { fi.m_clrTextColor = c; });
+        MutateCurrentFont(ActiveGrid(), GCFM_COLOR, [&](FONTINFO& fi) { fi.m_clrTextColor = c; });
 }
 
 void CMainFrame::OnFontBackground()
@@ -508,26 +518,56 @@ void CMainFrame::OnFontBackground()
         CMFCRibbonColorButton* pBtn = DYNAMIC_DOWNCAST(CMFCRibbonColorButton, m_wndRibbonBar.FindByID(ID_FONT_CELL_BKGND));
         if (!pBtn) return;
         m_cellBkg = pBtn->GetColor();
-        // The cell-background channel doesn't go through FONTINFO — it lives
-        // on cell_base::clrBackground. There's no GM_SETBACKGROUND yet, so
-        // this stays parked on m_cellBkg until that lands.
+        // The cell background lives on the cell, not in FONTINFO, so it has
+        // its own message (H11).
+        if (CGridCtrl* g = ActiveGrid())
+                g->SetSelectionBackground(m_cellBkg);
 }
 
-void CMainFrame::ApplyCurrentFont()
+
+// True for the grid's inline cell editor: an EDIT whose parent is a Grid32.
+static bool IsGridCellEditor(HWND hWnd)
 {
-        // Legacy entry point. Individual handlers now mutate font state
-        // directly through MutateCurrentFont(); this remains for callers
-        // that already hold a fully-built FONTINFO they want to apply.
+        TCHAR cls[32];
+        if (!hWnd || !::GetClassName(hWnd, cls, _countof(cls)) || _tcsicmp(cls, _T("Edit")) != 0)
+                return false;
+        HWND hParent = ::GetParent(hWnd);
+        return hParent && ::GetClassName(hParent, cls, _countof(cls)) &&
+               _tcsicmp(cls, GRID_WNDCLASS_NAME) == 0;
 }
 
+// The editing keys the cell editor handles for its own text.
+static bool IsTextEditingKey(const MSG* pMsg)
+{
+        if (pMsg->message != WM_KEYDOWN && pMsg->message != WM_SYSKEYDOWN)
+                return false;
+        const bool ctrl = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        const bool shift = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        const bool alt = (::GetKeyState(VK_MENU) & 0x8000) != 0;
+        switch (pMsg->wParam)
+        {
+        case 'C': case 'X': case 'V': case 'Z': case 'Y': case 'A':
+                return ctrl && !alt;
+        case VK_INSERT:
+                return ctrl || shift;
+        case VK_DELETE:
+                return shift;
+        case VK_BACK:
+                return alt;
+        }
+        return false;
+}
 
 BOOL CMainFrame::PreTranslateMessage(MSG* pMsg)
 {
-	if (m_hAccelTable != nullptr && ::TranslateAccelerator(m_hWnd, m_hAccelTable, pMsg))
-	{
-		return TRUE;
-	}
-	return CFrameWnd::PreTranslateMessage(pMsg);
+        // While a cell is being edited, Ctrl+C/X/V/Z and friends act on the
+        // text in the editor, not on the grid's cells, so they must not be
+        // turned into commands by the accelerator table.
+        if (IsGridCellEditor(pMsg->hwnd) && IsTextEditingKey(pMsg))
+                return FALSE;
+        // CFrameWndEx, not CFrameWnd: the ribbon's KeyTips, Alt navigation and
+        // tooltips live there, and it translates the accelerators too (M15).
+        return CFrameWndEx::PreTranslateMessage(pMsg);
 }
 
 
@@ -613,6 +653,23 @@ static CMFCRibbonPanel* FindHomePanel(CMFCRibbonBar& bar, LPCTSTR pszName)
 }
 
 // Helper: ribbon button with tooltip + description in one call.
+// A ribbon element's OnLButtonDblClk is a no-op, so a double-click on a
+// button produces only the first click's command. This one also posts
+// ID_FORMAT_PAINTER_LOCK for the double-click, which makes the Format
+// Painter persistent as in Excel (S9).
+class CFormatPainterButton : public CMFCRibbonButton
+{
+public:
+        CFormatPainterButton(UINT nID, LPCTSTR lpszText, int nSmallImageIndex)
+                : CMFCRibbonButton(nID, lpszText, nSmallImageIndex) {}
+        void OnLButtonDblClk(CPoint point) override
+        {
+                CMFCRibbonButton::OnLButtonDblClk(point);
+                if (CWnd* pMain = AfxGetMainWnd())
+                        pMain->PostMessage(WM_COMMAND, ID_FORMAT_PAINTER_LOCK);
+        }
+};
+
 static CMFCRibbonButton* MakeBtn(UINT id, LPCTSTR text, int idx, LPCTSTR tip, LPCTSTR desc)
 {
         auto* b = new CMFCRibbonButton(id, text, idx);
@@ -771,8 +828,12 @@ void CMainFrame::OnAlignCmd(UINT nID)
                 g->SetSelectionWrap(!g->GetCurrentCellWrap());
                 break;
         case ID_ALIGN_MERGE:
-                // Awaiting Grid32 merge-cells implementation (mergeRange exists,
-                // but no API or paint-time handling yet).
+                // Toggle: unmerge the block under the active cell, otherwise
+                // merge the selection (H10).
+                if (g->IsCurrentCellMerged())
+                        g->UnmergeSelection();
+                else
+                        g->MergeSelection();
                 break;
         }
 }
@@ -814,9 +875,11 @@ void CMainFrame::SetupClipboardPanel()
 {
         CMFCRibbonPanel* pPanel = FindHomePanel(m_wndRibbonBar, _T("Clipboard"));
         if (!pPanel) return;
-        pPanel->Add(MakeBtn(ID_FORMAT_PAINTER, _T("Format Painter"), FluentIdx::PaintBrush,
-                _T("Format Painter"),
-                _T("Copy formatting from one cell and apply it to another by clicking the target.")));
+        auto* pPainter = new CFormatPainterButton(ID_FORMAT_PAINTER, _T("Format Painter"), FluentIdx::PaintBrush);
+        pPainter->SetToolTipText(_T("Format Painter"));
+        pPainter->SetDescription(_T("Copy formatting from one cell and apply it to another by clicking the target. ")
+                                 _T("Double-click to keep painting until you click it again."));
+        pPanel->Add(pPainter);
         pPanel->Add(MakeBtn(ID_EDIT_CLEAR, _T("Clear"), FluentIdx::Eraser,
                 _T("Clear"), _T("Delete the contents of the selected cells.")));
 }
@@ -899,7 +962,7 @@ void CMainFrame::OnUpdateAlignCmd(CCmdUI* pCmdUI)
         case ID_ALIGN_MIDDLE: pCmdUI->SetCheck(g->GetCurrentCellVAlign() == DT_VCENTER); break;
         case ID_ALIGN_BOTTOM: pCmdUI->SetCheck(g->GetCurrentCellVAlign() == DT_BOTTOM);  break;
         case ID_ALIGN_WRAP:   pCmdUI->SetCheck(g->GetCurrentCellWrap() ? 1 : 0);         break;
-        case ID_ALIGN_MERGE:  pCmdUI->Enable(FALSE); break;  // roadmapped — Grid32 merge not yet implemented
+        case ID_ALIGN_MERGE:  pCmdUI->SetCheck(g->IsCurrentCellMerged() ? 1 : 0); break;
         }
 }
 
@@ -973,20 +1036,13 @@ void CMainFrame::OnEditSelectAll()
         if (CGridCtrl* g = ActiveGrid()) g->SelectAll();
 }
 
+// Excel semantics: a click arms the painter for one application, a click
+// while armed disarms it, and a double-click (ID_FORMAT_PAINTER_LOCK, from
+// CFormatPainterButton) keeps it armed until it is clicked again.
 void CMainFrame::OnFormatPainter()
 {
-        // Excel semantics:
-        //   - First click  arms one-shot
-        //   - Second click within the double-click window promotes to persistent
-        //   - Any later click disarms
         if (m_bFormatPainterArmed)
         {
-                const DWORD elapsed = GetTickCount() - m_dwFormatPainterArmTime;
-                if (!m_bFormatPainterPersistent && elapsed < GetDoubleClickTime())
-                {
-                        m_bFormatPainterPersistent = TRUE;
-                        return;
-                }
                 m_bFormatPainterArmed = FALSE;
                 m_bFormatPainterPersistent = FALSE;
                 return;
@@ -996,7 +1052,20 @@ void CMainFrame::OnFormatPainter()
         if (!g->GetCurrentCellFontInfo(m_capturedFont)) return;
         m_bFormatPainterArmed = TRUE;
         m_bFormatPainterPersistent = FALSE;
-        m_dwFormatPainterArmTime = GetTickCount();
+}
+
+// The ribbon never re-sends a button's command for the second click of a
+// double-click, so promoting by timing two ID_FORMAT_PAINTER commands could
+// never happen (S9). The double-click arrives here instead, after the first
+// click has already armed (or disarmed) the painter.
+void CMainFrame::OnFormatPainterLock()
+{
+        CGridCtrl* g = ActiveGrid();
+        if (!g) return;
+        if (!m_bFormatPainterArmed && !g->GetCurrentCellFontInfo(m_capturedFont))
+                return;
+        m_bFormatPainterArmed = TRUE;
+        m_bFormatPainterPersistent = TRUE;
 }
 
 void CMainFrame::OnUpdateFormatPainter(CCmdUI* pCmdUI)
@@ -1024,16 +1093,12 @@ void CMainFrame::OnEditClear()
 {
         CGridCtrl* g = ActiveGrid();
         if (!g) return;
-        // Clear cell text across the current selection via GM_FILLCELLS with an
-        // empty source. FILL_TEXT alone preserves cell formatting (matches the
-        // Excel Delete-key behavior); a future "Clear All" can OR in more flags.
-        GCFILLSTRUCT fs{};
-        fs.m_cbSize          = sizeof(GCFILLSTRUCT);
-        fs.m_dwFillHow       = FILLBYTEXT;
-        fs.m_dwFillWhat      = FILL_TEXT;
-        fs.m_dwFillRange     = FILLBYCURRENTSELECTION;
-        fs.m_wsText          = L"";
-        ::SendMessage(g->GetSafeHwnd(), GM_FILLCELLS, 0, (LPARAM)&fs);
+        // WM_CLEAR clears the contents of the selection, formulas included,
+        // keeps the formatting, recalculates once and is one undo step. Going
+        // through GM_FILLCELLS with empty text left formulas behind to come
+        // back on the next recalc, created a cell for every empty position,
+        // and could not be undone (S4).
+        g->SendMessage(WM_CLEAR);
 }
 
 void CMainFrame::OnCellFont()
@@ -1044,13 +1109,13 @@ void CMainFrame::OnCellFont()
         FONTINFO fi{};
         if (!g->GetCurrentCellFontInfo(fi))
         {
-                fi.m_wsFontFace = L"Calibri";
+                wcscpy_s(fi.m_szFontFace, L"Calibri");
                 fi.m_fPointSize = 11.0f;
                 fi.bWeight      = FW_NORMAL;
         }
 
         LOGFONT lf{};
-        wcscpy_s(lf.lfFaceName, LF_FACESIZE, fi.m_wsFontFace.c_str());
+        wcscpy_s(lf.lfFaceName, LF_FACESIZE, fi.m_szFontFace);
         HDC hdc = ::GetDC(nullptr);
         lf.lfHeight    = -MulDiv((int)(fi.m_fPointSize + 0.5f), GetDeviceCaps(hdc, LOGPIXELSY), 72);
         ::ReleaseDC(nullptr, hdc);
@@ -1067,7 +1132,7 @@ void CMainFrame::OnCellFont()
 
         LOGFONT out{};
         dlg.GetCurrentFont(&out);
-        fi.m_wsFontFace    = out.lfFaceName;
+        wcsncpy_s(fi.m_szFontFace, out.lfFaceName, _TRUNCATE);
         // CHOOSEFONT.iPointSize is in tenths of a point.
         fi.m_fPointSize    = dlg.m_cf.iPointSize / 10.0f;
         fi.bWeight         = (UINT)out.lfWeight;
@@ -1083,19 +1148,27 @@ void CMainFrame::OnDlgAlignment()
         CGridCtrl* g = ActiveGrid();
         if (!g) return;
 
+        // DT_LEFT and DT_TOP are both 0, so a 0 here is a real setting, not
+        // "unset": treating it as unset turned Top into Middle (S8).
         CAlignmentDlg dlg(this);
-        dlg.m_hAlign = g->GetCurrentCellHAlign();
-        dlg.m_vAlign = g->GetCurrentCellVAlign();
-        dlg.m_bWrap  = g->GetCurrentCellWrap();
-        if (!dlg.m_hAlign) dlg.m_hAlign = DT_LEFT;
-        if (!dlg.m_vAlign) dlg.m_vAlign = DT_VCENTER;
+        const UINT hAlign = g->GetCurrentCellHAlign();
+        const UINT vAlign = g->GetCurrentCellVAlign();
+        const BOOL bWrap  = g->GetCurrentCellWrap();
+        dlg.m_hAlign = hAlign;
+        dlg.m_vAlign = vAlign;
+        dlg.m_bWrap  = bWrap;
 
         if (dlg.DoModal() != IDOK)
                 return;
 
-        g->SetSelectionHAlign(dlg.m_hAlign);
-        g->SetSelectionVAlign(dlg.m_vAlign);
-        g->SetSelectionWrap(dlg.m_bWrap);
+        // Write only what the user changed, so OK doesn't flatten a selection
+        // whose cells are aligned differently.
+        if (dlg.m_hAlign != hAlign)
+                g->SetSelectionHAlign(dlg.m_hAlign);
+        if (dlg.m_vAlign != vAlign)
+                g->SetSelectionVAlign(dlg.m_vAlign);
+        if (!dlg.m_bWrap != !bWrap)
+                g->SetSelectionWrap(dlg.m_bWrap);
 }
 
 void CMainFrame::OnDlgNumber()
@@ -1131,7 +1204,16 @@ void CMainFrame::OnSortCmd(UINT nID)
         CGridCtrl* g = ActiveGrid();
         if (!g) return;
         GRIDSELECTION sel{};
-        ::SendMessage(g->GetSafeHwnd(), GM_GETSELECTION, 0, (LPARAM)&sel);
+        g->GetSelection(sel);
+        // A single cell means "sort the sheet by this column": the rows of
+        // the used range, keyed on the active cell's column.
+        if (sel.start.nRow == sel.end.nRow && sel.start.nCol == sel.end.nCol)
+        {
+                GRIDSELECTION used{};
+                if (!g->GetUsedRange(used))
+                        return;
+                sel = used;
+        }
         GCSORTSTRUCT ss{};
         ss.m_cbSize     = sizeof(GCSORTSTRUCT);
         ss.m_sortSel    = sel;
@@ -1143,30 +1225,32 @@ void CMainFrame::OnFillCmd(UINT nID)
 {
         CGridCtrl* g = ActiveGrid();
         if (!g) return;
-        GRIDSELECTION sel{};
-        ::SendMessage(g->GetSafeHwnd(), GM_GETSELECTION, 0, (LPARAM)&sel);
-
-        // Pick the source corner of the selection. OnFillCells doesn't use the
-        // direction flag itself; we encode direction here by choosing refCell.
-        GRIDPOINT refCell{};
-        switch (nID)
-        {
-        case ID_FILL_DOWN:  refCell = sel.start; break;                                // top-left
-        case ID_FILL_RIGHT: refCell = sel.start; break;                                // top-left
-        case ID_FILL_UP:    refCell = { sel.end.nRow, sel.start.nCol }; break;         // bottom-left
-        case ID_FILL_LEFT:  refCell = { sel.start.nRow, sel.end.nCol }; break;         // top-right
-        default: return;
-        }
-
+        // The grid fills each column (down/up) or row (right/left) of the
+        // selection from its own edge cell. Choosing one corner here made Fill
+        // Down and Fill Right copy the same cell everywhere, and an upward
+        // drag fill in reverse (S7).
         GCFILLSTRUCT fs{};
         fs.m_cbSize        = sizeof(GCFILLSTRUCT);
         fs.m_dwFillHow     = FILLBYREFCELL;
-        fs.m_dwFillWhat    = FILL_TEXT | FILL_COLOR | FILL_FONT | FILL_POINTSIZE | FILL_EFFECTS;
+        fs.m_dwFillWhat    = FILL_ALL;
         fs.m_dwFillRange   = FILLBYCURRENTSELECTION;
-        fs.m_refCell       = refCell;
+        switch (nID)
+        {
+        case ID_FILL_DOWN:  fs.m_dwFillDirection = FILL_DOWN;  break;
+        case ID_FILL_RIGHT: fs.m_dwFillDirection = FILL_RIGHT; break;
+        case ID_FILL_UP:    fs.m_dwFillDirection = FILL_UP;    break;
+        case ID_FILL_LEFT:  fs.m_dwFillDirection = FILL_LEFT;  break;
+        default: return;
+        }
         ::SendMessage(g->GetSafeHwnd(), GM_FILLCELLS, 0, (LPARAM)&fs);
 }
 
+// Find Next wraps around the sheet once. Replace changes every occurrence in
+// the current match and moves on to the next one; it used to change only the
+// first occurrence and stay put (S6). Replace All is one grid operation and
+// one undo step: looping on GM_REPLACETEXT never finished when the
+// replacement contained the search text (H5), and counted cells, not
+// replacements (S6).
 LRESULT CMainFrame::OnFindReplaceMsg(WPARAM, LPARAM lParam)
 {
         CFindReplaceDialog* dlg = CFindReplaceDialog::GetNotifier(lParam);
@@ -1179,27 +1263,39 @@ LRESULT CMainFrame::OnFindReplaceMsg(WPARAM, LPARAM lParam)
         CGridCtrl* g = ActiveGrid();
         if (!g) return 0;
 
-        // Start the next search just past the current cell so repeated Find Next
-        // moves forward instead of re-matching the cell we're already on.
-        GRIDPOINT cur{};
-        g->GetCurrentCell(cur);
-        GRIDPOINT next = cur;
-        if (dlg->SearchDown()) { next.nCol += 1; }
-        else                    { if (next.nCol == 0) { if (next.nRow) { --next.nRow; next.nCol = 0xFFFF; } } else --next.nCol; }
-
         CString findStr = dlg->GetFindString();
         CT2W wFind(findStr);
+        const BOOL bDown = dlg->SearchDown();
+
+        // Search from the cell after (or before) the active one, then from the
+        // other end of the sheet.
+        auto findNext = [&]() -> BOOL {
+                GRIDPOINT cur{};
+                g->GetCurrentCell(cur);
+                GCFINDSTRUCT fs{};
+                fs.m_cbSize = sizeof(fs);
+                fs.m_pwszFindText = wFind;
+                fs.m_bMatchCase = dlg->MatchCase();
+                fs.m_bSearchForward = bDown;
+                fs.m_startCell = cur;
+                if (bDown)
+                        fs.m_startCell.nCol += 1;
+                else if (cur.nCol > 0)
+                        fs.m_startCell.nCol -= 1;
+                else if (cur.nRow > 0)
+                        fs.m_startCell = { cur.nRow - 1, (UINT)-1 };
+                else
+                        fs.m_startCell = { (UINT)-1, (UINT)-1 };
+                if ((bDown || cur.nRow > 0 || cur.nCol > 0) && g->FindText(fs))
+                        return TRUE;
+                fs.m_startCell = bDown ? GRIDPOINT{ 0, 0 } : GRIDPOINT{ (UINT)-1, (UINT)-1 };
+                return g->FindText(fs);
+        };
 
         if (dlg->FindNext())
         {
-                GCFINDSTRUCT fs{};
-                fs.m_cbSize = sizeof(fs);
-                fs.m_wsFindText = (LPCWSTR)wFind;
-                fs.m_startCell = next;
-                fs.m_bMatchCase = dlg->MatchCase();
-                fs.m_bSearchForward = dlg->SearchDown();
-                if (!g->FindText(fs))
-                        AfxMessageBox(_T("No more matches."), MB_OK | MB_ICONINFORMATION);
+                if (!findNext())
+                        AfxMessageBox(_T("No matches."), MB_OK | MB_ICONINFORMATION);
                 return 0;
         }
 
@@ -1208,27 +1304,32 @@ LRESULT CMainFrame::OnFindReplaceMsg(WPARAM, LPARAM lParam)
                 CT2W wRepl(dlg->GetReplaceString());
                 GCREPLACESTRUCT rs{};
                 rs.m_cbSize = sizeof(rs);
-                rs.m_wsFindText = (LPCWSTR)wFind;
-                rs.m_wsReplaceText = (LPCWSTR)wRepl;
+                rs.m_pwszFindText = wFind;
+                rs.m_pwszReplaceText = wRepl;
                 rs.m_bMatchCase = dlg->MatchCase();
                 rs.m_bSearchForward = TRUE;
 
                 if (dlg->ReplaceCurrent())
                 {
-                        rs.m_startCell = cur;       // operate on the current match, don't skip past it
-                        g->ReplaceText(rs);
+                        // Replace in the active cell if it matches, otherwise
+                        // in the next match; then show the match after it.
+                        g->GetCurrentCell(rs.m_startCell);
+                        if (!g->ReplaceText(rs))
+                        {
+                                rs.m_startCell = { 0, 0 };
+                                if (!g->ReplaceText(rs))
+                                {
+                                        AfxMessageBox(_T("No matches."), MB_OK | MB_ICONINFORMATION);
+                                        return 0;
+                                }
+                        }
+                        findNext();
                         return 0;
                 }
 
-                rs.m_startCell = { 0, 0 };
-                int count = 0;
-                while (g->ReplaceText(rs))
-                {
-                        ++count;
-                        g->GetCurrentCell(rs.m_startCell);
-                        rs.m_startCell.nCol += 1;   // advance past last replacement
-                }
-                CString msg; msg.Format(_T("%d replacement(s) made."), count);
+                const UINT count = g->ReplaceAll(rs);
+                CString msg;
+                msg.Format(_T("%u replacement(s) made."), count);
                 AfxMessageBox(msg, MB_OK | MB_ICONINFORMATION);
         }
         return 0;

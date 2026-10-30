@@ -37,7 +37,6 @@ protected: // create from serialization only
         void SetupInsertPanel();
         void SetupClipboardPanel();
         void SetupSortFillPanel();
-        void ApplyCurrentFont();
         // Convenience: active grid control on the active view, or nullptr.
         CGridCtrl* ActiveGrid();
 
@@ -72,8 +71,7 @@ protected:  // control bar embedded members
     COLORREF          m_cellBkg;
     CFindReplaceDialog* m_pFindReplace = nullptr;  // modeless; self-deletes on close
     BOOL  m_bFormatPainterArmed = FALSE;
-    BOOL  m_bFormatPainterPersistent = FALSE;
-    DWORD m_dwFormatPainterArmTime = 0;   // GetTickCount of last arm; used to detect double-click promotion
+    BOOL  m_bFormatPainterPersistent = FALSE;   // armed by a double-click: stays on until clicked again
     FONTINFO m_capturedFont;
 public:
     // Called by CGridView when a cell is clicked. Returns true if the click
@@ -131,6 +129,7 @@ public:
 	afx_msg void OnEditSelectAll();
 	afx_msg void OnEditClear();
 	afx_msg void OnFormatPainter();
+	afx_msg void OnFormatPainterLock();
 	afx_msg void OnUpdateFormatPainter(CCmdUI* pCmdUI);
 	afx_msg LRESULT OnFindReplaceMsg(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnCellFont();

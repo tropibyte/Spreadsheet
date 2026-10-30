@@ -26,7 +26,6 @@
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #endif
-#include "GotoDlg.h"
 
 
 // CSpreadsheetView
@@ -40,12 +39,9 @@ BEGIN_MESSAGE_MAP(CSpreadsheetView, CGridView)
 	ON_COMMAND(ID_FILE_PRINT_PREVIEW, &CSpreadsheetView::OnFilePrintPreview)
 	ON_WM_CONTEXTMENU()
 	ON_WM_RBUTTONUP()
-	ON_COMMAND(ID_EDIT_PASTE, &CSpreadsheetView::OnEditPaste)
-	ON_COMMAND(ID_EDIT_CUT, &CSpreadsheetView::OnEditCut)
-	ON_COMMAND(ID_EDIT_COPY, &CSpreadsheetView::OnEditCopy)
-	ON_COMMAND(ID_EDIT_SELECT_ALL, &CSpreadsheetView::OnEditSelectAll)
-	ON_COMMAND(ID_CELL_GOTO, &CSpreadsheetView::OnCellGoto)
-	ON_COMMAND(ID_CELL_FONT, &CSpreadsheetView::OnCellFont)
+	// Cut/Copy/Paste/Undo/Redo are CGridView's; Select All, Go To, Cell Font,
+	// Find and Replace are CMainFrame's. The stubs this map used to bind to
+	// those IDs shadowed the working handlers (H1, H2, M16).
 END_MESSAGE_MAP()
 
 // CSpreadsheetView construction/destruction
@@ -62,23 +58,12 @@ CSpreadsheetView::~CSpreadsheetView()
 
 BOOL CSpreadsheetView::PreCreateWindow(CREATESTRUCT& cs)
 {
-	// TODO: Modify the Window class or styles here by modifying
-	//  the CREATESTRUCT cs
-	cs.style |= GS_SPREADSHEET | WS_VISIBLE;
+	// The grid's GS_* styles belong on the grid child (CGridView::OnCreate);
+	// OR'd into the view's own style they only collided with the low-word
+	// control style bits (M21).
+	cs.style |= WS_VISIBLE;
 
 	return CGridView::PreCreateWindow(cs);
-}
-
-// CSpreadsheetView drawing
-
-void CSpreadsheetView::OnDraw(CDC* /*pDC*/)
-{
-	CSpreadsheetDoc* pDoc = GetDocument();
-	ASSERT_VALID(pDoc);
-	if (!pDoc)
-		return;
-
-	// TODO: add draw code for native data here
 }
 
 
@@ -90,22 +75,6 @@ void CSpreadsheetView::OnFilePrintPreview()
 #ifndef SHARED_HANDLERS
 	AFXPrintPreview(this);
 #endif
-}
-
-BOOL CSpreadsheetView::OnPreparePrinting(CPrintInfo* pInfo)
-{
-	// default preparation
-	return DoPreparePrinting(pInfo);
-}
-
-void CSpreadsheetView::OnBeginPrinting(CDC* /*pDC*/, CPrintInfo* /*pInfo*/)
-{
-	// TODO: add extra initialization before printing
-}
-
-void CSpreadsheetView::OnEndPrinting(CDC* /*pDC*/, CPrintInfo* /*pInfo*/)
-{
-	// TODO: add cleanup after printing
 }
 
 void CSpreadsheetView::OnRButtonUp(UINT /* nFlags */, CPoint point)
@@ -144,51 +113,3 @@ CSpreadsheetDoc* CSpreadsheetView::GetDocument() const // non-debug version is i
 
 
 // CSpreadsheetView message handlers
-
-
-
-
-
-void CSpreadsheetView::OnEditCut()
-{
-	// TODO: Add your command handler code here
-	MessageBox(L"Cut", L"Spreadsheet");
-}
-
-void CSpreadsheetView::OnEditCopy()
-{
-	// TODO: Add your command handler code here
-	MessageBox(L"Copy", L"Spreadsheet");
-}
-
-void CSpreadsheetView::OnEditPaste()
-{
-	// TODO: Add your command handler code here
-	MessageBox(L"Paste", L"Spreadsheet");
-}
-
-
-
-void CSpreadsheetView::OnEditSelectAll()
-{
-	// TODO: Add your command handler code here
-}
-
-
-void CSpreadsheetView::OnCellGoto()
-{
-	CGotoDlg dlg;
-	if (dlg.DoModal() == IDOK)
-	{
-		if (SetCurrentCell(dlg.m_cellRef.GetString(), dlg.nWhich))
-		{
-			//  handle error
-		}
-	}
-}
-
-
-void CSpreadsheetView::OnCellFont()
-{
-	// TODO: Add your command handler code here
-}

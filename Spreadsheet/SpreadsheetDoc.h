@@ -31,6 +31,7 @@ public:
 // Overrides
 public:
 	virtual BOOL OnNewDocument();
+	virtual void DeleteContents();
 	virtual void Serialize(CArchive& ar);
 	virtual BOOL OnOpenDocument(LPCTSTR lpszPathName);
 	virtual BOOL OnSaveDocument(LPCTSTR lpszPathName);
@@ -47,7 +48,12 @@ public:
 	virtual void Dump(CDumpContext& dc) const;
 #endif
 
+	virtual BOOL SaveModified();
+
 protected:
+	virtual BOOL DoSave(LPCTSTR lpszPathName, BOOL bReplace = TRUE);
+	// Commit any cell edit still open in this document's views.
+	void CommitPendingEdits();
 
 // Generated message map functions
 protected:

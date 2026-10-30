@@ -3,26 +3,29 @@
 #include "grid32_internal.h"
 #include <new>
 #include <exception>
+#include <cstddef>
 #include <windowsx.h>
 #include <commctrl.h>   // NM_CLICK / NM_KEYDOWN / NM_SETFOCUS / NM_KILLFOCUS / NM_RETURN
 
-GRIDPOINT MakeGridPointFromWPARAM(WPARAM wParam)
+// Cell coordinates arrive by pointer (see grid32.h). They used to be packed
+// into one WPARAM as 16-bit halves, which capped every message at 65535 rows
+// and columns, and GM_SETCURRENTCELL packed them the other way round from
+// everything else (M2, M3).
+static const GRIDPOINT* GridPointArg(WPARAM w)
 {
-    GRIDPOINT pt;
-    pt.nCol = LOWORD(wParam);
-    pt.nRow = HIWORD(wParam);
-    return pt;
+    return reinterpret_cast<const GRIDPOINT*>(w);
 }
 
 LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-    bool bCallDefault = true;
     CGrid32Mgr* pMgr = reinterpret_cast<CGrid32Mgr*>(GetWindowLongPtr(hWnd, 0));
     if (pMgr == nullptr && uMsg != WM_NCCREATE)
     {
-        // Catastrophic failure
-        MessageBox(hWnd, _T("Catastrophic failure: CGrid32Mgr instance is nullptr."), _T("Error"), MB_ICONERROR);
-        return -1; // or an appropriate error code
+        // Messages can arrive before WM_NCCREATE (WM_GETMINMAXINFO) and after
+        // WM_NCDESTROY. There is nothing to route them to; a message box here
+        // used to re-enter the message pump from inside the window procedure
+        // (H22).
+        return DefWindowProc(hWnd, uMsg, wParam, lParam);
     }
 
     try
@@ -37,7 +40,7 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
             // and at WM_NCCREATE we don't have one yet.
             pMgr = new (std::nothrow) CGrid32Mgr();
             if (!pMgr)
-                return -1;
+                return FALSE;
 
             pMgr->m_hWndGrid = hWnd;
             SetWindowLongPtr(hWnd, 0, reinterpret_cast<LONG_PTR>(pMgr));
@@ -90,10 +93,10 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         break;
         case WM_HSCROLL:
             pMgr->OnHScroll(LOWORD(wParam), HIWORD(wParam), (HWND)lParam);
-            break;
+            return 0;
         case WM_VSCROLL:
             pMgr->OnVScroll(LOWORD(wParam), HIWORD(wParam), (HWND)lParam);
-            break;
+            return 0;
         case WM_KEYDOWN:
             {
                 GRIDNMHDR h{};
@@ -110,6 +113,12 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
                 return 0;
             }
 
+            break;
+        case WM_CHAR:
+            // Typing starts an edit here, from the character the keyboard
+            // layout and IME produced (H14).
+            if (pMgr->OnChar((WCHAR)wParam))
+                return 0;
             break;
         case WM_SETFOCUS:
             pMgr->SendGridNotification(NM_SETFOCUS);
@@ -128,6 +137,9 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         case WM_LBUTTONDOWN:
             pMgr->OnLButtonDown((UINT)wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
             break;
+        case WM_LBUTTONDBLCLK:
+            pMgr->OnLButtonDblClk((UINT)wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+            return 0;
 
         case WM_LBUTTONUP:
             pMgr->OnLButtonUp((UINT)wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
@@ -157,7 +169,7 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         }
         case WM_MOUSEWHEEL:
             pMgr->OnMouseWheel((short)GET_WHEEL_DELTA_WPARAM(wParam), (UINT)wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
-            break;
+            return 0;
         case WM_RBUTTONDOWN:
             pMgr->OnRButtonDown((UINT)wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
             break;
@@ -189,56 +201,66 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
             EndPaint(hWnd, &ps);
             return 0; // Indicate that we have handled the message
         }
+        case WM_PRINTCLIENT:
+        {
+            // Paint the whole client area into the DC we are given, so
+            // PrintWindow, AnimateWindow and screenshots see the grid.
+            PAINTSTRUCT ps{};
+            ps.hdc = reinterpret_cast<HDC>(wParam);
+            GetClientRect(hWnd, &ps.rcPaint);
+            if (ps.hdc)
+                pMgr->OnPaint(ps);
+            return 0;
+        }
         case WM_CLEAR:
             pMgr->OnClear();
-            break;
+            return 0;
 
         case WM_COPY:
             pMgr->OnCopy();
-            break;
+            return 0;
 
         case WM_CUT:
             pMgr->OnCut();
-            break;
+            return 0;
 
         case WM_PASTE:
             pMgr->OnPaste();
-            break;
+            return 0;
 
         case WM_UNDO:
-            pMgr->OnUndo();
-            {
-                GRIDNMHDR h{}; h.cellPt = pMgr->m_currentCell; h.range = pMgr->m_selectionRect;
-                pMgr->SendGridNotification(GN_CELLCHANGED, &h);
-            }
-            break;
         case GM_REDO:
-            pMgr->OnRedo();
             {
-                GRIDNMHDR h{}; h.cellPt = pMgr->m_currentCell; h.range = pMgr->m_selectionRect;
-                pMgr->SendGridNotification(GN_CELLCHANGED, &h);
+                // GN_CELLCHANGED names what the undo actually changed, and is
+                // not sent at all when there was nothing to undo (S13).
+                GRIDSELECTION changed{};
+                const bool ok = uMsg == WM_UNDO ? pMgr->OnUndo(&changed) : pMgr->OnRedo(&changed);
+                if (ok)
+                {
+                    GRIDNMHDR h{};
+                    h.cellPt = changed.start;
+                    h.range = changed;
+                    pMgr->SendGridNotification(GN_CELLCHANGED, &h);
+                }
+                return ok;
             }
-            break;
         case GM_CANUNDO:
             return pMgr->OnCanUndo();
-            //break;
         case GM_CANREDO:
             return pMgr->OnCanRedo();
-            //break;
         case GM_SETCELL:
         {
-            if (lParam)
-            {
-                GRIDPOINT pt = MakeGridPointFromWPARAM(wParam);
-                pMgr->SetCell(pt.nRow, pt.nCol, *reinterpret_cast<PGRIDCELL>(lParam));
-                GRIDNMHDR h{}; h.cellPt = pt;
-                pMgr->SendGridNotification(GN_CELLCHANGED, &h);
-            }
-            else
+            const GRIDPOINT* pt = GridPointArg(wParam);
+            if (!pt || !lParam)
             {
                 pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
+                return FALSE;
             }
-            break;
+            if (!pMgr->OnSetCellInfo(*pt, *reinterpret_cast<const GCCELLINFO*>(lParam)))
+                return FALSE;
+            GRIDNMHDR h{}; h.cellPt = *pt; h.range = { *pt, *pt };
+            pMgr->SendGridNotification(GN_CELLCHANGED, &h);
+            return TRUE;
         }
         case GM_GETLASTERROR:
             return pMgr->dwError;
@@ -276,170 +298,243 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
             return pMgr->GetRowHeight((size_t)wParam);
 
         case GM_SETSELECTION:
-            pMgr->OnSetSelection(reinterpret_cast<GRIDSELECTION*>(lParam));
+            // No GN_SELCHANGE for a selection that was rejected (S13).
+            if (!lParam || !pMgr->OnSetSelection(reinterpret_cast<const GRIDSELECTION*>(lParam)))
             {
-                GRIDNMHDR h{}; h.cellPt = pMgr->m_currentCell; h.range = pMgr->m_selectionRect;
-                pMgr->SendGridNotification(GN_SELCHANGE, &h);
+                if (!lParam)
+                    pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
+                return FALSE;
             }
-            break;
+            pMgr->NotifySelChange();
+            return TRUE;
 
         case GM_GETSELECTION:
             pMgr->OnGetSelection(reinterpret_cast<GRIDSELECTION*>(lParam));
-            break;
+            return lParam != 0;
 
         case GM_SETCHARFORMAT:
-            if (lParam)
             {
-                GRIDNMHDR h{};
-                if (wParam == SCF_RANGE)
+                // These used to fall through to DefWindowProc and return 0,
+                // so every CGridCtrl wrapper reported failure (H17).
+                if (!lParam)
+                {
+                    pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
+                    return FALSE;
+                }
+                const WPARAM which = wParam & ~(WPARAM)SCF_MASKED;
+                CELLFONT fi;
+                DWORD mask = GCFM_ALL;
+                GRIDSELECTION range{};
+                if (which == SCF_RANGE || (wParam & SCF_MASKED))
                 {
                     LPGCCELLCHARFORMAT pCF = reinterpret_cast<LPGCCELLCHARFORMAT>(lParam);
-                    if (pCF->m_cbSize == sizeof(GCCELLCHARFORMAT))
+                    if (pCF->m_cbSize >= sizeof(GCCELLCHARFORMAT))
+                        mask = pCF->m_dwMask;
+                    else if (pCF->m_cbSize != offsetof(GCCELLCHARFORMAT, m_dwMask))
                     {
-                        pMgr->SetRangeFormat(pCF->m_range, pCF->m_format);
-                        h.range = pCF->m_range;
-                        h.cellPt = pCF->m_range.start;
+                        pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
+                        return FALSE;
                     }
-                }
-                else if (wParam == SCF_SELECTION)
-                {
-                    PFONTINFO pInfo = reinterpret_cast<PFONTINFO>(lParam);
-                    pMgr->SetSelectionFormat(*pInfo);
-                    h.range = pMgr->m_selectionRect;
-                    h.cellPt = pMgr->m_currentCell;
+                    fi = CellFontFrom(pCF->m_format);
+                    range = pCF->m_range;
                 }
                 else
                 {
-                    PFONTINFO pInfo = reinterpret_cast<PFONTINFO>(lParam);
-                    pMgr->SetCellFormat(pMgr->m_currentCell.nRow, pMgr->m_currentCell.nCol, *pInfo);
-                    h.cellPt = pMgr->m_currentCell;
+                    fi = CellFontFrom(*reinterpret_cast<PFONTINFO>(lParam));
                 }
+
+                GRIDNMHDR h{};
+                switch (which)
+                {
+                case SCF_RANGE:
+                    pMgr->SetRangeFormat(range, fi, mask);
+                    pMgr->NormalizeSelectionRect(range);
+                    h.range = range;
+                    h.cellPt = range.start;
+                    break;
+                case SCF_SELECTION:
+                    pMgr->SetSelectionFormat(fi, mask);
+                    h.range = pMgr->GetNormalizedSelection();
+                    h.cellPt = pMgr->m_currentCell;
+                    break;
+                case SCF_CURRENTCELL:
+                    pMgr->SetCellFormat(pMgr->m_currentCell.nRow, pMgr->m_currentCell.nCol, fi, mask);
+                    h.cellPt = pMgr->m_currentCell;
+                    h.range = { h.cellPt, h.cellPt };
+                    break;
+                default:
+                    pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
+                    return FALSE;
+                }
+                if (pMgr->dwError)
+                    return FALSE;
                 pMgr->SendGridNotification(GN_CELLCHANGED, &h);
+                return TRUE;
             }
-            break;
 
         case GM_SETCELLTEXT:
             {
-                GRIDPOINT pt = MakeGridPointFromWPARAM(wParam);
-                pMgr->SetCellText(pt, reinterpret_cast<LPCWSTR>(lParam));
-                GRIDNMHDR h{}; h.cellPt = pt;
+                const GRIDPOINT* pt = GridPointArg(wParam);
+                if (!pt)
+                {
+                    pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
+                    return FALSE;
+                }
+                pMgr->SetCellText(*pt, reinterpret_cast<LPCWSTR>(lParam));
+                if (pMgr->dwError)
+                    return FALSE;
+                GRIDNMHDR h{}; h.cellPt = *pt; h.range = { *pt, *pt };
                 pMgr->SendGridNotification(GN_CELLCHANGED, &h);
+                return TRUE;
             }
-            break;
 
         case GM_GETCELLTEXT:
         {
-            if (!lParam)
+            const GRIDPOINT* pt = GridPointArg(wParam);
+            if (!pt || !lParam)
             {
                 pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
                 return 0;
             }
 
-            return pMgr->OnGetCellText(MakeGridPointFromWPARAM(wParam), reinterpret_cast<GRID_GETTEXT*>(lParam));
+            return pMgr->OnGetCellText(*pt, reinterpret_cast<GRID_GETTEXT*>(lParam));
         }
         case GM_SETREDRAW:
             pMgr->m_bRedraw = wParam != 0 ? TRUE : FALSE;
-            break;
+            if (pMgr->m_bRedraw)
+                pMgr->Invalidate();
+            return 0;
 
         case GM_GETREDRAW:
             return pMgr->m_bRedraw ? TRUE : FALSE;
 
         case GM_SETCURRENTCELL:
+            // Both forms move through MoveCurrentCell, which collapses the
+            // selection onto the cell and sends the one GN_SELCHANGE.
+            if (wParam)
+                return pMgr->OnSetCurrentCell(reinterpret_cast<LPCWSTR>(lParam), (short)wParam);
+            if (!lParam)
             {
-                BOOL ok;
-                if (wParam)
-                {
-                    LPCWSTR pwszRef = (LPCWSTR)lParam;
-                    ok = pMgr->OnSetCurrentCell(pwszRef, (short)wParam);
-                }
-                else
-                {
-                    UINT nRow = LOWORD(lParam);
-                    UINT nCol = HIWORD(lParam);
-                    ok = pMgr->OnSetCurrentCell(nRow, nCol);
-                }
-                if (ok)
-                {
-                    GRIDNMHDR h{}; h.cellPt = pMgr->m_currentCell; h.range = pMgr->m_selectionRect;
-                    pMgr->SendGridNotification(GN_SELCHANGE, &h);
-                }
-                return ok;
+                pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
+                return FALSE;
+            }
+            {
+                const GRIDPOINT* pt = reinterpret_cast<const GRIDPOINT*>(lParam);
+                return pMgr->OnSetCurrentCell(pt->nRow, pt->nCol);
             }
         case GM_GETCURRENTCELL:
-        {
-            return MAKELRESULT(pMgr->m_currentCell.nCol, pMgr->m_currentCell.nRow);
-        }
+            if (!lParam)
+            {
+                pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
+                return FALSE;
+            }
+            *reinterpret_cast<GRIDPOINT*>(lParam) = pMgr->m_currentCell;
+            return TRUE;
         case GM_INCREMENTCURRENTCELL:
             pMgr->OnIncrementCell((UINT)wParam, (GRIDPOINT *)lParam);
-            break;
+            return 0;
 
         case GM_FILLCELLS:
             if (lParam)
             {
-                pMgr->OnFillCells(wParam, *(LPGCFILLSTRUCT)lParam);
-                GRIDNMHDR h{}; h.range = pMgr->m_selectionRect; h.cellPt = h.range.start;
+                const GCFILLSTRUCT& fs = *(LPGCFILLSTRUCT)lParam;
+                GRIDSELECTION range = fs.m_dwFillRange == FILLBYRANGE ? fs.m_range : pMgr->GetNormalizedSelection();
+                pMgr->NormalizeSelectionRect(range);
+                if (!pMgr->OnFillCells(wParam, fs))
+                    return FALSE;
+                GRIDNMHDR h{}; h.range = range; h.cellPt = range.start;
                 pMgr->SendGridNotification(GN_CELLCHANGED, &h);
+                return TRUE;
             }
-            break;
+            pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
+            return FALSE;
         case GM_SORTCELLS:
-            if(lParam)
+            if (lParam)
             {
                 LPGCSORTSTRUCT ss = (GCSORTSTRUCT*)lParam;
-                pMgr->OnSortCells(wParam, *ss);
-                GRIDNMHDR h{}; h.range = ss->m_sortSel; h.cellPt = ss->m_sortSel.start;
+                if (!pMgr->OnSortCells(wParam, *ss))
+                    return FALSE;
+                GRIDSELECTION range = ss->m_sortSel;
+                pMgr->NormalizeSelectionRect(range);
+                GRIDNMHDR h{}; h.range = range; h.cellPt = range.start;
                 pMgr->SendGridNotification(GN_CELLCHANGED, &h);
+                return TRUE;
             }
-            break;
+            pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
+            return FALSE;
 
         case GM_FILTERCELLS:
-            if(lParam)
-                pMgr->OnFilterCells(wParam, *(GCFILTERSTRUCT*)lParam);
-            break;
+            if (lParam)
+                return pMgr->OnFilterCells(wParam, *(GCFILTERSTRUCT*)lParam);
+            pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
+            return FALSE;
         case GM_FINDTEXT:
             if (lParam)
                 return pMgr->OnFindText(*(LPGCFINDSTRUCT)lParam);
-            break;
+            return FALSE;
         case GM_REPLACETEXT:
             if (lParam)
             {
                 BOOL ok = pMgr->OnReplaceText(*(LPGCREPLACESTRUCT)lParam);
                 if (ok)
                 {
-                    GRIDNMHDR h{}; h.cellPt = pMgr->m_selectionRect.start;
+                    GRIDNMHDR h{}; h.cellPt = pMgr->m_currentCell;
+                    h.range = { h.cellPt, h.cellPt };
                     pMgr->SendGridNotification(GN_CELLCHANGED, &h);
                 }
                 return ok;
             }
-            break;
+            return FALSE;
+        case GM_REPLACEALL:
+            if (lParam)
+            {
+                UINT count = pMgr->OnReplaceAll(*(LPGCREPLACESTRUCT)lParam);
+                if (count)
+                {
+                    GRIDSELECTION used{};
+                    pMgr->OnGetUsedRange(&used);
+                    GRIDNMHDR h{}; h.cellPt = used.start; h.range = used;
+                    pMgr->SendGridNotification(GN_CELLCHANGED, &h);
+                }
+                return count;
+            }
+            return 0;
 
         case GM_SETFORMAT:
-            // wParam: SCF_CURRENTCELL / SCF_SELECTION / SCF_RANGE
-            // lParam: UINT format code (FMT_*) for current/selection;
-            //         GCCELLFORMAT* for range (range form unimplemented).
+            // wParam: SCF_CURRENTCELL / SCF_SELECTION
+            // lParam: UINT format code (FMT_*).
             {
                 GRIDNMHDR h{};
                 if (wParam == SCF_SELECTION)
                 {
                     pMgr->SetSelectionNumberFormat((UINT)lParam);
-                    h.range = pMgr->m_selectionRect; h.cellPt = pMgr->m_currentCell;
+                    h.range = pMgr->GetNormalizedSelection(); h.cellPt = pMgr->m_currentCell;
                 }
-                else
+                else if (wParam == SCF_CURRENTCELL)
                 {
                     pMgr->SetCellNumberFormat(pMgr->m_currentCell.nRow,
                                               pMgr->m_currentCell.nCol,
                                               (UINT)lParam);
                     h.cellPt = pMgr->m_currentCell;
+                    h.range = { h.cellPt, h.cellPt };
                 }
+                else
+                {
+                    pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
+                    return FALSE;
+                }
+                if (pMgr->dwError)
+                    return FALSE;
                 pMgr->SendGridNotification(GN_CELLCHANGED, &h);
+                return TRUE;
             }
-            break;
 
         case GM_GETCHARFORMAT:
             // lParam: PFONTINFO out-param. Reads the current cell's font.
             if (lParam) {
-                FONTINFO fi{};
+                CELLFONT fi;
                 if (pMgr->GetCurrentCellFontInfo(fi)) {
-                    *reinterpret_cast<PFONTINFO>(lParam) = fi;
+                    *reinterpret_cast<PFONTINFO>(lParam) = FontInfoFrom(fi);
                     return TRUE;
                 }
             }
@@ -448,25 +543,27 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         case GM_SETALIGN:
             // wParam: GA_HORIZ / GA_VERT / GA_WRAP
             // lParam: DT_* value for horiz/vert axis, or BOOL for wrap.
-            switch (wParam) {
-            case GA_HORIZ: pMgr->SetSelectionHAlign((UINT)lParam); break;
-            case GA_VERT:  pMgr->SetSelectionVAlign((UINT)lParam); break;
-            case GA_WRAP:  pMgr->SetSelectionWrap((BOOL)lParam);   break;
-            }
+            if (wParam != GA_HORIZ && wParam != GA_VERT && wParam != GA_WRAP)
             {
-                GRIDNMHDR h{}; h.range = pMgr->m_selectionRect; h.cellPt = pMgr->m_currentCell;
+                pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
+                return FALSE;
+            }
+            pMgr->SetSelectionAlignBits((UINT)wParam, wParam == GA_WRAP ? (lParam ? 1u : 0u) : (UINT)lParam);
+            if (pMgr->dwError)
+                return FALSE;
+            {
+                GRIDNMHDR h{}; h.range = pMgr->GetNormalizedSelection(); h.cellPt = pMgr->m_currentCell;
                 pMgr->SendGridNotification(GN_CELLCHANGED, &h);
             }
-            break;
+            return TRUE;
 
         case GM_GETALIGN:
             // wParam: GA_HORIZ / GA_VERT / GA_WRAP
             // Returns the matching DT_* value (horiz/vert) or 0/1 (wrap)
-            // for the current cell. Returns 0 if no cell exists.
+            // for the current cell.
             {
                 PGRIDCELL pCell = pMgr->GetCellOrDefault(pMgr->m_currentCell.nRow,
                                                          pMgr->m_currentCell.nCol);
-                if (!pCell) return 0;
                 switch (wParam) {
                 case GA_HORIZ: return (LRESULT)(pCell->justification & (DT_LEFT | DT_CENTER | DT_RIGHT));
                 case GA_VERT:  return (LRESULT)(pCell->justification & (DT_TOP | DT_VCENTER | DT_BOTTOM));
@@ -476,39 +573,113 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
             return 0;
 
         case GM_GETFORMAT:
-            // Returns the current cell's FMT_* number-format code, or
-            // FMT_GENERAL if no cell exists.
-            {
-                PGRIDCELL pCell = pMgr->GetCellOrDefault(pMgr->m_currentCell.nRow,
-                                                         pMgr->m_currentCell.nCol);
-                return pCell ? (LRESULT)pCell->m_nFormat : (LRESULT)FMT_GENERAL;
-            }
+            // Returns the current cell's FMT_* number-format code.
+            return (LRESULT)pMgr->GetCellOrDefault(pMgr->m_currentCell.nRow,
+                                                   pMgr->m_currentCell.nCol)->m_nFormat;
 
         case GM_SELECTALL:
-            {
-                GRIDSELECTION sel{};
-                sel.start = { 0, 0 };
-                sel.end   = { (UINT)pMgr->gcs.nHeight - 1, (UINT)pMgr->gcs.nWidth - 1 };
-                pMgr->OnSetSelection(&sel);
-                GRIDNMHDR h{}; h.cellPt = pMgr->m_currentCell; h.range = pMgr->m_selectionRect;
-                pMgr->SendGridNotification(GN_SELCHANGE, &h);
-            }
-            return 0;
+            if (!pMgr->OnSetSelection(nullptr))
+                return FALSE;
+            pMgr->NotifySelChange();
+            return TRUE;
 
         case GM_ENUMCELLS:
-            // Handle GM_ENUMCELLS
-            pMgr->OnEnumCells((GRIDCELL*)lParam, (UINT)wParam);
-            break;
+            // The count copied, or with a null array the count available.
+            // The value was discarded before (H18).
+            return (LRESULT)pMgr->OnEnumCells(reinterpret_cast<GRIDPOINT*>(lParam), (UINT)wParam);
+
+        case GM_COMMITEDIT:
+            if (wParam)
+                return pMgr->CommitEdit();
+            if (!pMgr->IsEditing())
+                return FALSE;
+            pMgr->CancelEdit();
+            return TRUE;
+
+        case GM_SETBACKGROUND:
+            {
+                GRIDNMHDR h{};
+                if (wParam == SCF_SELECTION)
+                {
+                    pMgr->SetSelectionBackground((COLORREF)lParam);
+                    h.range = pMgr->GetNormalizedSelection();
+                }
+                else if (wParam == SCF_CURRENTCELL)
+                {
+                    h.range = { pMgr->m_currentCell, pMgr->m_currentCell };
+                    pMgr->SetRangeBackground(h.range, (COLORREF)lParam);
+                }
+                else
+                {
+                    pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
+                    return FALSE;
+                }
+                if (pMgr->dwError)
+                    return FALSE;
+                h.cellPt = pMgr->m_currentCell;
+                pMgr->SendGridNotification(GN_CELLCHANGED, &h);
+                return TRUE;
+            }
+        case GM_GETBACKGROUND:
+            return (LRESULT)pMgr->GetCellOrDefault(pMgr->m_currentCell.nRow,
+                                                   pMgr->m_currentCell.nCol)->clrBackground;
+
+        case GM_MERGECELLS:
+            {
+                GRIDSELECTION sel = lParam ? *reinterpret_cast<const GRIDSELECTION*>(lParam)
+                                           : pMgr->GetNormalizedSelection();
+                const BOOL ok = wParam ? pMgr->MergeCells(sel) : pMgr->UnmergeCells(sel);
+                if (ok)
+                {
+                    pMgr->ExpandForMerges(sel);
+                    GRIDNMHDR h{}; h.range = sel; h.cellPt = sel.start;
+                    pMgr->SendGridNotification(GN_CELLCHANGED, &h);
+                    pMgr->NotifySelChange();
+                }
+                return ok;
+            }
+        case GM_GETMERGE:
+            {
+                const MERGERANGE* m = pMgr->FindMerge(pMgr->m_currentCell.nRow, pMgr->m_currentCell.nCol);
+                if (m && lParam)
+                    *reinterpret_cast<MERGERANGE*>(lParam) = *m;
+                return m != nullptr;
+            }
+
+        case GM_GETUSEDRANGE:
+            return pMgr->OnGetUsedRange(reinterpret_cast<GRIDSELECTION*>(lParam));
+        case GM_RENDERRANGE:
+            if (!lParam)
+            {
+                pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
+                return FALSE;
+            }
+            return pMgr->OnRenderRange(*reinterpret_cast<const GCRENDERSTRUCT*>(lParam));
 
         case GM_STREAMIN:
-            if (lParam)
-                pMgr->OnStreamIn(reinterpret_cast<LPGCSTREAM>(lParam));
-            break;
-
         case GM_STREAMOUT:
-            if (lParam)
-                pMgr->OnStreamOut(reinterpret_cast<LPGCSTREAM>(lParam));
-            break;
+            // TRUE when the stream's m_dwError came back 0. These used to fall
+            // through to DefWindowProc, so CGridCtrl::StreamIn/StreamOut
+            // reported failure every time (H17).
+            if (!lParam)
+            {
+                pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
+                return FALSE;
+            }
+            {
+                LPGCSTREAM pStream = reinterpret_cast<LPGCSTREAM>(lParam);
+                pStream->m_dwError = GRID_ERROR_INVALID_PARAMETER;   // until the call says otherwise
+                if (uMsg == GM_STREAMIN)
+                    pMgr->OnStreamIn(pStream);
+                else
+                    pMgr->OnStreamOut(pStream);
+                pMgr->SetLastError(pStream->m_dwError);
+                return pStream->m_dwError == 0;
+            }
+
+        case GM_CLEARALL:
+            pMgr->ClearAll();
+            return 0;
 
 
         }

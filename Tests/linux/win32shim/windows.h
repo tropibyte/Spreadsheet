@@ -51,6 +51,7 @@ struct tagNMHDR { HWND hwndFrom; UINT_PTR idFrom; UINT code; };
 typedef LRESULT (CALLBACK* WNDPROC)(HWND, UINT, WPARAM, LPARAM);
 #define UNREFERENCED_PARAMETER(P) ((void)(P))
 #define swprintf_s swprintf
+#define swscanf_s swscanf
 static inline int _wcsicmp(const wchar_t* a, const wchar_t* b) {
     for (;; ++a, ++b) {
         wchar_t ca = (wchar_t)towlower(*a), cb = (wchar_t)towlower(*b);

@@ -7,7 +7,7 @@ C++. This directory lets those parts build and run on Linux, so CI can catch
 regressions without a Windows runner.
 
 ```
-make check     # build and run all three suites
+make check     # build and run all five suites
 make clean
 ```
 
@@ -34,11 +34,13 @@ not on a case-sensitive filesystem.
 |---|---|---|
 | `Grid32Tests` | `../Grid32Tests.cpp` | `Grid32Detail::*` header helpers (dates, number parsing, formatting) |
 | `FormulatorTests` | `../FormulatorTests.cpp` + `Formulator.cpp` | the formula parser, against stub `CGrid32Mgr` members |
-| `GridMgrTests` | `GridMgrTests.cpp` + stubs + `Grid32Mgr.cpp`, `Formulator.cpp`, `EditWndProc.cpp` | the real manager: typing, recalculation, formats, CSV import |
+| `GridMgrTests` | `GridMgrTests.cpp` + stubs + `Grid32Mgr.cpp`, `Formulator.cpp`, `EditWndProc.cpp` | the real manager: typing and the editor's state, selection, undo, clear, fill, sort, filter, merge, find/replace, clipboard payloads, formats |
+| `FormulaRecalcTests` | `FormulaRecalcTests.cpp` + the same sources | the formula engine through the manager: recalculation, number formats on formula cells, grid-bounded references |
+| `StreamTests` | `StreamTests.cpp` + the same sources | import and export in every format, and `GM_CLEARALL` |
 
 The first two also build on Windows via `../run_tests.bat` and
-`../run_formulator_tests.bat`. `GridMgrTests` is Linux-only: it defines Win32
-symbols that would collide with the real ones.
+`../run_formulator_tests.bat`. The other three are Linux-only: they define
+Win32 symbols that would collide with the real ones.
 
 ## What this does and does not prove
 
@@ -48,19 +50,15 @@ already caught real bugs.
 
 It does **not** prove anything about behaviour that lives in Win32 itself:
 painting, hit-testing, scrolling, the clipboard, or the edit-control subclass.
-Those still need a Windows build and a human at the keyboard. Treat a green run
-here as "the logic is sound", not "it ships".
+`../Grid32LiveTests.cpp` (`../run_live_tests.bat`) covers part of that on
+Windows — a real Grid32 window, its inline editor, its paint and print
+rendering, driven through the message API — but mouse hit-testing and the
+clipboard still need a human at the keyboard. Treat a green run here as "the
+logic is sound", not "it ships".
 
 The MSVC build is covered separately by the `windows-build` job in
-`.github/workflows/ci.yml`, which compiles Grid32 for x64 and Win32 and runs
-the two portable suites under `cl.exe`. That job deliberately does not build
+`.github/workflows/ci.yml`, which compiles Grid32 for x64 and Win32, runs the
+two portable suites under `cl.exe`, and runs the live-window tests against the
+x64 DLL. That job deliberately does not build
 the MFC host — see the comment at the end of the workflow for why, and what it
 would cost to add.
-
-## Note on `-O0`
-
-The Makefile builds at `-O0` on purpose. `Grid32FormulaText::ResetText` is
-defined `inline` in `Formulator.cpp` but declared `extern` in `Grid32Mgr.cpp`
-and called from there; at `-O2` GCC inlines every use, drops the symbol, and
-the link fails with an undefined reference. That is `AUDIT_2026-09.md` **M23**.
-Raise the optimisation level once it is fixed.

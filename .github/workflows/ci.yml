@@ -62,6 +62,13 @@ jobs:
         shell: cmd
         run: Tests\run_formulator_tests.bat
 
+      # A real Grid32 window: the inline editor, painting, print rendering and
+      # the message API, which the headless suites cannot reach. Uses the x64
+      # Release DLL built above.
+      - name: Grid32 live-window tests
+        shell: cmd
+        run: Tests\run_live_tests.bat Grid32\x64\Release\Grid32.dll
+
       # NOT BUILT HERE: Spreadsheet.vcxproj, the MFC host.
       #
       # It sets UseOfMfc=Dynamic with PlatformToolset=v143, and the

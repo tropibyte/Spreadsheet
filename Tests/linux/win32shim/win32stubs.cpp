@@ -27,6 +27,9 @@ BOOL LineTo(HDC,int,int) { return 0; }
 int SetROP2(HDC,int) { return 0; }
 BOOL GetTextExtentPoint32W(HDC, LPCWSTR, int, SIZE*) { return 0; }
 BOOL PatBlt(HDC,int,int,int,int,DWORD) { return 0; }
+BOOL GetTextMetricsW(HDC, TEXTMETRICW*) { return 0; }
+int SaveDC(HDC) { return 0; }
+BOOL RestoreDC(HDC, int) { return 0; }
 HDC GetDC(HWND) { return nullptr; }
 int ReleaseDC(HWND, HDC) { return 0; }
 HDC BeginPaint(HWND, PAINTSTRUCT*) { return nullptr; }
@@ -40,6 +43,7 @@ BOOL DestroyWindow(HWND) { return 0; }
 BOOL ShowWindow(HWND, int) { return 0; }
 BOOL MoveWindow(HWND,int,int,int,int,BOOL) { return 0; }
 HWND SetFocus(HWND) { return nullptr; }
+HWND GetFocus() { return nullptr; }
 // SendGridNotification only posts when the grid has a parent.
 static int g_fakeParent = 0;
 HWND GetParent(HWND) { return &g_fakeParent; }
@@ -111,6 +115,9 @@ BOOL CloseClipboard() { return 0; }
 BOOL EmptyClipboard() { return 0; }
 HANDLE GetClipboardData(UINT) { return nullptr; }
 HANDLE SetClipboardData(UINT, HANDLE) { return nullptr; }
+UINT RegisterClipboardFormatW(LPCWSTR) { return 0xC000; }
+BOOL IsClipboardFormatAvailable(UINT) { return 0; }
+size_t GlobalSize(HGLOBAL) { return 0; }
 HGLOBAL GlobalAlloc(UINT, size_t) { return nullptr; }
 void* GlobalLock(HGLOBAL) { return nullptr; }
 BOOL GlobalUnlock(HGLOBAL) { return 0; }
