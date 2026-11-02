@@ -324,6 +324,32 @@ int wmain(int argc, wchar_t** argv)
     SetText(fresh, 2, 2, L"x");
     g_notifications.clear();
     CHECK(SendMessageW(fresh, WM_UNDO, 0, 0) == TRUE && Count(GN_CELLCHANGED) == 1, L"an undo sends one GN_CELLCHANGED");
+    {
+        // Alt+Page Down pages sideways; with Shift held it extends instead.
+        GRIDPOINT a1{ 0, 0 };
+        SendMessageW(fresh, GM_SETCURRENTCELL, 0, (LPARAM)&a1);
+        GRIDPOINT before{}, after{};
+        SendMessageW(fresh, GM_GETCURRENTCELL, 0, (LPARAM)&before);
+        CHECK(SendMessageW(fresh, WM_SYSKEYDOWN, VK_NEXT, 0x20000001) == 0, L"Alt+Page Down is handled");
+        SendMessageW(fresh, GM_GETCURRENTCELL, 0, (LPARAM)&after);
+        CHECK(after.nRow == 0 && after.nCol == 7, L"...and moves a screen right (7 columns)");
+        SendMessageW(fresh, WM_SYSKEYDOWN, VK_PRIOR, 0x20000001);
+        SendMessageW(fresh, GM_GETCURRENTCELL, 0, (LPARAM)&after);
+        CHECK(after.nCol == 0, L"Alt+Page Up moves back");
+        BYTE keys[256] = {};
+        GetKeyboardState(keys);
+        const BYTE shiftWas = keys[VK_SHIFT];
+        keys[VK_SHIFT] = 0x80;
+        SetKeyboardState(keys);
+        SendMessageW(fresh, WM_SYSKEYDOWN, VK_NEXT, 0x20000001);
+        keys[VK_SHIFT] = shiftWas;
+        SetKeyboardState(keys);
+        GRIDSELECTION sel{};
+        SendMessageW(fresh, GM_GETSELECTION, 0, (LPARAM)&sel);
+        SendMessageW(fresh, GM_GETCURRENTCELL, 0, (LPARAM)&after);
+        CHECK(after.nCol == 0 && sel.start.nCol == 0 && sel.end.nCol == 7,
+              L"Shift+Alt+Page Down extends the selection by a screen");
+    }
     GRIDSELECTION bad{ { 50, 0 }, { 60, 0 } };
     g_notifications.clear();
     CHECK(SendMessageW(fresh, GM_SETSELECTION, 0, (LPARAM)&bad) == FALSE && Count(GN_SELCHANGE) == 0,

@@ -107,6 +107,9 @@ public:
     bool Editing() const { return m_bEditing; }
     size_t CellCount() const { return mapCells.size(); }
     const GRIDCELL& Default() const { return m_defaultGridCell; }
+    // Gives the headless grid a client area, so paging has a screen to page by.
+    void SetClient(LONG w, LONG h) { m_clientRect = { 0, 0, w, h }; m_paintRect = m_clientRect; }
+    GRIDPOINT TopLeft() const { return m_visibleTopLeft; }
     // Moves the active cell without going through MoveCurrentCell, the way a
     // click or a scroll arrow used to while the editor still had focus.
     void PokeCurrentCell(UINT row, UINT col) { m_currentCell = { row, col }; }
@@ -509,6 +512,32 @@ TEST(Selection_EachMoveSendsOneSelChange)
     s.mgr().IncrementSelectedCell(-1, 0);
     s.mgr().IncrementSelectedCell(-1, 0);       // already at row 0: no move, no notification
     ASSERT_TRUE(StubCountNotifications(GN_SELCHANGE) == 1);
+}
+
+TEST(Selection_AltPagingMovesAScreenSideways)
+{
+    // 16 columns of 100 px; 770 px wide less the 70 px row header leaves
+    // room for 7 whole columns.
+    Sheet s(16, 64);
+    s.SetClient(770, 600);
+    ASSERT_TRUE(s.mgr().OnSysKeyDown(VK_NEXT));
+    ASSERT_TRUE(s.Cur().nCol == 7 && s.TopLeft().nCol == 7);
+    ASSERT_TRUE(SameSel(s.Sel(), 0, 7, 0, 7));
+    s.mgr().OnSysKeyDown(VK_NEXT);
+    ASSERT_TRUE(s.Cur().nCol == 14);
+    ASSERT_TRUE(s.TopLeft().nCol == 9);         // stops with column P at the right edge
+    s.mgr().OnSysKeyDown(VK_PRIOR);
+    ASSERT_TRUE(s.Cur().nCol == 7 && s.TopLeft().nCol == 2);
+    ASSERT_TRUE(!s.mgr().OnSysKeyDown(VK_F1));  // other Alt keys go to the host
+}
+
+TEST(Selection_ShiftAltPagingExtends)
+{
+    Sheet s(16, 64);
+    s.SetClient(770, 600);
+    s.mgr().IncrementSelectedPage(0, 1, true);  // what Shift+Alt+Page Down does
+    ASSERT_TRUE(s.Cur().nCol == 0);
+    ASSERT_TRUE(SameSel(s.Sel(), 0, 0, 0, 7));
 }
 
 TEST(Selection_SetSelectionClampsInsteadOfRejecting)

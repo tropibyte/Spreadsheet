@@ -114,6 +114,15 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
             }
 
             break;
+        case WM_SYSKEYDOWN:
+            // Alt+Page Up / Page Down page sideways; other Alt keys belong to
+            // the host's menus and ribbon, so they go on to DefWindowProc.
+            if (pMgr->OnSysKeyDown((UINT)wParam))
+            {
+                pMgr->Invalidate(false);
+                return 0;
+            }
+            break;
         case WM_CHAR:
             // Typing starts an edit here, from the character the keyboard
             // layout and IME produced (H14).

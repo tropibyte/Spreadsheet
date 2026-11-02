@@ -2072,8 +2072,10 @@ void CGrid32Mgr::IncrementSelectedCell(long nRow, long nCol, bool bExtend)
     MoveCurrentCell(row, (UINT)col, bExtend);
 }
 
-// Page Up / Page Down: move the view and the cell by one screenful, so the
-// cell keeps its place on screen.
+// Page Up / Page Down (and Alt+Page Up / Page Down sideways): move the view
+// and the cell by one screenful, so the cell keeps its place on screen. The
+// view stops where the last row or column reaches the far edge, rather than
+// scrolling on until only one is left showing.
 void CGrid32Mgr::IncrementSelectedPage(long nRow, long nCol, bool bExtend)
 {
     PAGESTAT pageStat;
@@ -2087,11 +2089,35 @@ void CGrid32Mgr::IncrementSelectedPage(long nRow, long nCol, bool bExtend)
     if (col < 0) col = 0;
     if (col >= (long long)gcs.nWidth) col = (long long)gcs.nWidth - 1;
 
+    const long long availW = (long long)m_clientRect.right - GetActualRowHeaderWidth();
+    const long long availH = (long long)m_clientRect.bottom - GetActualColHeaderHeight();
     if (nRow)
-        m_visibleTopLeft.nRow = StepVisibleRow(m_visibleTopLeft.nRow, nRow * rowsPerPage);
+    {
+        UINT top = StepVisibleRow(m_visibleTopLeft.nRow, nRow * rowsPerPage);
+        if (availH > 0 && gcs.nHeight > 0)
+        {
+            // The highest top row that still has the last row at the bottom.
+            UINT maxTop = (UINT)gcs.nHeight - 1;
+            long long h = (long long)RowH(maxTop);
+            while (maxTop > 0 && h + (long long)RowH(maxTop - 1) <= availH)
+                h += (long long)RowH(--maxTop);
+            if (top > maxTop)
+                top = maxTop;
+        }
+        m_visibleTopLeft.nRow = top;
+    }
     if (nCol)
     {
         long long left = (long long)m_visibleTopLeft.nCol + (long long)nCol * colsPerPage;
+        if (availW > 0 && gcs.nWidth > 0)
+        {
+            // The leftmost column that still has the last column at the right.
+            UINT maxLeft = (UINT)gcs.nWidth - 1;
+            long long w = (long long)ColW(maxLeft);
+            while (maxLeft > 0 && w + (long long)ColW(maxLeft - 1) <= availW)
+                w += (long long)ColW(--maxLeft);
+            left = std::min<long long>(left, maxLeft);
+        }
         m_visibleTopLeft.nCol = (UINT)std::max<long long>(0, std::min<long long>(left, (long long)gcs.nWidth - 1));
     }
     SetScrollRanges();
@@ -2228,6 +2254,17 @@ bool CGrid32Mgr::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
     // used to be guessed from the virtual-key code here, so F1 (0x70, 'p')
     // opened the editor (H14).
     return false;
+}
+
+// Alt+Page Up / Alt+Page Down: a screen left or right, as in Excel; with
+// Shift, the selection extends by a screen instead.
+bool CGrid32Mgr::OnSysKeyDown(UINT nChar)
+{
+    if (nChar != VK_PRIOR && nChar != VK_NEXT)
+        return false;
+    const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    IncrementSelectedPage(0, nChar == VK_PRIOR ? -1 : 1, shift);
+    return true;
 }
 
 bool CGrid32Mgr::OnKeyUp(UINT nChar, UINT nRepCnt, UINT nFlags)

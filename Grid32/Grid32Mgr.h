@@ -258,6 +258,7 @@ public:
 	void OnSize(UINT nType, int cx, int cy);
 	bool OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags);
 	bool OnKeyUp(UINT nChar, UINT nRepCnt, UINT nFlags);
+	bool OnSysKeyDown(UINT nChar);     // Alt+Page Up / Page Down
 	bool OnChar(WCHAR ch);
 	void GetCellByPoint(int x, int y, GRIDPOINT& gridPt);
 	void StartMouseTracking();
