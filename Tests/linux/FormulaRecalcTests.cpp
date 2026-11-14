@@ -48,8 +48,10 @@ struct TestReg { TestReg(const char* n, std::function<void()> f) { Tests().push_
 } while (0)
 
 #define ASSERT_TRUE(cond) do { if (!(cond)) FAIL_HERE("expected true: " #cond); } while (0)
+// Fails on NaN too: "> eps" is false for NaN, so a NaN (an error result)
+// used to pass every ASSERT_NEAR.
 #define ASSERT_NEAR(a, b, eps) do { double _da = (a), _db = (b); \
-    if (std::fabs(_da - _db) > (eps)) { std::cerr << "  (got " << _da << ", want " << _db << ")\n"; \
+    if (!(std::fabs(_da - _db) <= (eps))) { std::cerr << "  (got " << _da << ", want " << _db << ")\n"; \
     FAIL_HERE("expected " #a " near " #b); } } while (0)
 #define ASSERT_WSTR(expr, want) do { std::wstring _g = (expr); std::wstring _w = (want); \
     if (_g != _w) { std::wcerr << L"  (got \"" << _g << L"\", want \"" << _w << L"\")\n"; \
@@ -368,7 +370,7 @@ TEST(FormulaCell_BareReferenceToTextShowsTheText)
     s.Set(1, 1, L"=A2");
     ASSERT_WSTR(s.Text(1, 1), L"hello");          // was "0"
     s.Set(2, 1, L"=A1+1");
-    ASSERT_WSTR(s.Text(2, 1), L"1");              // was "ABC": the text leaked out
+    ASSERT_WSTR(s.Text(2, 1), L"#VALUE!");        // "ABC" is no number (it leaked out, then read as 0)
 }
 
 // ---- H21: references are bounded by the grid ------------------------------------

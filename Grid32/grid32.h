@@ -148,6 +148,11 @@ struct tagGCSTREAM;
 //   GM_SETCURRENTCELL wParam = 0,                lParam = const GRIDPOINT*
 //                     wParam = SETBYNAME / SETBYCOORDINATE, lParam = LPCWSTR
 //   GM_GETCURRENTCELL lParam = GRIDPOINT* (out); returns TRUE
+//
+// GM_SETCELLTEXT reads its text as typing does: "=..." is a formula, a
+// leading apostrophe makes the rest text ("'42" stores the text "42", without
+// the apostrophe), anything else becomes a number, date, boolean or text by
+// what it looks like. GM_SETCELL stores a GCCELLINFO as given.
 
 #define GM_REDO						(WM_USER + 1)
 #define GM_CANUNDO					(WM_USER + 2)

@@ -45,7 +45,9 @@ struct TestReg { TestReg(const char* n, std::function<void()> f) { Tests().push_
 #define ASSERT_TRUE(cond) do { if (!(cond)) FAIL_HERE("expected true: " #cond); } while (0)
 #define ASSERT_FALSE(cond) do { if ((cond)) FAIL_HERE("expected false: " #cond); } while (0)
 #define ASSERT_EQ(a, b) do { if (!((a) == (b))) FAIL_HERE("expected " #a " == " #b); } while (0)
-#define ASSERT_NEAR(a, b, eps) do { double _da = (a), _db = (b); if (std::fabs(_da - _db) > (eps)) FAIL_HERE("expected " #a " near " #b); } while (0)
+// Fails on NaN too: "> eps" is false for NaN, so a NaN (an error result)
+// used to pass every ASSERT_NEAR.
+#define ASSERT_NEAR(a, b, eps) do { double _da = (a), _db = (b); if (!(std::fabs(_da - _db) <= (eps))) FAIL_HERE("expected " #a " near " #b); } while (0)
 
 using namespace Grid32Detail;
 

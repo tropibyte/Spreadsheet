@@ -169,6 +169,21 @@ inline CellType InferType(const std::wstring& text, double& valueOut)
 // ---- Number formatting --------------------------------------------------
 // Render a value with thousands separators. helper: stringify integer with
 // commas every three digits.
+// Typed entry: a leading apostrophe makes the rest text, as in Excel ('42 is
+// the text "42", '=A1 the text "=A1"). The apostrophe is not part of the text.
+// NeedsTextPrefix says whether a text cell's text needs it to be typed back
+// as text: text that would otherwise be read as a number, date, TRUE/FALSE
+// or formula, or that starts with an apostrophe of its own.
+constexpr wchar_t kTextPrefix = L'\'';
+
+inline bool NeedsTextPrefix(const std::wstring& text)
+{
+    if (text.empty()) return false;
+    if (text[0] == L'=' || text[0] == kTextPrefix) return true;
+    double v = 0.0;
+    return InferType(text, v) != CT_Text;
+}
+
 inline std::wstring FormatWithThousands(long long whole)
 {
     std::wstring s;

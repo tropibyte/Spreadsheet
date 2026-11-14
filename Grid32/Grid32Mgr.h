@@ -207,7 +207,11 @@ public:
 	void GetCellText(UINT nRow, UINT nCol, LPWSTR pText, UINT nLen);
 	void SetCell(UINT nRow, UINT nCol, const GRIDCELL& gc);
 	void SetCurrentCellText(LPCWSTR newText);
-	void SetCellText(UINT nRow, UINT nCol, LPCWSTR newText);
+	// As typed into the cell: "=..." is a formula, "'..." is text (the
+	// apostrophe dropped), anything else is typed by InferType. `bTyped`
+	// false reads a leading apostrophe as part of the text, for imported
+	// data, where it is content.
+	void SetCellText(UINT nRow, UINT nCol, LPCWSTR newText, bool bTyped = true);
 	void SetCellText(const GRIDPOINT& gridPt, LPCWSTR newText);
 	void ClearCellText(UINT nRow, UINT nCol);
 	void DeleteCell(UINT nRow, UINT nCol);

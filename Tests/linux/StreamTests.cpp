@@ -601,7 +601,10 @@ TEST(Odf_RoundTripsTextAndTypedValues)
     ASSERT_TRUE(dst.Cell(5, 2)->m_eType == CT_Date);
     ASSERT_TRUE(dst.Cell(5, 2)->m_dValue == src.Cell(5, 2)->m_dValue);
     ASSERT_TRUE(!dst.Cell(5, 3)->m_bFormula);                // a result, by design
-    ASSERT_WSTR(dst.Text(5, 3), src.Text(5, 3));
+    // Exactly the result (0.6000000000000001), not its 15-digit display
+    // ("0.6"), which is what the display-text export used to write.
+    ASSERT_TRUE(dst.Cell(5, 3)->m_eType == CT_Number);
+    ASSERT_TRUE(dst.Cell(5, 3)->m_dValue == src.Cell(5, 3)->m_dValue);
     ASSERT_EQ(dst.CellCount(), src.CellCount());
 }
 
@@ -793,6 +796,40 @@ TEST(Dates_FormulaDateResultsExportAsDates)
     ASSERT_TRUE(RoundTrip(src, SF_SSF, dst));              // SSF keeps the formula
     ASSERT_TRUE(dst.Cell(0, 1)->m_bFormula && dst.Cell(0, 1)->m_eType == CT_Date);
     ASSERT_WSTR(dst.Text(0, 1), L"2024-01-16");
+}
+
+TEST(FormulaResults_ExportTheirValueWhateverTheFormat)
+{
+    // A formula's result was classified by its display text: under a
+    // currency or percent format it exported as the string "$1,234.57" or
+    // "25.00%", and under a Number format as 1234.57.
+    Sheet src;
+    src.Set(0, 0, L"=1234.5678");
+    src.mgr().SetCellNumberFormat(0, 0, FMT_CURRENCY);
+    src.Set(0, 1, L"=0.25");
+    src.mgr().SetCellNumberFormat(0, 1, FMT_PERCENT);
+    src.Set(0, 2, L"=1234.5678");
+    src.mgr().SetCellNumberFormat(0, 2, FMT_NUMBER);
+    src.Set(0, 3, L"=\"42\"");                              // text, though it looks like a number
+    src.Set(0, 4, L"=1/0");                                 // an error
+    const std::wstring xml = Out(src, SF_XML);
+    ASSERT_CONTAINS(xml, L"<Cell ss:StyleID=\"fmt3\"><Data ss:Type=\"Number\">1234.5678</Data>");
+    ASSERT_CONTAINS(xml, L"<Cell ss:StyleID=\"fmt4\"><Data ss:Type=\"Number\">0.25</Data>");
+    ASSERT_CONTAINS(xml, L"<Cell ss:StyleID=\"fmt1\"><Data ss:Type=\"Number\">1234.5678</Data>");
+    ASSERT_CONTAINS(xml, L"<Data ss:Type=\"String\">42</Data>");
+    ASSERT_CONTAINS(xml, L"<Data ss:Type=\"String\">#DIV/0!</Data>");
+    ASSERT_NOT_CONTAINS(xml, L"String\">$1,234.57");
+    const std::wstring odf = Out(src, SF_ODF);
+    ASSERT_CONTAINS(odf, L"office:value-type=\"float\" office:value=\"1234.5678\"><text:p>$1,234.57</text:p>");
+    ASSERT_CONTAINS(odf, L"office:value-type=\"float\" office:value=\"0.25\"><text:p>25.00%</text:p>");
+    ASSERT_CONTAINS(odf, L"office:value-type=\"string\"><text:p>42</text:p>");
+
+    Sheet dst;
+    ASSERT_TRUE(RoundTrip(src, SF_XML, dst));
+    ASSERT_TRUE(dst.Cell(0, 0)->m_eType == CT_Number && dst.Cell(0, 0)->m_dValue == 1234.5678);
+    ASSERT_WSTR(dst.Text(0, 0), L"$1,234.57");              // and its format
+    ASSERT_TRUE(dst.Cell(0, 1)->m_dValue == 0.25);
+    ASSERT_TRUE(dst.Cell(0, 3)->m_eType == CT_Text);
 }
 
 TEST(Xml_RoundTripsValuesTypesAndFormats)

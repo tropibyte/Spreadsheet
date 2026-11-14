@@ -208,7 +208,7 @@ void RenderFormulaResult(PGRIDCELL pCell, const CFormulator::Result& r)
     // keeps CT_Formula.
     const bool isDate = r.isDate && !r.isText && !r.isError;
     pCell->m_eType = isDate ? CT_Date : CT_Formula;
-    pCell->m_dValue = r.value;
+    pCell->m_dValue = r.isText ? std::numeric_limits<double>::quiet_NaN() : r.value;
     if (r.isText || r.isError)
     {
         pCell->m_wsText = r.text;
@@ -261,8 +261,9 @@ public:
         return slot;
     }
 
-    // As typed into the cell: "=..." is a formula, anything else is typed by
-    // InferType and rendered under the cell's number format (SetCellText).
+    // As typed into the cell: "=..." is a formula, "'..." is text (the
+    // apostrophe dropped), anything else is typed by InferType and rendered
+    // under the cell's number format (SetCellText).
     void Type(const CellKey& k, const std::wstring& text)
     {
         PGRIDCELL cell = GetOrCreate(k);
@@ -271,6 +272,12 @@ public:
             cell->m_bFormula = true;
             cell->m_wsFormula = text.substr(1);
             cell->m_eType = CT_Formula;
+        }
+        else if (!text.empty() && text[0] == Grid32Detail::kTextPrefix)
+        {
+            // '42 is the text "42", as in the grid: the apostrophe is dropped.
+            Literal(k, text.substr(1));
+            return;
         }
         else
         {
@@ -372,8 +379,9 @@ const char* const kHelp =
 "\n"
 "Cells\n"
 "  A1: <content>              type into A1, as in the grid:  A1: 5   A2: =A1*2\n"
-"  set A1 <content>           the same                       A3: hello\n"
-"  text A1 <content>          store as literal text, no type inference (\"42\" stays text)\n"
+"  set A1 <content>           the same                       A3: hello   A4: '42 (text)\n"
+"  text A1 <content>          store as literal text, as GM_SETCELL does (no inference,\n"
+"                             a leading ' kept)\n"
 "  A1                         inspect a cell: input, type, value, display, format\n"
 "  clear A1 | A1:B3 | all     empty cells\n"
 "  format A1[:B3] <name>      general number integer currency percent\n"
@@ -422,6 +430,9 @@ struct Console
     {
         if (!cell) return std::string();
         if (cell->m_bFormula) return "=" + Narrow(cell->m_wsFormula);
+        // What the grid's editor shows: text that needs its apostrophe has it.
+        if (cell->m_eType == CT_Text && Grid32Detail::NeedsTextPrefix(cell->m_wsText))
+            return "'" + Narrow(cell->m_wsText);
         return Narrow(cell->m_wsText);
     }
 
@@ -593,10 +604,10 @@ struct Console
                 Out(ref + ": " + InputOf(cell));
             else if (cell->m_eType == CT_Text && !cell->m_wsText.empty())
             {
-                // Text that InferType would type differently needs `text`.
-                double v = 0.0;
-                const bool retypes = Grid32Detail::InferType(cell->m_wsText, v) != CT_Text;
-                Out((retypes ? "text " + ref + " " : ref + ": ") + Narrow(cell->m_wsText));
+                // Text that typing would read as something else keeps its
+                // apostrophe, as the grid's editor shows it.
+                Out(ref + ": " + (Grid32Detail::NeedsTextPrefix(cell->m_wsText) ? "'" : "") +
+                    Narrow(cell->m_wsText));
             }
             else if (!cell->m_wsText.empty())
                 Out(ref + ": " + Narrow(Grid32Detail::FormatEditValue(cell->m_eType, cell->m_dValue, cell->m_wsText)));

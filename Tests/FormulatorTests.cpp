@@ -51,7 +51,9 @@ struct TestReg { TestReg(const char* n, std::function<void()> f) { Tests().push_
 
 #define ASSERT_TRUE(cond) do { if (!(cond)) FAIL_HERE("expected true: " #cond); } while (0)
 #define ASSERT_FALSE(cond) do { if ((cond)) FAIL_HERE("expected false: " #cond); } while (0)
-#define ASSERT_NEAR(a, b, eps) do { double _da = (a), _db = (b); if (std::fabs(_da - _db) > (eps)) { \
+// Fails on NaN too: "> eps" is false for NaN, so a NaN (an error result)
+// used to pass every ASSERT_NEAR.
+#define ASSERT_NEAR(a, b, eps) do { double _da = (a), _db = (b); if (!(std::fabs(_da - _db) <= (eps))) { \
     std::cerr << "  (got " << _da << ", want " << _db << ")\n"; FAIL_HERE("expected " #a " near " #b); } } while (0)
 
 // ---- stub sheet ------------------------------------------------------------
@@ -140,6 +142,20 @@ static double Eval(const wchar_t* formula)
     if (!e.empty() && e[0] == L'=') e = e.substr(1);
     std::set<std::pair<UINT, UINT>> visited;
     return CFormulator::EvalArg(g_sheet, e, visited);
+}
+
+// A formula's result is the text `want` (not an error).
+static bool IsText(const wchar_t* formula, const wchar_t* want)
+{
+    CFormulator::Result r = CFormulator::Evaluate(g_sheet, formula);
+    return r.isText && !r.isError && r.text == want;
+}
+
+// A formula's result is the error `code`, with a NaN value.
+static bool IsError(const wchar_t* formula, const wchar_t* code)
+{
+    CFormulator::Result r = CFormulator::Evaluate(g_sheet, formula);
+    return r.isError && !r.isText && r.text == code && std::isnan(r.value);
 }
 
 // A1=5 A2=7 A3=9 B1=2 B2=4
@@ -398,8 +414,11 @@ TEST(TextCells_NumericLookingTextReadsAsANumber)
     ASSERT_NEAR(Eval(L"=A2+0"), 20.0, 1e-9);     // was 0
     ASSERT_NEAR(Eval(L"=A3+0"), 0.25, 1e-12);    // was 25
     ASSERT_NEAR(Eval(L"=A4+0"), 42.0, 1e-9);
-    ASSERT_NEAR(Eval(L"=A5+0"), 0.0, 1e-9);      // was 12
-    ASSERT_NEAR(Eval(L"=A6+0"), 0.0, 1e-9);      // was 1
+    // Text that is not a number is #VALUE! in arithmetic, as in Excel (it
+    // read as 0 until the #VALUE! rule; before that std::stod read "12abc"
+    // as 12).
+    ASSERT_TRUE(IsError(L"A5+0", CFormulator::kErrorValue));
+    ASSERT_TRUE(IsError(L"A6+0", CFormulator::kErrorValue));
     ASSERT_NEAR(Eval(L"=A7+0"), -5.0, 1e-9);
     ASSERT_NEAR(Eval(L"=COUNT(A1:A7)"), 5.0, 1e-9);
 }
@@ -454,7 +473,7 @@ TEST(TextResult_DoesNotLeakIntoArithmetic)
     ASSERT_NEAR(r.value, 43.0, 1e-9);           // "42" reads as 42
     r = CFormulator::Evaluate(g_sheet, L"B1+1");
     ASSERT_FALSE(r.isText);
-    ASSERT_NEAR(r.value, 1.0, 1e-9);            // "X" reads as 0
+    ASSERT_TRUE(r.isError && r.text == CFormulator::kErrorValue);   // "X" is no number
 }
 
 TEST(BareReference_ShowsTheCellAsItIs)
@@ -518,7 +537,7 @@ TEST(Ranges_OutsideTheGridAreRejectedNotWalked)
     // loop counter wraps before it can pass UINT_MAX, so this spun forever.
     auto start = std::chrono::steady_clock::now();
     ASSERT_NEAR(Eval(L"=SUM(A1:A4294967296)"), 0.0, 1e-9);
-    ASSERT_NEAR(Eval(L"=AVERAGE(A1:A4294967296)"), 0.0, 1e-9);
+    ASSERT_TRUE(IsError(L"AVERAGE(A1:A4294967296)", CFormulator::kErrorDiv0));   // an average of nothing
     ASSERT_NEAR(Eval(L"=MAX(A4294967296:A1)"), 0.0, 1e-9);
     ASSERT_NEAR(Eval(L"=COUNT(A1:A4294967296)"), 0.0, 1e-9);
     ASSERT_TRUE(ElapsedSeconds(start) < 1.0);
@@ -603,7 +622,7 @@ TEST(Mod_TakesTheDivisorsSign)
     ASSERT_NEAR(Eval(L"=MOD(3,-2)"), -1.0, 1e-12);     // was 1
     ASSERT_NEAR(Eval(L"=MOD(-3,-2)"), -1.0, 1e-12);
     ASSERT_NEAR(Eval(L"=MOD(5.5,-2)"), -0.5, 1e-12);
-    ASSERT_NEAR(Eval(L"=MOD(1,0)"), 0.0, 1e-12);
+    ASSERT_TRUE(IsError(L"MOD(1,0)", CFormulator::kErrorDiv0));
     // An exact multiple is +0, not -0 (which displays as "-0").
     CFormulator::Result r = CFormulator::Evaluate(g_sheet, L"MOD(-6,3)");
     ASSERT_TRUE(r.value == 0.0 && !std::signbit(r.value));
@@ -662,7 +681,7 @@ TEST(TextFunction_DoesNotLeakThroughArithmetic)
     ASSERT_NEAR(r.value, -5.0, 1e-12);
     r = CFormulator::Evaluate(g_sheet, L"LEFT(\"x\",1)*2");
     ASSERT_FALSE(r.isText);
-    ASSERT_NEAR(r.value, 0.0, 1e-12);                           // "x" reads as 0
+    ASSERT_TRUE(r.isError && r.text == CFormulator::kErrorValue);   // "x" is no number
     r = CFormulator::Evaluate(g_sheet, L"IF(LEFT(\"1\",1),5,0)");
     ASSERT_FALSE(r.isText);                                     // the condition is consumed
     ASSERT_NEAR(r.value, 5.0, 1e-12);
@@ -723,11 +742,6 @@ TEST(CeilingFloorTrunc_RoundTheDecimalToo)
 }
 
 // ---- Text values: literals and comparisons ----------------------------------
-static bool IsText(const wchar_t* formula, const wchar_t* want)
-{
-    CFormulator::Result r = CFormulator::Evaluate(g_sheet, formula);
-    return r.isText && !r.isError && r.text == want;
-}
 
 TEST(StringLiterals_AreTextValues)
 {
@@ -742,7 +756,7 @@ TEST(StringLiterals_AreTextValues)
     ASSERT_NEAR(Eval(L"=LEN(\"a\"\"b\")"), 3.0, 1e-12);
     // Everything after a literal's closing quote used to be ignored in a
     // text function's argument.
-    ASSERT_TRUE(IsText(L"UPPER(\"a\"+1)", L"1"));
+    ASSERT_TRUE(IsError(L"UPPER(\"a\"+1)", CFormulator::kErrorValue));   // "a" is no number
     CFormulator::Result r = CFormulator::Evaluate(g_sheet, L"\"abc");
     ASSERT_TRUE(r.isError && r.text == CFormulator::kErrorSyntax);
 }
@@ -755,7 +769,7 @@ TEST(References_ToTextCarryTheText)
     ASSERT_TRUE(IsText(L"(A1)", L"hello"));
     ASSERT_TRUE(IsText(L"IF(1,A1,0)", L"hello"));
     ASSERT_TRUE(IsText(L"IF(1,A2,0)", L"ABC"));
-    ASSERT_NEAR(Eval(L"=A1+1"), 1.0, 1e-12);                     // still 0 in arithmetic
+    ASSERT_TRUE(IsError(L"A1+1", CFormulator::kErrorValue));     // text in arithmetic
 }
 
 TEST(Comparisons_CompareText)
@@ -780,7 +794,7 @@ TEST(Comparisons_CompareText)
     ASSERT_NEAR(Eval(L"=A3=42"), 1.0, 1e-12);
     ASSERT_NEAR(Eval(L"=A3>41"), 1.0, 1e-12);
     // Text in a comparison inside arithmetic is not mistaken for a sibling's.
-    ASSERT_NEAR(Eval(L"=LEFT(\"a\",1)*(A4=5)"), 0.0, 1e-12);
+    ASSERT_TRUE(IsError(L"LEFT(\"a\",1)*(A4=5)", CFormulator::kErrorValue));
     ASSERT_NEAR(Eval(L"=2*(A4=5)"), 2.0, 1e-12);
 }
 
@@ -802,11 +816,6 @@ TEST(Comparisons_BlankIsEmptyTextAndZero)
 }
 
 // ---- Error values (E2, part) --------------------------------------------------
-static bool IsError(const wchar_t* formula, const wchar_t* code)
-{
-    CFormulator::Result r = CFormulator::Evaluate(g_sheet, formula);
-    return r.isError && !r.isText && r.text == code && std::isnan(r.value);
-}
 
 TEST(Errors_MalformedFormulasAreSyntaxErrors)
 {
@@ -910,7 +919,8 @@ TEST(Aggregates_TakeSeveralArguments)
     ASSERT_NEAR(Eval(L"=MIN(A1:A3,0)"), 0.0, 1e-12);
     ASSERT_NEAR(Eval(L"=MAX(A1:A3,B1*10)"), 20.0, 1e-12);
     ASSERT_NEAR(Eval(L"=COUNT(A1:A3,1,\"x\",\"5\")"), 5.0, 1e-12);      // "x" is not a number
-    ASSERT_NEAR(Eval(L"=SUM(\"abc\",1)"), 1.0, 1e-12);
+    ASSERT_TRUE(IsError(L"SUM(\"abc\",1)", CFormulator::kErrorValue));   // given as text: no number
+    ASSERT_NEAR(Eval(L"=SUM(\"5\",1)"), 6.0, 1e-12);
     ASSERT_NEAR(Eval(L"=SUM(A1:A4097,1)"), 1.0, 1e-12);               // off the grid: nothing
     ASSERT_NEAR(Eval(L"=SUM(SUM(A1:A2),A3)"), 21.0, 1e-12);
 }
@@ -985,7 +995,7 @@ TEST(TextFunctions_HugeCountsDoNotOverflow)
     ASSERT_TRUE(IsText(L"LEFT(\"abc\",0)", L""));
     ASSERT_TRUE(IsText(L"RIGHT(\"abc\",2)", L"bc"));
     ASSERT_TRUE(IsText(L"MID(\"abcdef\",2.9,2.9)", L"bc"));
-    ASSERT_TRUE(IsText(L"MID(\"abcdef\",-5,2)", L"ab"));
+    ASSERT_TRUE(IsError(L"MID(\"abcdef\",-5,2)", CFormulator::kErrorValue));   // no position -5
     ASSERT_TRUE(IsText(L"MID(\"abcdef\",7,2)", L""));
 }
 
@@ -1119,8 +1129,9 @@ TEST(Value_ReadsNumericTextOrFails)
     ASSERT_TRUE(IsError(L"SUM(VALUE(A1),VALUE(A2))", CFormulator::kErrorValue));
     ASSERT_NEAR(Eval(L"=COUNT(VALUE(A1),VALUE(A2))"), 1.0, 1e-12);
     ASSERT_NEAR(Eval(L"=IF(1,5,VALUE(A2))"), 5.0, 1e-12);   // not evaluated, no error
-    // =A2+0 still reads "abc" as 0; VALUE is the strict reading.
-    ASSERT_NEAR(Eval(L"=A2+0"), 0.0, 1e-12);
+    // Arithmetic reads text the same way now.
+    ASSERT_TRUE(IsError(L"A2+0", CFormulator::kErrorValue));
+    ASSERT_NEAR(Eval(L"=A1+0"), 42.0, 1e-12);
     // One argument, and not none.
     ASSERT_TRUE(IsError(L"VALUE(A1,A2)", CFormulator::kErrorSyntax));
     ASSERT_TRUE(IsError(L"VALUE()", CFormulator::kErrorSyntax));
@@ -1263,7 +1274,7 @@ TEST(Ranges_WholeColumnsAndRows)
     // Columns or rows past the grid are rejected whole, as a cell range is.
     ASSERT_NEAR(Eval(L"=SUM(A:AAA)"), 0.0, 1e-12);
     ASSERT_NEAR(Eval(L"=SUM(4097:4097)"), 0.0, 1e-12);
-    ASSERT_NEAR(Eval(L"=SUM(1:4294967297)"), 0.0, 1e-12);
+    ASSERT_TRUE(CFormulator::Evaluate(g_sheet, L"SUM(1:4294967297)").isError);   // no such row
     // Mixed forms are not ranges; read as an expression, "A" is an unknown name.
     ASSERT_TRUE(IsError(L"SUM(A:1)", CFormulator::kErrorName));
     // A formula inside its own column reads itself as 0 (a cycle), as before.
@@ -1324,6 +1335,118 @@ TEST(IsError_And_IsBlank)
     SheetSet(3, 0, L"7");
     SheetCell(3, 0)->m_wsText.clear();
     ASSERT_NEAR(Eval(L"=ISBLANK(A4)"), 1.0, 1e-12);
+}
+
+// ---- #11: text where a number is needed -------------------------------------------
+TEST(TextInArithmetic_IsANumberOrValueError)
+{
+    SheetReset();
+    SheetSet(0, 0, L"hello");               // A1
+    SheetSetText(1, 0, L"42");              // A2: text "42"
+    SheetSet(2, 0, L"=\"\"");               // A3: a formula whose result is ""
+    // Text that reads as a number (or a date) is that number, as in Excel.
+    ASSERT_NEAR(Eval(L"=\"42\"+1"), 43.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=\"$1,234.50\"*2"), 2469.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=\"25%\"*4"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=\"2024-01-15\"+1"), 45307.0, 1e-12);  // date text, as in Excel
+    ASSERT_NEAR(Eval(L"=A2+1"), 43.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=-A2"), -42.0, 1e-12);
+    // Other text is #VALUE!. It read as 0.
+    ASSERT_TRUE(IsError(L"\"abc\"+1", CFormulator::kErrorValue));   // was 1
+    ASSERT_TRUE(IsError(L"1+\"abc\"", CFormulator::kErrorValue));
+    ASSERT_TRUE(IsError(L"A1*2", CFormulator::kErrorValue));        // was 0
+    ASSERT_TRUE(IsError(L"A1/2", CFormulator::kErrorValue));
+    ASSERT_TRUE(IsError(L"-A1", CFormulator::kErrorValue));
+    ASSERT_TRUE(IsError(L"A3+1", CFormulator::kErrorValue));        // "" is no number
+    ASSERT_TRUE(IsError(L"\"\"+1", CFormulator::kErrorValue));
+    // A blank cell is 0; unary plus and comparisons are not arithmetic.
+    ASSERT_NEAR(Eval(L"=Z9+1"), 1.0, 1e-12);
+    ASSERT_TRUE(IsText(L"+A1", L"hello"));
+    ASSERT_NEAR(Eval(L"=A1=\"hello\""), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=A1>5"), 1.0, 1e-12);
+    // The error travels like any other, and IFERROR catches it.
+    SheetSet(0, 1, L"=A1+1");               // B1
+    ASSERT_TRUE(IsError(L"B1*2", CFormulator::kErrorValue));
+    ASSERT_NEAR(Eval(L"=IFERROR(A1+1,0)"), 0.0, 1e-12);
+}
+
+TEST(NumericFunctions_ReadTextArguments)
+{
+    SheetReset();
+    SheetSet(0, 0, L"hello");               // A1
+    ASSERT_NEAR(Eval(L"=ABS(\"-5\")"), 5.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=ROUND(\"3.14159\",2)"), 3.14, 1e-12);
+    ASSERT_NEAR(Eval(L"=DATE(\"2024\",\"1\",\"15\")"), 45306.0, 1e-12);
+    ASSERT_TRUE(IsError(L"ABS(\"abc\")", CFormulator::kErrorValue));
+    ASSERT_TRUE(IsError(L"SQRT(A1)", CFormulator::kErrorValue));
+    ASSERT_TRUE(IsError(L"ROUND(1.5,\"x\")", CFormulator::kErrorValue));
+    ASSERT_TRUE(IsError(L"MOD(A1,2)", CFormulator::kErrorValue));
+    ASSERT_TRUE(IsError(L"SIN(A1)", CFormulator::kErrorValue));
+    ASSERT_TRUE(IsError(L"POWER(2,A1)", CFormulator::kErrorValue));
+    ASSERT_TRUE(IsError(L"LEFT(\"abc\",\"x\")", CFormulator::kErrorValue));
+    // Given as arguments to an aggregate, text counts when it is a number.
+    ASSERT_NEAR(Eval(L"=SUM(\"5\",1)"), 6.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=SUM(\"2024-01-15\")"), 45306.0, 1e-12);
+    ASSERT_TRUE(IsError(L"SUM(\"abc\",1)", CFormulator::kErrorValue));
+    ASSERT_TRUE(IsError(L"AVERAGE(\"x\")", CFormulator::kErrorValue));
+    ASSERT_TRUE(IsError(L"MAX(A1+0)", CFormulator::kErrorValue));
+    ASSERT_NEAR(Eval(L"=COUNT(\"abc\",1,\"5\")"), 2.0, 1e-12);    // COUNT just does not count it
+    // In a range, text is skipped as before.
+    ASSERT_NEAR(Eval(L"=SUM(A1:A3,1)"), 1.0, 1e-12);
+}
+
+TEST(Conditions_ReadTrueFalseTextAndRefuseOtherText)
+{
+    SheetReset();
+    SheetSet(0, 0, L"hello");               // A1
+    SheetSetText(1, 0, L"TRUE");            // A2: the text "TRUE"
+    ASSERT_NEAR(Eval(L"=IF(\"TRUE\",1,2)"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=IF(\"false\",1,2)"), 2.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=IF(A2,1,2)"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=IF(\"1\",1,2)"), 1.0, 1e-12);               // numeric text, as elsewhere
+    ASSERT_NEAR(Eval(L"=IF(Z9,1,2)"), 2.0, 1e-12);                  // blank is false
+    ASSERT_TRUE(IsError(L"IF(\"abc\",1,2)", CFormulator::kErrorValue));   // took the false branch
+    ASSERT_TRUE(IsError(L"IF(A1,1,2)", CFormulator::kErrorValue));
+    ASSERT_TRUE(IsError(L"IFS(A1,1)", CFormulator::kErrorValue));
+    ASSERT_NEAR(Eval(L"=NOT(\"FALSE\")"), 1.0, 1e-12);
+    ASSERT_TRUE(IsError(L"NOT(\"abc\")", CFormulator::kErrorValue));
+    // An error in the condition is the answer.
+    ASSERT_TRUE(IsError(L"IF(1/0,1,2)", CFormulator::kErrorDiv0));
+}
+
+TEST(IfAndIfs_ArgumentCountsAndNoMatch)
+{
+    StandardSheet();
+    ASSERT_TRUE(IsError(L"IF(1)", CFormulator::kErrorSyntax));           // read as 0
+    ASSERT_TRUE(IsError(L"IF(1,2,3,4)", CFormulator::kErrorSyntax));     // the 4th was ignored
+    ASSERT_NEAR(Eval(L"=IF(0,1)"), 0.0, 1e-12);                          // no else: 0 (FALSE)
+    ASSERT_TRUE(IsError(L"IFS()", CFormulator::kErrorSyntax));
+    ASSERT_TRUE(IsError(L"IFS(1)", CFormulator::kErrorSyntax));
+    ASSERT_TRUE(IsError(L"IFS(0,1,1)", CFormulator::kErrorSyntax));      // a condition with no value
+    ASSERT_TRUE(IsError(L"NOT()", CFormulator::kErrorSyntax));
+    // No condition true: #N/A, as in Excel. It read 0.
+    ASSERT_TRUE(IsError(L"IFS(0,1)", CFormulator::kErrorNA));
+    ASSERT_TRUE(IsError(L"IFS(A1>10,1,A1>9,2)", CFormulator::kErrorNA));
+    ASSERT_NEAR(Eval(L"=IFS(A1>10,1,A1>3,2)"), 2.0, 1e-12);
+    // #N/A is an error like the others.
+    ASSERT_TRUE(IsText(L"IFERROR(IFS(0,1),\"none\")", L"none"));
+    ASSERT_NEAR(Eval(L"=ISERROR(IFS(0,1))"), 1.0, 1e-12);
+    SheetSet(0, 2, L"=IFS(0,1)");                                        // C1
+    ASSERT_TRUE(IsError(L"C1+1", CFormulator::kErrorNA));
+}
+
+TEST(TextFunctions_RefuseNegativeCountsAndPositions)
+{
+    StandardSheet();
+    ASSERT_TRUE(IsError(L"LEFT(\"abc\",-1)", CFormulator::kErrorValue));     // was ""
+    ASSERT_TRUE(IsError(L"RIGHT(\"abc\",-1)", CFormulator::kErrorValue));
+    ASSERT_TRUE(IsError(L"MID(\"abcdef\",0,2)", CFormulator::kErrorValue));  // was "ab"
+    ASSERT_TRUE(IsError(L"MID(\"abcdef\",2,-1)", CFormulator::kErrorValue)); // was ""
+    ASSERT_TRUE(IsError(L"MID(\"abcdef\",2)", CFormulator::kErrorSyntax));   // MID takes three
+    ASSERT_TRUE(IsText(L"LEFT(\"abc\",0)", L""));
+    ASSERT_TRUE(IsText(L"MID(\"abcdef\",2,0)", L""));
+    ASSERT_TRUE(IsText(L"MID(\"abcdef\",2,3)", L"bcd"));
+    ASSERT_TRUE(IsText(L"LEFT(\"abc\",\"2\")", L"ab"));                     // numeric text counts
 }
 
 // ---- runner ----------------------------------------------------------------

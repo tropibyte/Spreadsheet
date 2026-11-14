@@ -34,7 +34,8 @@ public:
 	static constexpr const wchar_t* kErrorName = L"#NAME?";     // unknown function or name
 	static constexpr const wchar_t* kErrorDiv0 = L"#DIV/0!";    // division by zero
 	static constexpr const wchar_t* kErrorNum = L"#NUM!";       // no finite result
-	static constexpr const wchar_t* kErrorValue = L"#VALUE!";   // a value of the wrong kind (VALUE("abc"))
+	static constexpr const wchar_t* kErrorValue = L"#VALUE!";   // a value of the wrong kind ("abc"+1, VALUE("abc"))
+	static constexpr const wchar_t* kErrorNA = L"#N/A";         // no value to give (IFS with no condition true)
 
 	// IFERROR and ISERROR see every error but kErrorSyntax: a malformed
 	// formula is a mistake in the formula, not a value it produced, and

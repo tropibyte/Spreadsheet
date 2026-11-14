@@ -1446,7 +1446,7 @@ void CGrid32Mgr::SetCellText(const GRIDPOINT& gridPt, LPCWSTR newText)
 }
 
 
-void CGrid32Mgr::SetCellText(UINT nRow, UINT nCol, LPCWSTR newText)
+void CGrid32Mgr::SetCellText(UINT nRow, UINT nCol, LPCWSTR newText, bool bTyped)
 {
     if (nRow >= gcs.nHeight || nCol >= gcs.nWidth)
     {
@@ -1496,6 +1496,16 @@ void CGrid32Mgr::SetCellText(UINT nRow, UINT nCol, LPCWSTR newText)
         pCell->m_bFormula = true;
         pCell->m_wsFormula = newText + 1;
         RefreshFormulaCell(pCell);
+    } else if (bTyped && newText && newText[0] == Grid32Detail::kTextPrefix) {
+        // '42 is the text "42": the apostrophe says "text", and is not part
+        // of it (Excel's prefix). It was kept as a visible character, so a
+        // number could not be typed as text at all. EditTextOf puts it back
+        // for editing when the text needs it.
+        pCell->m_bFormula = false;
+        pCell->m_wsFormula.clear();
+        pCell->m_eType = CT_Text;
+        pCell->m_dValue = 0.0;
+        pCell->m_wsText = newText + 1;
     } else {
         pCell->m_bFormula = false;
         pCell->m_wsFormula.clear();
@@ -3104,15 +3114,40 @@ void CGrid32Mgr::OnIncrementCell(UINT direction, GRIDPOINT* pGridPoint)
 
 namespace {
 // The text a cell is edited as: a formula's source, or a formatted number's
-// plain value ("$1,234.50" edits as "1234.5"), else the text itself.
+// plain value ("$1,234.50" edits as "1234.5"), else the text itself — with
+// the apostrophe that keeps it text when typing it back would read it as
+// something else (the text "42" edits as '42). Committing the edit unchanged
+// therefore gives back the same cell, and so do fills and Replace, which
+// write what this returns through SetCellText.
 std::wstring EditTextOf(const GRIDCELL& cell)
 {
     if (cell.m_bFormula)
         return L"=" + cell.m_wsFormula;
     if (cell.m_eType != CT_Text && cell.m_nFormat != FMT_GENERAL)
         return Grid32Detail::FormatEditValue(cell.m_eType, cell.m_dValue, cell.m_wsText);
+    if (cell.m_eType == CT_Text && Grid32Detail::NeedsTextPrefix(cell.m_wsText))
+        return Grid32Detail::kTextPrefix + cell.m_wsText;
     return cell.m_wsText;
 }
+
+// What Replace searches and rewrites in a cell, and how to type the result
+// back. A text cell that only stays text with the apostrophe stays text: the
+// replacement works on its text, not on the prefix (Excel's Find does not see
+// the prefix either, and replacing "'" would otherwise turn every such cell
+// back into a number). Any other cell is rewritten as its edit text and read
+// again as typed.
+struct ReplaceSource
+{
+    std::wstring text;
+    bool keepAsText;
+    explicit ReplaceSource(const GRIDCELL& cell)
+        : keepAsText(!cell.m_bFormula && cell.m_eType == CT_Text &&
+                     Grid32Detail::NeedsTextPrefix(cell.m_wsText))
+    {
+        text = keepAsText ? cell.m_wsText : EditTextOf(cell);
+    }
+    std::wstring Typed() const { return keepAsText ? Grid32Detail::kTextPrefix + text : text; }
+};
 }
 
 void CGrid32Mgr::BeginEdit(bool bKeepText)
@@ -4482,14 +4517,14 @@ BOOL CGrid32Mgr::OnSortCells(WPARAM wParam, const GCSORTSTRUCT& sortStruct)
         Row row{ r, { true, false, 0.0, std::wstring() } };
         if (PGRIDCELL cell = GetCell(r, keyCol))
         {
-            double n = 0.0;
             row.key.text = cell->m_wsText;
             row.key.num = cell->m_dValue;
             row.key.isEmpty = cell->m_wsText.empty() && !cell->m_bFormula && cell->m_eType == CT_Text;
-            row.key.isNumeric = cell->m_eType == CT_Number || cell->m_eType == CT_Date ||
-                cell->m_eType == CT_Boolean ||
-                (cell->m_bFormula && std::isfinite(cell->m_dValue) &&
-                 (cell->m_nFormat != FMT_GENERAL || Grid32Detail::TryParseNumber(cell->m_wsText, n)));
+            // A formula sorts as a number exactly when it produced one:
+            // m_dValue is NaN for a text or error result.
+            row.key.isNumeric = cell->m_bFormula
+                ? std::isfinite(cell->m_dValue)
+                : (cell->m_eType == CT_Number || cell->m_eType == CT_Date || cell->m_eType == CT_Boolean);
         }
         rows.push_back(std::move(row));
     }
@@ -4739,11 +4774,11 @@ bool CGrid32Mgr::OnReplaceText(const GCREPLACESTRUCT& replaceStruct)
     auto visit = [&](auto it) -> bool {
         if (IsRowHidden(it->first.first))
             return false;
-        std::wstring source = EditTextOf(*it->second);
-        if (!ReplaceAllIn(source, findText, replaceText, matchCase))
+        ReplaceSource source(*it->second);
+        if (!ReplaceAllIn(source.text, findText, replaceText, matchCase))
             return false;
         const GRIDPOINT pt{ it->first.first, it->first.second };
-        SetCellText(pt.nRow, pt.nCol, source.c_str());
+        SetCellText(pt.nRow, pt.nCol, source.Typed().c_str());
         MoveCurrentCell(pt.nRow, pt.nCol, false);
         return true;
     };
@@ -4793,12 +4828,12 @@ UINT CGrid32Mgr::OnReplaceAll(const GCREPLACESTRUCT& replaceStruct)
     {
         if (IsRowHidden(entry.first.first))
             continue;
-        std::wstring source = EditTextOf(*entry.second);
-        const size_t n = ReplaceAllIn(source, findText, replaceText, matchCase);
+        ReplaceSource source(*entry.second);
+        const size_t n = ReplaceAllIn(source.text, findText, replaceText, matchCase);
         if (n)
         {
             count += (UINT)n;
-            edits.push_back({ { entry.first.first, entry.first.second }, std::move(source) });
+            edits.push_back({ { entry.first.first, entry.first.second }, source.Typed() });
         }
     }
     if (edits.empty())
@@ -4945,16 +4980,12 @@ ExportKind ClassifyForExport(const GRIDCELL& cell, double& number)
     case CT_Date:
         return ExportKind::Date;
     case CT_Formula:
-    {
-        // A formula's result is a number exactly when its display text is one.
-        double v = 0.0;
-        if (Grid32Detail::TryParseNumber(cell.m_wsText, v) && std::isfinite(v))
-        {
-            number = v;
-            return ExportKind::Number;
-        }
-        return ExportKind::String;
-    }
+        // A formula's result is a number exactly when m_dValue is finite
+        // (text and error results hold NaN; see ApplyFormulaResult), and the
+        // number is m_dValue itself. Reading it back from the display text
+        // exported a formatted result as the string "$1,234.57" or "25.00%",
+        // and a Number-formatted 1234.5678 as 1234.57.
+        return std::isfinite(number) ? ExportKind::Number : ExportKind::String;
     default:
         return ExportKind::String;
     }
@@ -6421,7 +6452,7 @@ void CGrid32Mgr::OnStreamIn(LPGCSTREAM pStream)
                 slot = pCell.release();
             }
             else
-                SetCellText(sc.row, sc.col, sc.text.c_str());
+                SetCellText(sc.row, sc.col, sc.text.c_str(), false);   // a leading ' is content here
             if (sc.format != FMT_GENERAL)
             {
                 PGRIDCELL pCell = GetCell(sc.row, sc.col);
@@ -6510,7 +6541,12 @@ static void ApplyFormulaResult(PGRIDCELL pCell, const CFormulator::Result& r)
     // keeps CT_Formula.
     const bool isDate = r.isDate && !r.isText && !r.isError;
     pCell->m_eType = isDate ? CT_Date : CT_Formula;
-    pCell->m_dValue = r.value;
+    // m_dValue is the number a formula produced, and NaN when it produced
+    // text (as for an error): sorting and export go by "finite or not"
+    // instead of parsing the display text, which a number format turns into
+    // "$1,234.57" or "25.00%". A text result used to keep its text read as a
+    // number here, so ="zzz" under a number format sorted as 0.
+    pCell->m_dValue = r.isText ? std::numeric_limits<double>::quiet_NaN() : r.value;
     if (r.isText || r.isError)
     {
         pCell->m_wsText = r.text;

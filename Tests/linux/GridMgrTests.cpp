@@ -45,8 +45,10 @@ struct TestReg { TestReg(const char* n, std::function<void()> f) { Tests().push_
 } while (0)
 
 #define ASSERT_TRUE(cond) do { if (!(cond)) FAIL_HERE("expected true: " #cond); } while (0)
+// Fails on NaN too: "> eps" is false for NaN, so a NaN (an error result)
+// used to pass every ASSERT_NEAR.
 #define ASSERT_NEAR(a, b, eps) do { double _da = (a), _db = (b); \
-    if (std::fabs(_da - _db) > (eps)) { std::cerr << "  (got " << _da << ", want " << _db << ")\n"; \
+    if (!(std::fabs(_da - _db) <= (eps))) { std::cerr << "  (got " << _da << ", want " << _db << ")\n"; \
     FAIL_HERE("expected " #a " near " #b); } } while (0)
 // Wide text goes to std::cerr as narrow text: writing to std::wcerr as well
 // mixed stream orientations, and the FAIL lines went missing.
@@ -821,6 +823,32 @@ TEST(Sort_KeyColumnAndBlanksLast)
     ASSERT_WSTR(s.Text(2, 0), L"row1");         // the blank stays last descending
 }
 
+TEST(Sort_FormulaResultsSortByWhatTheyAre)
+{
+    // A text result under a number format sorted as the number 0: between
+    // -3 and 5 rather than after the numbers.
+    Sheet s;
+    s.Set(0, 0, L"5");
+    s.Set(1, 0, L"=\"zzz\"");
+    s.mgr().SetCellNumberFormat(1, 0, FMT_NUMBER);
+    s.Set(2, 0, L"-3");
+    s.Set(3, 0, L"=1/0");
+    s.mgr().SetCellNumberFormat(3, 0, FMT_NUMBER);
+    s.Set(4, 0, L"=2*1");
+    s.mgr().SetCellNumberFormat(4, 0, FMT_CURRENCY);         // "$2.00": a number all the same
+    GCSORTSTRUCT ss{};
+    ss.m_cbSize = sizeof(ss);
+    ss.m_sortSel = { { 0, 0 }, { 4, 0 } };
+    ss.m_bAscending = TRUE;
+    ASSERT_TRUE(s.mgr().OnSortCells(0, ss));
+    ASSERT_WSTR(s.Text(0, 0), L"-3");
+    ASSERT_WSTR(s.Text(1, 0), L"$2.00");
+    ASSERT_WSTR(s.Text(2, 0), L"5");
+    ASSERT_WSTR(s.Text(3, 0), L"#DIV/0!");                  // text, in text order
+    ASSERT_WSTR(s.Text(4, 0), L"zzz");
+    ASSERT_TRUE(std::isnan(s.Value(4, 0)));                 // a text result holds no number
+}
+
 // ---- AUDIT_2026-10 S10 and AUDIT_2026-09 H7/H9/M6/M8: formatting --------------
 TEST(Format_WholeGridStylesTheDefaultCellNotEveryPosition)
 {
@@ -1027,6 +1055,117 @@ TEST(Copy_PrivateFormatKeepsFormulasAndFormats)
 }
 
 // ---- AUDIT_2026-10 S13, AUDIT_2026-09 M9 / M20 / P7 ----------------------------
+// ---- the apostrophe prefix -----------------------------------------------------
+static CellType TypeOf(Sheet& s, UINT r, UINT c)
+{
+    PGRIDCELL p = s.mgr().GetCell(r, c);
+    return p ? p->m_eType : CT_Text;
+}
+
+TEST(Apostrophe_TypesTheRestAsText)
+{
+    // There was no way to type a number as text: '42 kept the apostrophe as
+    // a visible character, and "42" in quotes keeps its quotes (as in Excel).
+    Sheet s;
+    s.Set(0, 0, L"'42");
+    ASSERT_WSTR(s.Text(0, 0), L"42");
+    ASSERT_TRUE(TypeOf(s, 0, 0) == CT_Text);
+    s.Set(1, 0, L"'=A1");                        // a formula's text, not a formula
+    ASSERT_WSTR(s.Text(1, 0), L"=A1");
+    ASSERT_TRUE(!s.mgr().GetCell(1, 0)->m_bFormula);
+    s.Set(2, 0, L"''x");                         // one apostrophe of its own
+    ASSERT_WSTR(s.Text(2, 0), L"'x");
+    s.Set(3, 0, L"'2024-01-15");
+    ASSERT_TRUE(TypeOf(s, 3, 0) == CT_Text);
+    s.Set(4, 0, L"'TRUE");
+    ASSERT_TRUE(TypeOf(s, 4, 0) == CT_Text);
+    s.Set(5, 0, L"\"42\"");                      // quotes are characters when typing
+    ASSERT_WSTR(s.Text(5, 0), L"\"42\"");
+    // Formulas see text.
+    s.Set(0, 1, L"=VALUE(A1)");
+    ASSERT_WSTR(s.Text(0, 1), L"42");
+    s.Set(1, 1, L"=ISBLANK(A1)");
+    ASSERT_WSTR(s.Text(1, 1), L"0");
+    s.Set(2, 1, L"=VALUE(A6)");
+    ASSERT_WSTR(s.Text(2, 1), L"#VALUE!");
+    // Undo gives back what was there.
+    s.Set(0, 0, L"7");
+    ASSERT_TRUE(TypeOf(s, 0, 0) == CT_Number);
+    s.mgr().OnUndo();
+    ASSERT_WSTR(s.Text(0, 0), L"42");
+    ASSERT_TRUE(TypeOf(s, 0, 0) == CT_Text);
+}
+
+TEST(Apostrophe_EditingKeepsTextAsText)
+{
+    Sheet s;
+    s.Set(0, 0, L"'42");
+    // F2 shows '42: committing it unchanged writes nothing.
+    s.mgr().SetCurrentCell(0, 0);
+    const size_t undoBefore = s.mgr().OnCanUndo();
+    s.mgr().BeginEdit(true);
+    s.mgr().CommitEditText(L"'42");
+    ASSERT_TRUE(s.mgr().OnCanUndo() == undoBefore);
+    ASSERT_TRUE(TypeOf(s, 0, 0) == CT_Text);
+    // Taking the apostrophe away makes it a number.
+    s.mgr().BeginEdit(true);
+    s.mgr().CommitEditText(L"42");
+    ASSERT_TRUE(TypeOf(s, 0, 0) == CT_Number);
+    // Text that needs no apostrophe edits without one.
+    s.Set(1, 0, L"'hello");
+    s.mgr().SetCurrentCell(1, 0);
+    const size_t before = s.mgr().OnCanUndo();
+    s.mgr().BeginEdit(true);
+    s.mgr().CommitEditText(L"hello");
+    ASSERT_TRUE(s.mgr().OnCanUndo() == before);
+}
+
+TEST(Apostrophe_FillAndReplaceKeepTextAsText)
+{
+    // Fill and Replace write cells back as edit text. A text "42" used to
+    // come back a number.
+    Sheet s;
+    s.Set(0, 0, L"'42");
+    s.Set(0, 1, L"'0042");
+    s.Select(0, 0, 2, 1);
+    ASSERT_TRUE(s.mgr().OnFillCells(0, FillDir(FILL_DOWN)));
+    ASSERT_WSTR(s.Text(2, 0), L"42");
+    ASSERT_TRUE(TypeOf(s, 2, 0) == CT_Text);
+    ASSERT_WSTR(s.Text(2, 1), L"0042");          // leading zeros survive
+    ASSERT_TRUE(TypeOf(s, 2, 1) == CT_Text);
+
+    Sheet r;
+    r.Set(0, 0, L"'42");
+    r.Set(1, 0, L"abc");
+    r.Set(2, 0, L"''x");
+    ASSERT_TRUE(r.mgr().OnReplaceAll(Replace(L"4", L"5")) == 1);
+    ASSERT_WSTR(r.Text(0, 0), L"52");
+    ASSERT_TRUE(TypeOf(r, 0, 0) == CT_Text);
+    // The prefix is not content: there is nothing to find in A1.
+    ASSERT_TRUE(r.mgr().OnReplaceAll(Replace(L"'", L"")) == 1);   // only A3's own apostrophe
+    ASSERT_WSTR(r.Text(0, 0), L"52");
+    ASSERT_TRUE(TypeOf(r, 0, 0) == CT_Text);
+    ASSERT_WSTR(r.Text(2, 0), L"x");
+    // Plain text that becomes a number when replaced is read again as typed.
+    ASSERT_TRUE(r.mgr().OnReplaceAll(Replace(L"abc", L"7")) == 1);
+    ASSERT_TRUE(TypeOf(r, 1, 0) == CT_Number);
+}
+
+TEST(Apostrophe_PasteIsTypedImportIsLiteral)
+{
+    // Pasting text is typing it; a file's apostrophe is content.
+    Sheet s;
+    s.mgr().PasteText(L"'42\t42\r\n");
+    ASSERT_WSTR(s.Text(0, 0), L"42");
+    ASSERT_TRUE(TypeOf(s, 0, 0) == CT_Text);
+    ASSERT_TRUE(TypeOf(s, 0, 1) == CT_Number);
+
+    Sheet f;
+    StreamInCsv(f, L"'42,42\n");
+    ASSERT_WSTR(f.Text(0, 0), L"'42");
+    ASSERT_TRUE(TypeOf(f, 0, 1) == CT_Number);
+}
+
 TEST(Undo_ReportsWhatChangedAndNothingWhenEmpty)
 {
     Sheet s;

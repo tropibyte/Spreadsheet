@@ -36,21 +36,25 @@ expect =LEN("a)b") => 3
 expect =IF(D1="","blank","not blank") => blank
 expect ="abc"="ABC" => 1
 
-# Text that looks like a number: typed it becomes a number, `text` keeps it text
-text D2 42
+# Text that looks like a number: typed it becomes a number; a leading
+# apostrophe keeps it text, as in Excel (the apostrophe is not part of it).
+D2: '42
 D2
+expect D2 => 42
+expect =LEN(D2) => 2
 expect =D2=42 => 1
 expect =D2+1 => 43
 
-# VALUE reads text as a number strictly: #VALUE! if it is not one.
-# (=D2+0 reads any non-numeric text as 0.)
+# VALUE reads text as a number: #VALUE! if it is not one. Arithmetic reads
+# text the same way, as Excel does.
 text D3 abc
 text D4 $1,234.50
 expect =VALUE(D2) => 42
 expect =VALUE(D4) => 1234.5
 expect =VALUE("2024-01-15") => 45306
 expect =VALUE(D3) => #VALUE!
-expect =D3+0 => 0
+expect =D3+0 => #VALUE!
+expect =D2+0 => 42
 
 # ---- Number formats apply to formula results
 E1: =A1*1000.5
@@ -116,6 +120,13 @@ expect =IFERROR(12abc,0) => #ERROR!
 expect =ISERROR(E2) => 0
 expect =ISBLANK(H9) => 1
 expect =ISBLANK(H1) => 0
+
+# ---- Text where a number is needed: a number if it reads as one, else #VALUE!
+expect ="42"+1 => 43
+expect ="abc"+1 => #VALUE!
+expect =IF("abc",1,2) => #VALUE!
+expect =IFS(1>2,"no") => #N/A
+expect =LEFT("abc",-1) => #VALUE!
 
 # ---- Unsupported syntax is flagged rather than guessed at
 expect =2^3 => #ERROR!

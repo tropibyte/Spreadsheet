@@ -313,17 +313,6 @@ namespace {
         return true;
     }
 
-    // A text function's result. The text goes in the slot, where it becomes
-    // the formula's result if nothing consumes it; the return value is the
-    // text read as a number, which is what arithmetic around the call sees
-    // (as it does for a text cell): =1+LEFT("5",1) is 6, not the text "5".
-    double TextResult(const std::wstring& text)
-    {
-        Grid32FormulaText::SetText(text);
-        double n = 0.0;
-        return ParseNumericText(text, n) ? n : 0.0;
-    }
-
     // `x` rounded to 15 significant digits, the precision Excel works in.
     // Binary doubles hold most decimals only approximately: 1.005 is stored
     // as 1.00499999999999989..., so 1.005*100 is 100.49999999999999 and a
@@ -429,6 +418,20 @@ namespace {
     bool TextToNumber(const std::wstring& text, double& out)
     {
         return ParseNumericText(text, out) || Grid32Detail::TryParseDate(TrimWs(text), out);
+    }
+
+    // A text value: a text function's result, a string literal, or a
+    // reference to text. The text goes in the slot, where it becomes the
+    // formula's result if nothing consumes it; the return value is the text
+    // read as a number (TextToNumber), which is what arithmetic around it
+    // sees: =1+LEFT("5",1) is 6, not the text "5". Text that does not read
+    // as a number returns 0, and whatever consumes it as a number makes that
+    // #VALUE! (Engine::RequireNumber).
+    double TextResult(const std::wstring& text)
+    {
+        Grid32FormulaText::SetText(text);
+        double n = 0.0;
+        return TextToNumber(text, n) ? n : 0.0;
     }
 
     // A reference names a cell only if that cell is inside the grid. ParseCellRef
@@ -751,7 +754,8 @@ struct CFormulator::Engine
     // cell as it is: a formula's result, text included, or a text cell's
     // text. Text used to reach =A1 from a formula only by accident — it leaked
     // through the shared slot, into =A1+1 as well — and never from a text
-    // cell, which showed 0. Arithmetic on text still reads it as a number.
+    // cell, which showed 0. Arithmetic on text reads it as a number when it
+    // is one and is #VALUE! otherwise (Engine::RequireNumber).
     // Returns false when `expr` is not a bare reference.
     static bool BareReference(CGrid32Mgr* mgr, const std::wstring& expr, Path& visited, Result& out)
     {
@@ -806,7 +810,7 @@ struct CFormulator::Engine
     // Take on a referenced cell's error as this evaluation's own.
     static void PropagateError(const Result& r)
     {
-        static const wchar_t* const kCodes[] = { kErrorSyntax, kErrorName, kErrorDiv0, kErrorNum, kErrorValue };
+        static const wchar_t* const kCodes[] = { kErrorSyntax, kErrorName, kErrorDiv0, kErrorNum, kErrorValue, kErrorNA };
         for (const wchar_t* code : kCodes)
             if (r.text == code) { Grid32FormulaText::SetError(code); return; }
         Grid32FormulaText::SetError(kErrorSyntax);
@@ -1004,6 +1008,66 @@ struct CFormulator::Engine
         return FormatGeneral(num);
     }
 
+    // Text used where a number is needed — an operand of + - * / or of a
+    // minus sign — reads as a number when it is one ("42", "$1,234.50",
+    // "25%", a date such as "2024-01-15"), as in Excel; any other text makes
+    // the formula #VALUE!. It used to read as 0, so ="abc"+1 was 1. Call it
+    // right after the operand was parsed, while its text is in the slot.
+    static void RequireNumber()
+    {
+        if (!Grid32FormulaText::g_textResultValid) return;
+        double n = 0.0;
+        if (!TextToNumber(Grid32FormulaText::g_textResult, n))
+            Grid32FormulaText::SetError(kErrorValue);
+    }
+
+    // A numeric function's argument (ROUND, SQRT, LEFT's count, DATE's
+    // parts, ...): as RequireNumber reads it. ABS("abc") is #VALUE!, and
+    // ABS("-5") is 5.
+    static double EvalNumber(CGrid32Mgr* mgr, const std::wstring& arg, Path& visited)
+    {
+        Grid32FormulaText::ResetText();
+        double v = CFormulator::EvalArg(mgr, arg, visited);
+        if (Grid32FormulaText::g_textResultValid)
+        {
+            double n = 0.0;
+            if (TextToNumber(Grid32FormulaText::g_textResult, n))
+                v = n;
+            else
+            {
+                Grid32FormulaText::SetError(kErrorValue);
+                v = 0.0;
+            }
+        }
+        Grid32FormulaText::ResetText();
+        return v;
+    }
+
+    // A condition (IF, IFS, NOT): a number, true when not 0. Text "TRUE" and
+    // "FALSE" are true and false, as in Excel; other text is read as
+    // EvalNumber reads it, so "abc" is #VALUE! — IF("abc",1,2) used to take
+    // the false branch. A blank cell is false.
+    static double EvalCondition(CGrid32Mgr* mgr, const std::wstring& arg, Path& visited)
+    {
+        Grid32FormulaText::ResetText();
+        double v = CFormulator::EvalArg(mgr, arg, visited);
+        if (Grid32FormulaText::g_textResultValid)
+        {
+            const std::wstring text = TrimWs(Grid32FormulaText::g_textResult);
+            double n = 0.0;
+            if (Grid32Detail::IEquals(text, L"TRUE")) v = 1.0;
+            else if (Grid32Detail::IEquals(text, L"FALSE")) v = 0.0;
+            else if (TextToNumber(text, n)) v = n;
+            else
+            {
+                Grid32FormulaText::SetError(kErrorValue);
+                v = 0.0;
+            }
+        }
+        Grid32FormulaText::ResetText();
+        return v;
+    }
+
     // Evaluate `arg` on an error slot of its own, for IFERROR and ISERROR:
     // true, with the slot as the caller had it, if the argument ran into an
     // error. A syntax error is not caught: it is a mistake in the formula,
@@ -1161,15 +1225,26 @@ struct CFormulator::Engine
             const wchar_t* const outerError = Grid32FormulaText::g_error;
             Grid32FormulaText::g_error = nullptr;
             Grid32FormulaText::ResetText();
-            const double v = CFormulator::EvalArg(mgr, a, visited);
+            double v = CFormulator::EvalArg(mgr, a, visited);
             const wchar_t* const argError = Grid32FormulaText::g_error;
+            // Text given as an argument counts when it reads as a number or a
+            // date ("5", "2024-01-15"), as in Excel; other text is #VALUE!
+            // (it was skipped, so SUM("abc",1) was 1). COUNT just does not
+            // count it. Text in a range is another matter: it is skipped,
+            // above.
+            const bool isText = Grid32FormulaText::g_textResultValid;
             double n = 0.0;
-            const bool number = !argError && (!Grid32FormulaText::g_textResultValid ||
-                ParseNumericText(Grid32FormulaText::g_textResult, n));
+            const bool textIsNumber = isText && TextToNumber(Grid32FormulaText::g_textResult, n);
+            if (textIsNumber) v = n;
+            const bool number = !argError && (!isText || textIsNumber);
             const bool isDate = Grid32FormulaText::g_dateResult;
             Grid32FormulaText::ResetText();
             Grid32FormulaText::g_error = outerError;
-            if (argError && !skipErrors) Grid32FormulaText::SetError(argError);
+            if (!skipErrors)
+            {
+                if (argError) Grid32FormulaText::SetError(argError);
+                else if (isText && !textIsNumber) Grid32FormulaText::SetError(kErrorValue);
+            }
             if (number) fn(v, isDate);
         }
     }
@@ -1363,8 +1438,10 @@ double CFormulator::ParseTerm(CGrid32Mgr* mgr, const std::wstring& expr, size_t&
         wchar_t op = expr[pos];
         if (op != L'*' && op != L'/') break;
         ++pos;
+        Engine::RequireNumber();           // the left operand, as a number
         Grid32FormulaText::ResetText();   // the right operand's slots are its own
         double rhs = ParseFactor(mgr, expr, pos, visited);
+        Engine::RequireNumber();
         if (op == L'*')
         {
             value *= rhs;
@@ -1432,8 +1509,10 @@ double CFormulator::ParseAdditive(CGrid32Mgr* mgr, const std::wstring& expr, siz
         if (op != L'+' && op != L'-') break;
         ++pos;
         const bool lhsDate = Grid32FormulaText::g_dateResult;
+        Engine::RequireNumber();           // the left operand, as a number
         Grid32FormulaText::ResetText();   // the right operand's slots are its own
         double rhs = ParseTerm(mgr, expr, pos, visited);
+        Engine::RequireNumber();
         const bool rhsDate = Grid32FormulaText::g_dateResult;
         if (op == L'+') value += rhs; else value -= rhs;
         Grid32FormulaText::ResetText();   // as in ParseTerm
@@ -1529,7 +1608,8 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
     if (expr[pos] == L'"') {
         // A string literal; "" inside it is one quote. Its value is text,
         // which IF can hand on and a comparison can compare (="abc",
-        // =IF(A1>3,"yes","no"), =A1="abc"); arithmetic reads it as a number.
+        // =IF(A1>3,"yes","no"), =A1="abc"); arithmetic reads it as a number
+        // if it is one ("5"+1 is 6) and is #VALUE! if not.
         std::wstring literal;
         ++pos;
         bool closed = false;
@@ -1552,6 +1632,7 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
         ++pos;
         double val = ParseFactor(mgr, expr, pos, visited);
         if (!neg) return val;
+        Engine::RequireNumber();           // -"abc" is #VALUE!
         Grid32FormulaText::ResetText();   // -LEFT("5",1) is the number -5
         return -val;
     }
@@ -1632,15 +1713,15 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
         }
         else if (_wcsicmp(token.c_str(), L"SIN") == 0)
         {
-            res = sin(EvalArg(mgr, arg, visited));
+            res = sin(Engine::EvalNumber(mgr, arg, visited));
         }
         else if (_wcsicmp(token.c_str(), L"COS") == 0)
         {
-            res = cos(EvalArg(mgr, arg, visited));
+            res = cos(Engine::EvalNumber(mgr, arg, visited));
         }
         else if (_wcsicmp(token.c_str(), L"TAN") == 0)
         {
-            res = tan(EvalArg(mgr, arg, visited));
+            res = tan(Engine::EvalNumber(mgr, arg, visited));
         }
         else if (_wcsicmp(token.c_str(), L"POWER") == 0)
         {
@@ -1650,8 +1731,8 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
             double base = 0.0, exp = 0.0;
             if (args.size() == 2)
             {
-                base = EvalArg(mgr, args[0], visited);
-                exp = EvalArg(mgr, args[1], visited);
+                base = Engine::EvalNumber(mgr, args[0], visited);
+                exp = Engine::EvalNumber(mgr, args[1], visited);
                 res = pow(base, exp);   // no finite result (POWER(0,-1)) is #NUM!
             }
             else
@@ -1662,15 +1743,15 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
         else if (_wcsicmp(token.c_str(), L"ROOT") == 0)
         {
             auto args = SplitArgs(arg);
-            double val = args.size() >= 1 ? EvalArg(mgr, args[0], visited) : 0.0;
-            double n = args.size() >= 2 ? EvalArg(mgr, args[1], visited) : 2.0;
+            double val = args.size() >= 1 ? Engine::EvalNumber(mgr, args[0], visited) : 0.0;
+            double n = args.size() >= 2 ? Engine::EvalNumber(mgr, args[1], visited) : 2.0;
             res = n != 0.0 ? pow(val, 1.0 / n) : 0.0;
         }
         else if (_wcsicmp(token.c_str(), L"LOG") == 0 || _wcsicmp(token.c_str(), L"LN") == 0)
         {
             // Logarithms of zero or a negative number have no value; they
             // showed "-inf" and "nan".
-            const double v = EvalArg(mgr, arg, visited);
+            const double v = Engine::EvalNumber(mgr, arg, visited);
             if (v > 0.0)
                 res = _wcsicmp(token.c_str(), L"LOG") == 0 ? log10(v) : log(v);
             else
@@ -1678,14 +1759,18 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
         }
         else if (_wcsicmp(token.c_str(), L"IF") == 0)
         {
-            // IF(cond, then [, else]) — non-zero condition selects `then`.
+            // IF(cond, then [, else]) — a true condition selects `then`. Two or
+            // three arguments: IF(1) read as 0, and extra ones were ignored.
             auto args = SplitArgs(arg);
-            if (args.size() >= 2)
+            if (args.size() < 2 || args.size() > 3)
             {
-                double cond = EvalArg(mgr, args[0], visited);
+                Grid32FormulaText::SetError(kErrorSyntax);
+            }
+            else
+            {
                 // The condition is consumed here; only the branch taken may
                 // hand a text result on.
-                Grid32FormulaText::ResetText();
+                const double cond = Engine::EvalCondition(mgr, args[0], visited);
                 if (cond != 0.0)
                     res = EvalArg(mgr, args[1], visited);
                 else if (args.size() >= 3)
@@ -1696,17 +1781,27 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
         }
         else if (_wcsicmp(token.c_str(), L"IFS") == 0)
         {
-            // IFS(cond1, val1, cond2, val2, ...) — first truthy condition wins.
+            // IFS(cond1, val1, cond2, val2, ...) — the first true condition
+            // wins. Pairs only (IFS(1) read as 0), and with no condition true
+            // there is no value: #N/A, as in Excel (it read 0).
             auto args = SplitArgs(arg);
-            for (size_t i = 0; i + 1 < args.size(); i += 2)
+            if (args.size() < 2 || args.size() % 2 != 0)
             {
-                const double cond = EvalArg(mgr, args[i], visited);
-                Grid32FormulaText::ResetText();
-                if (cond != 0.0)
+                Grid32FormulaText::SetError(kErrorSyntax);
+            }
+            else
+            {
+                bool matched = false;
+                for (size_t i = 0; i + 1 < args.size(); i += 2)
                 {
-                    res = EvalArg(mgr, args[i + 1], visited);
-                    break;
+                    if (Engine::EvalCondition(mgr, args[i], visited) != 0.0)
+                    {
+                        res = EvalArg(mgr, args[i + 1], visited);
+                        matched = true;
+                        break;
+                    }
                 }
+                if (!matched) Grid32FormulaText::SetError(kErrorNA);
             }
         }
         else if (_wcsicmp(token.c_str(), L"AND") == 0 || _wcsicmp(token.c_str(), L"OR") == 0)
@@ -1730,18 +1825,19 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
         }
         else if (_wcsicmp(token.c_str(), L"NOT") == 0)
         {
-            res = (EvalArg(mgr, arg, visited) == 0.0) ? 1.0 : 0.0;
+            if (TrimWs(arg).empty()) Grid32FormulaText::SetError(kErrorSyntax);
+            res = (Engine::EvalCondition(mgr, arg, visited) == 0.0) ? 1.0 : 0.0;
         }
         else if (_wcsicmp(token.c_str(), L"ABS") == 0)
         {
-            res = std::fabs(EvalArg(mgr, arg, visited));
+            res = std::fabs(Engine::EvalNumber(mgr, arg, visited));
         }
         else if (_wcsicmp(token.c_str(), L"ROUND") == 0)
         {
             // ROUND(value, digits)
             auto args = SplitArgs(arg);
-            double v = args.size() >= 1 ? EvalArg(mgr, args[0], visited) : 0.0;
-            double d = args.size() >= 2 ? EvalArg(mgr, args[1], visited) : 0.0;
+            double v = args.size() >= 1 ? Engine::EvalNumber(mgr, args[0], visited) : 0.0;
+            double d = args.size() >= 2 ? Engine::EvalNumber(mgr, args[1], visited) : 0.0;
             // Half away from zero, on the decimal the user sees: 1.005 rounds
             // to 1.01, not the 1.00 its binary value (1.00499999...) gives.
             res = RoundToDigits(v, d, RoundMode::HalfAwayFromZero);
@@ -1749,23 +1845,23 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
         else if (_wcsicmp(token.c_str(), L"CEILING") == 0)
         {
             auto args = SplitArgs(arg);
-            double v = args.size() >= 1 ? EvalArg(mgr, args[0], visited) : 0.0;
-            double sig = args.size() >= 2 ? EvalArg(mgr, args[1], visited) : 1.0;
+            double v = args.size() >= 1 ? Engine::EvalNumber(mgr, args[0], visited) : 0.0;
+            double sig = args.size() >= 2 ? Engine::EvalNumber(mgr, args[1], visited) : 1.0;
             res = RoundToMultiple(v, sig, true);
         }
         else if (_wcsicmp(token.c_str(), L"FLOOR") == 0)
         {
             auto args = SplitArgs(arg);
-            double v = args.size() >= 1 ? EvalArg(mgr, args[0], visited) : 0.0;
-            double sig = args.size() >= 2 ? EvalArg(mgr, args[1], visited) : 1.0;
+            double v = args.size() >= 1 ? Engine::EvalNumber(mgr, args[0], visited) : 0.0;
+            double sig = args.size() >= 2 ? Engine::EvalNumber(mgr, args[1], visited) : 1.0;
             res = RoundToMultiple(v, sig, false);
         }
         else if (_wcsicmp(token.c_str(), L"MOD") == 0)
         {
             // MOD(dividend, divisor)
             auto args = SplitArgs(arg);
-            double d1 = args.size() >= 1 ? EvalArg(mgr, args[0], visited) : 0.0;
-            double d2 = args.size() >= 2 ? EvalArg(mgr, args[1], visited) : 0.0;
+            double d1 = args.size() >= 1 ? Engine::EvalNumber(mgr, args[0], visited) : 0.0;
+            double d2 = args.size() >= 2 ? Engine::EvalNumber(mgr, args[1], visited) : 0.0;
             // The result takes the divisor's sign, as in Excel:
             // MOD(-3,2) = 1 and MOD(3,-2) = -1. std::fmod takes the
             // dividend's, and gave -1 and 1.
@@ -1786,7 +1882,7 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
         else if (_wcsicmp(token.c_str(), L"INT") == 0)
         {
             // INT rounds toward -inf, like Excel.
-            res = std::floor(EvalArg(mgr, arg, visited));
+            res = std::floor(Engine::EvalNumber(mgr, arg, visited));
         }
         else if (_wcsicmp(token.c_str(), L"TRUNC") == 0)
         {
@@ -1794,13 +1890,13 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
             // argument used to be ignored; now that an argument must parse
             // whole it would have been a syntax error instead.
             auto args = SplitArgs(arg);
-            double v = args.size() >= 1 ? EvalArg(mgr, args[0], visited) : 0.0;
-            double d = args.size() >= 2 ? EvalArg(mgr, args[1], visited) : 0.0;
+            double v = args.size() >= 1 ? Engine::EvalNumber(mgr, args[0], visited) : 0.0;
+            double d = args.size() >= 2 ? Engine::EvalNumber(mgr, args[1], visited) : 0.0;
             res = RoundToDigits(v, d, RoundMode::TowardZero);
         }
         else if (_wcsicmp(token.c_str(), L"SQRT") == 0)
         {
-            double v = EvalArg(mgr, arg, visited);
+            double v = Engine::EvalNumber(mgr, arg, visited);
             if (v >= 0) res = std::sqrt(v);
             else Grid32FormulaText::SetError(kErrorNum);   // it read 0
         }
@@ -1814,16 +1910,22 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
         {
             auto args = SplitArgs(arg);
             std::wstring s = args.size() >= 1 ? Engine::EvalAsString(mgr, args[0], visited) : std::wstring();
-            const size_t n = args.size() >= 2 ? ClampCount(EvalArg(mgr, args[1], visited), s.size())
-                                              : (s.empty() ? 0 : 1);
+            // A negative count has no meaning: #VALUE!, as in Excel (it
+            // read as 0).
+            const double count = args.size() >= 2 ? Engine::EvalNumber(mgr, args[1], visited) : 1.0;
+            if (count < 0.0) Grid32FormulaText::SetError(kErrorValue);
+            const size_t n = ClampCount(count, s.size());
             res = TextResult(s.substr(0, n));
         }
         else if (_wcsicmp(token.c_str(), L"RIGHT") == 0)
         {
             auto args = SplitArgs(arg);
             std::wstring s = args.size() >= 1 ? Engine::EvalAsString(mgr, args[0], visited) : std::wstring();
-            const size_t n = args.size() >= 2 ? ClampCount(EvalArg(mgr, args[1], visited), s.size())
-                                              : (s.empty() ? 0 : 1);
+            // A negative count has no meaning: #VALUE!, as in Excel (it
+            // read as 0).
+            const double count = args.size() >= 2 ? Engine::EvalNumber(mgr, args[1], visited) : 1.0;
+            if (count < 0.0) Grid32FormulaText::SetError(kErrorValue);
+            const size_t n = ClampCount(count, s.size());
             res = TextResult(s.substr(s.size() - n));
         }
         else if (_wcsicmp(token.c_str(), L"MID") == 0)
@@ -1831,10 +1933,13 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
             // MID(text, start, length) — start is 1-based per Excel
             auto args = SplitArgs(arg);
             std::wstring s = args.size() >= 1 ? Engine::EvalAsString(mgr, args[0], visited) : std::wstring();
-            const double start = args.size() >= 2 ? EvalArg(mgr, args[1], visited) : 1.0;
-            const double length = args.size() >= 3 ? EvalArg(mgr, args[2], visited) : 0.0;
-            // A start below 1 (or NaN) is read as 1; past the end there is
-            // nothing.
+            // Three arguments; a start below 1 or a negative length is
+            // #VALUE!, as in Excel (they read as 1 and 0). Past the end there
+            // is nothing.
+            if (args.size() != 3) Grid32FormulaText::SetError(kErrorSyntax);
+            const double start = args.size() >= 2 ? Engine::EvalNumber(mgr, args[1], visited) : 1.0;
+            const double length = args.size() >= 3 ? Engine::EvalNumber(mgr, args[2], visited) : 0.0;
+            if (start < 1.0 || length < 0.0) Grid32FormulaText::SetError(kErrorValue);
             size_t pos1 = ClampCount(start, s.size() + 1);
             if (pos1 == 0) pos1 = 1;
             const size_t idx = pos1 - 1;
@@ -1903,9 +2008,9 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
             // (ParseNumericText: " 42 ", "1e3", "1,234.50", "$1,234.50",
             // "25%" = 0.25); date text is what typing into a cell accepts
             // (TryParseDate: ISO and US), and reads as its serial, as in
-            // Excel. A number passes through and a blank cell is 0. Unlike
-            // =A1+0, which reads any text that is not a number as 0, text
-            // that is neither fails: "abc", "", "12abc", "1,2".
+            // Excel. A number passes through and a blank cell is 0; text
+            // that is neither fails: "abc", "", "12abc", "1,2". (=A1+0 now
+            // reads text the same way; VALUE says what it is for.)
             if (TrimWs(arg).empty())
                 Grid32FormulaText::SetError(kErrorSyntax);  // VALUE() has nothing to read
             Grid32FormulaText::ResetText();
@@ -1938,9 +2043,9 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
         {
             // DATE(y, m, d) — construct serial
             auto args = SplitArgs(arg);
-            const double y = args.size() >= 1 ? EvalArg(mgr, args[0], visited) : 1900.0;
-            const double m = args.size() >= 2 ? EvalArg(mgr, args[1], visited) : 1.0;
-            const double d = args.size() >= 3 ? EvalArg(mgr, args[2], visited) : 1.0;
+            const double y = args.size() >= 1 ? Engine::EvalNumber(mgr, args[0], visited) : 1900.0;
+            const double m = args.size() >= 2 ? Engine::EvalNumber(mgr, args[1], visited) : 1.0;
+            const double d = args.size() >= 3 ? Engine::EvalNumber(mgr, args[2], visited) : 1.0;
             // As Excel's DATE: the parts are truncated to whole numbers; a
             // year 0..1899 is that many years after 1900 (DATE(24,1,1) is
             // 1924-01-01 — it read as the year 24, a negative serial); a
