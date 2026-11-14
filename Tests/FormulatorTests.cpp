@@ -1449,6 +1449,45 @@ TEST(TextFunctions_RefuseNegativeCountsAndPositions)
     ASSERT_TRUE(IsText(L"LEFT(\"abc\",\"2\")", L"ab"));                     // numeric text counts
 }
 
+// ---- #13 / #15: a blank cell is blank however it is reached ------------------------
+TEST(Blank_IsBlankThroughParenthesesAndChoices)
+{
+    // Blankness was detected from the source text: only a bare reference
+    // (=A1="") saw an empty cell; =(A1)="" compared 0 with "" and was FALSE.
+    // The parser now passes typed values, and a reference to an empty cell
+    // is Blank wherever it goes.
+    SheetReset();
+    SheetSet(0, 0, L"=\"\"");                                      // A1: a formula whose result is ""
+    SheetSet(0, 1, L"x");                                          // B1
+    // Z9 is empty.
+    ASSERT_NEAR(Eval(L"=Z9=\"\""), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=(Z9)=\"\""), 1.0, 1e-12);                  // was 0
+    ASSERT_NEAR(Eval(L"=((Z9))=\"\""), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=+Z9=\"\""), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=IF(1,Z9,B1)=\"\""), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=(Z9)=0"), 1.0, 1e-12);                     // and still 0
+    ASSERT_NEAR(Eval(L"=(Z9)=A1"), 1.0, 1e-12);                    // equal to a "" result
+    ASSERT_NEAR(Eval(L"=(Z9)<A1"), 0.0, 1e-12);                    // was 1
+    ASSERT_NEAR(Eval(L"=(Z9)+1"), 1.0, 1e-12);
+    // As text it is "", not "0".
+    ASSERT_NEAR(Eval(L"=LEN((Z9))"), 0.0, 1e-12);                  // was 1
+    ASSERT_TRUE(IsText(L"CONCAT((Z9),\"a\")", L"a"));              // was "0a"
+    ASSERT_TRUE(IsText(L"UPPER(+Z9)", L""));
+    ASSERT_TRUE(IsError(L"-UPPER(+Z9)", CFormulator::kErrorValue));  // "" is no number
+    // ISBLANK sees it too; a formula's "" is still not blank.
+    ASSERT_NEAR(Eval(L"=ISBLANK((Z9))"), 1.0, 1e-12);              // was 0
+    ASSERT_NEAR(Eval(L"=ISBLANK(IF(1,Z9,0))"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=ISBLANK((A1))"), 0.0, 1e-12);
+    // What a cell shows for one is 0, as before.
+    CFormulator::Result r = CFormulator::Evaluate(g_sheet, L"(Z9)");
+    ASSERT_TRUE(!r.isText && !r.isError && r.value == 0.0);
+    r = CFormulator::Evaluate(g_sheet, L"IF(1,Z9,0)");
+    ASSERT_TRUE(!r.isText && !r.isError && r.value == 0.0);
+    // A reference off the grid is not a cell, blank or otherwise: it reads
+    // as 0, as it always has.
+    ASSERT_NEAR(Eval(L"=LEN((A4097))"), 1.0, 1e-12);
+}
+
 // ---- runner ----------------------------------------------------------------
 int main()
 {

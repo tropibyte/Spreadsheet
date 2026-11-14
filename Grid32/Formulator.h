@@ -74,7 +74,7 @@ public:
 	// difference across one recalculation to check the memoization.
 	static size_t CellEvaluationCount();
 
-	// Needed by file-scope text/date function helpers; safe to expose.
+	// Reference syntax, public for the grid and the tools (GoTo, the console).
 	// Accepts a *whole* reference token only ("A1"); anything with trailing
 	// characters ("A1:B10", "A1B") is rejected so range syntax can't be
 	// mistaken for a single cell. Syntax only: whether the cell lies inside a
@@ -83,34 +83,16 @@ public:
 	// Parse "A1" or "A1:B10" into an inclusive, normalized rectangular range.
 	static bool ParseRange(const std::wstring& arg, UINT& sr, UINT& sc,
 		UINT& er, UINT& ec);
-private:
-	struct Engine;	// evaluation internals, defined in Formulator.cpp
 
-	static void SkipSpaces(const std::wstring& s, size_t& pos);
-	static bool IsValidCellReference(const std::wstring& s, size_t& pos, size_t& row, size_t& col);
-	static double ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos,
-		std::set<std::pair<UINT, UINT>>& visited);
-
-	// The aggregates take any mix of ranges, references and expressions:
-	// SUM(A1:A3, B7, 12).
-	static double SumRange(CGrid32Mgr* mgr, const std::wstring& arg,
-		std::set<std::pair<UINT, UINT>>& visited);
-	// `isDate`: every value it saw was a date, so the result is one.
-	static double MinMaxRange(CGrid32Mgr* mgr, const std::wstring& arg,
-		std::set<std::pair<UINT, UINT>>& visited, bool bMax, bool& isDate);
-	static double CountRange(CGrid32Mgr* mgr, const std::wstring& arg,
-		std::set<std::pair<UINT, UINT>>& visited);
-	static double AverageRange(CGrid32Mgr* mgr, const std::wstring& arg,
-		std::set<std::pair<UINT, UINT>>& visited);
-	static double ParseTerm(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos, std::set<std::pair<UINT, UINT>>& visited);
-	// Additive level: term (('+'|'-') term)*. ParseExpression sits above this
-	// and adds the comparison operators, which bind least tightly.
-	static double ParseAdditive(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos, std::set<std::pair<UINT, UINT>>& visited);
-	static double ParseExpression(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos, std::set<std::pair<UINT, UINT>>& visited);
-public:
-	// Used by both internal helpers and (transitively) by file-scope text
-	// function helpers — promoted so the namespace can call back in. Called
-	// from outside an evaluation (as the tests do) it is an entry point in its
-	// own right, memoized like Evaluate.
+	// Evaluate expression source (no leading '=') as a number: a text result
+	// reads as the number it is (0 if none), an error as NaN. The tests use it;
+	// the grid uses Evaluate and EvaluateCell. `visited` is the chain of
+	// formula cells being evaluated (empty from outside).
 	static double EvalArg(CGrid32Mgr* mgr, const std::wstring& s, std::set<std::pair<UINT, UINT>>& visited);
+
+private:
+	// The parser and everything it uses, defined in Formulator.cpp. It passes
+	// typed values (number, text, blank, error; a number may be a date)
+	// rather than a double plus thread-local side channels.
+	struct Engine;
 };
