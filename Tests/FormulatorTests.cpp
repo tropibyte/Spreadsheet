@@ -420,7 +420,9 @@ TEST(TextCells_NumericLookingTextReadsAsANumber)
     ASSERT_TRUE(IsError(L"A5+0", CFormulator::kErrorValue));
     ASSERT_TRUE(IsError(L"A6+0", CFormulator::kErrorValue));
     ASSERT_NEAR(Eval(L"=A7+0"), -5.0, 1e-9);
-    ASSERT_NEAR(Eval(L"=COUNT(A1:A7)"), 5.0, 1e-9);
+    // In a range, text is not a number however it reads, as in Excel (#9):
+    // the reading above is arithmetic's, not the aggregates'.
+    ASSERT_NEAR(Eval(L"=COUNT(A1:A7)"), 0.0, 1e-9);
 }
 
 TEST(Aggregates_SkipNonNumericTextConsistently)
@@ -1486,6 +1488,42 @@ TEST(Blank_IsBlankThroughParenthesesAndChoices)
     // A reference off the grid is not a cell, blank or otherwise: it reads
     // as 0, as it always has.
     ASSERT_NEAR(Eval(L"=LEN((A4097))"), 1.0, 1e-12);
+}
+
+// ---- #9: text and TRUE/FALSE in ranges ----------------------------------------------
+TEST(Ranges_SkipTextAndLogicalCells)
+{
+    SheetReset();
+    SheetSet(0, 0, L"10");                      // A1: a number
+    SheetSetText(1, 0, L"42");                  // A2: text that looks like a number ('42)
+    SheetSet(2, 0, L"TRUE");                    // A3: a TRUE cell
+    SheetSet(3, 0, L"FALSE");                   // A4
+    SheetSet(4, 0, L"=\"7\"");                  // A5: a formula's text result
+    SheetSet(5, 0, L"hello");                   // A6
+    SheetSet(6, 0, L"2024-01-15");              // A7: a date counts, it is a number
+    // SUM / AVERAGE / MIN / MAX / COUNT skip all of the text and the logicals.
+    ASSERT_NEAR(Eval(L"=SUM(A1:A6)"), 10.0, 1e-12);             // was 10+42+1+0+7 = 60
+    ASSERT_NEAR(Eval(L"=COUNT(A1:A6)"), 1.0, 1e-12);            // was 5
+    ASSERT_NEAR(Eval(L"=AVERAGE(A1:A6)"), 10.0, 1e-12);         // was 12
+    ASSERT_NEAR(Eval(L"=MIN(A1:A6)"), 10.0, 1e-12);             // was 0 (FALSE)
+    ASSERT_NEAR(Eval(L"=MAX(A1:A6)"), 10.0, 1e-12);             // was 42
+    ASSERT_NEAR(Eval(L"=COUNT(A1:A7)"), 2.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=SUM(A:A)"), 10.0 + 45306.0, 1e-9);
+    // A single reference is a range of one.
+    ASSERT_NEAR(Eval(L"=SUM(A2)"), 0.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=COUNT(A3)"), 0.0, 1e-12);
+    ASSERT_TRUE(IsError(L"AVERAGE(A2:A6)", CFormulator::kErrorDiv0));  // nothing to average
+    // Values given directly still count when they are numbers, as in Excel.
+    ASSERT_NEAR(Eval(L"=SUM(\"5\",TRUE,A1)"), 16.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=COUNT(\"5\",TRUE,\"x\")"), 2.0, 1e-12);
+    // Arithmetic on a reference is unchanged: text that is a number is one.
+    ASSERT_NEAR(Eval(L"=A2+1"), 43.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=A3+1"), 2.0, 1e-12);
+    // AND / OR count TRUE/FALSE cells, and skip text.
+    ASSERT_NEAR(Eval(L"=AND(A1:A3)"), 1.0, 1e-12);              // 10, TRUE; "42" skipped
+    ASSERT_NEAR(Eval(L"=AND(A1:A4)"), 0.0, 1e-12);              // FALSE
+    ASSERT_NEAR(Eval(L"=OR(A4:A6)"), 0.0, 1e-12);               // FALSE; text skipped
+    ASSERT_TRUE(IsError(L"OR(A5:A6)", CFormulator::kErrorValue));      // only text: nothing to test
 }
 
 // ---- runner ----------------------------------------------------------------

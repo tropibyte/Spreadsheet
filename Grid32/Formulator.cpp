@@ -906,14 +906,18 @@ struct CFormulator::Engine
         return true;
     }
 
-    // What a cell contributes to a range aggregate (S3). Returns false for a
-    // blank cell. `isNumber` says whether it takes part in SUM / AVERAGE /
-    // MIN / MAX / COUNT.
+    // What a cell in a range contributes to an aggregate (S3). Returns false
+    // for a blank cell. `isNumber` says whether it takes part in SUM /
+    // AVERAGE / MIN / MAX / COUNT / AND / OR; `isLogical` that it is a TRUE or
+    // FALSE cell, which AND and OR count and the others, as in Excel, skip.
     //
     // Typed cells are read from m_dValue, never from their display text: a
     // currency cell shows "$1,234.50", a percentage "25.00%", a date
     // "2024-01-15", a boolean "TRUE", and std::stod read those as 0, 25, 2024
-    // and 0. Text cells are numbers only when the whole text reads as one.
+    // and 0. Text is not a number here, however it reads — a text cell, or a
+    // formula's text result — as in Excel: '42 is typed as text precisely so
+    // that it is not one. (Review #9: it counted when it read as a number.)
+    // Arithmetic on a reference is another matter: =A1+1 reads "42" as 42.
     //
     // A formula cell whose result is an error sets `error` to its code and
     // reads as not a number; the aggregate decides what the error means.
@@ -921,11 +925,12 @@ struct CFormulator::Engine
     // dates are dates).
     static bool ReadCell(CGrid32Mgr* mgr, const CellKey& key, const GRIDCELL* cell,
         Path& visited, double& value, bool& isNumber, const wchar_t** error = nullptr,
-        bool* isDate = nullptr)
+        bool* isDate = nullptr, bool* isLogical = nullptr)
     {
         value = 0.0;
         isNumber = false;
         if (isDate) *isDate = false;
+        if (isLogical) *isLogical = false;
         if (!cell) return false;
 
         if (cell->m_bFormula)
@@ -943,10 +948,10 @@ struct CFormulator::Engine
                 if (error) *error = ErrorCode(r.text);
                 return true;
             }
-            double n = 0.0;
+            if (r.isText) return true;                  // text: not a number
             value = r.value;
-            isNumber = !r.isText || ParseNumericText(r.text, n);
-            if (isDate) *isDate = !r.isText && (r.isDate || IsDateFormat(cell->m_nFormat));
+            isNumber = true;
+            if (isDate) *isDate = r.isDate || IsDateFormat(cell->m_nFormat);
             return true;
         }
 
@@ -962,11 +967,10 @@ struct CFormulator::Engine
             value = cell->m_dValue;
             isNumber = true;
             if (isDate) *isDate = IsDateValueCell(cell);
+            if (isLogical) *isLogical = cell->m_eType == CT_Boolean;
             return true;
         default:
-            isNumber = ParseNumericText(cell->m_wsText, value);
-            if (!isNumber) value = 0.0;
-            return true;
+            return true;                                // text: not a number
         }
     }
 
@@ -1290,10 +1294,12 @@ struct CFormulator::Engine
     // isDate)`: SUM, AVERAGE, MIN, MAX, COUNT, AND and OR all take any mix of
     // ranges, references and expressions (E4), and agree on what counts.
     //
-    //  - A range or reference contributes its populated cells that read as
-    //    numbers (ReadCell); blanks and non-numeric text are skipped. One
-    //    that runs off the grid contributes nothing. Ranges may be whole
-    //    columns or rows (SUM(A:A), SUM(2:2); see ResolveRangeArg).
+    //  - A range or reference contributes its populated cells that hold
+    //    numbers (ReadCell): blanks and text are skipped, numeric-looking
+    //    text included, and so are TRUE/FALSE cells unless `countLogical`
+    //    (AND, OR), as in Excel. One that runs off the grid contributes
+    //    nothing. Ranges may be whole columns or rows (SUM(A:A), SUM(2:2);
+    //    see ResolveRangeArg).
     //  - Any other argument is evaluated and contributes one value. Text
     //    counts when it reads as a number or a date ("5", "2024-01-15"), as
     //    in Excel; other text is #VALUE!. An omitted argument ("A1,,A2")
@@ -1304,7 +1310,7 @@ struct CFormulator::Engine
     // and the result is always null.
     template <class Fn>
     static const wchar_t* ForEachAggregateValue(CGrid32Mgr* mgr, const std::wstring& arglist, Path& visited,
-        bool skipErrors, Fn fn)
+        bool skipErrors, Fn fn, bool countLogical = false)
     {
         const wchar_t* firstError = nullptr;
         auto note = [&](const wchar_t* code) { if (!skipErrors && !firstError) firstError = code; };
@@ -1321,12 +1327,12 @@ struct CFormulator::Engine
             {
                 ForEachPopulatedCell(mgr, sr, sc, er, ec, [&](const CellKey& key, PGRIDCELL cell) {
                     double v = 0.0;
-                    bool isNumber = false, isDate = false;
+                    bool isNumber = false, isDate = false, isLogical = false;
                     const wchar_t* cellError = nullptr;
-                    if (!ReadCell(mgr, key, cell, visited, v, isNumber, &cellError, &isDate))
+                    if (!ReadCell(mgr, key, cell, visited, v, isNumber, &cellError, &isDate, &isLogical))
                         return;
                     if (cellError) note(cellError);
-                    else if (isNumber) fn(v, isDate);
+                    else if (isNumber && (countLogical || !isLogical)) fn(v, isDate);
                 });
                 continue;
             }
@@ -1356,7 +1362,7 @@ struct CFormulator::Engine
     }
 
     // The aggregates agree with each other about what a cell is worth. Blank
-    // cells, and text that does not read as a number, are skipped — matching
+    // cells, text and TRUE/FALSE cells in a range are skipped — matching
     // Excel, and E6: treating them as 0 would drag MIN to 0 and inflate
     // AVERAGE's denominator.
     static Value Sum(CGrid32Mgr* mgr, const std::wstring& arg, Path& visited)
@@ -1412,7 +1418,8 @@ struct CFormulator::Engine
 
     // AND / OR take conditions, values and ranges alike: AND(A1:A3),
     // OR(A1>5, B1:B9). They read their arguments the way the aggregates do,
-    // and like Excel they look at every argument, so an error anywhere is the
+    // except that TRUE/FALSE cells in a range count (text is skipped), and
+    // like Excel they look at every argument, so an error anywhere is the
     // result (AND(0,1/0) is #DIV/0!). With nothing to look at there is no
     // answer: #VALUE!, as in Excel.
     static Value AndOr(CGrid32Mgr* mgr, const std::wstring& arg, Path& visited, bool isAnd)
@@ -1421,7 +1428,7 @@ struct CFormulator::Engine
         if (const wchar_t* e = ForEachAggregateValue(mgr, arg, visited, false, [&](double v, bool) {
                 any = true;
                 if (v != 0.0) some = true; else all = false;
-            }))
+            }, true))
             return Value::Err(e);
         if (!any) return Value::Err(kErrorValue);
         return Value::Num((isAnd ? all : some) ? 1.0 : 0.0);
