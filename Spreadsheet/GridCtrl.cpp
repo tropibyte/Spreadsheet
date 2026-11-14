@@ -164,6 +164,29 @@ BOOL CGridCtrl::SetCurrentCellText(LPCWSTR text)
     return ::SendMessage(m_hWnd, GM_SETCELLTEXT, (WPARAM)&pt, (LPARAM)text) != 0;
 }
 
+BOOL CGridCtrl::SetCellText(const GRIDPOINT& pt, LPCWSTR text)
+{
+    return ::SendMessage(m_hWnd, GM_SETCELLTEXT, (WPARAM)&pt, (LPARAM)text) != 0;
+}
+
+BOOL CGridCtrl::GetCellInput(const GRIDPOINT& pt, CStringW& text) const
+{
+    text.Empty();
+    // Ask for the size first, then fetch: a formula has no length limit.
+    const LRESULT needed = ::SendMessage(m_hWnd, GM_GETCELLINPUT, (WPARAM)&pt, 0);
+    if (needed <= 0)
+        return FALSE;
+    if (needed > 1)
+    {
+        GRID_GETTEXT gt{};
+        gt.nLen = (UINT)needed;
+        gt.wszBuff = text.GetBuffer((int)needed);
+        ::SendMessage(m_hWnd, GM_GETCELLINPUT, (WPARAM)&pt, (LPARAM)&gt);
+        text.ReleaseBuffer();
+    }
+    return TRUE;
+}
+
 BOOL CGridCtrl::FindText(const GCFINDSTRUCT& fs)
 {
     return ::SendMessage(m_hWnd, GM_FINDTEXT, 0, (LPARAM)&fs) != 0;

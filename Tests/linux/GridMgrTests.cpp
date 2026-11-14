@@ -1069,6 +1069,47 @@ TEST(Geometry_SparseSizesAndHiddenRows)
 }
 
 // ---- runner ----------------------------------------------------------------
+// ---- GM_GETCELLINPUT: a cell's content as typed, for the formula bar --------
+static std::wstring Input(Sheet& s, UINT row, UINT col, LRESULT* pNeeded = nullptr, UINT cch = 64)
+{
+    std::vector<wchar_t> buf(cch ? cch : 1, L'#');
+    GRID_GETTEXT gt{ cch ? buf.data() : nullptr, cch };
+    const LRESULT needed = s.mgr().OnGetCellInput(GRIDPOINT{ row, col }, &gt);
+    if (pNeeded) *pNeeded = needed;
+    return cch ? std::wstring(buf.data()) : std::wstring();
+}
+
+TEST(CellInput_IsWhatTheEditorOpensWith)
+{
+    // The bar has to show what was typed, not what the cell displays: the
+    // formula behind a result, the plain number behind a currency format.
+    Sheet s;
+    s.Set(0, 0, L"1234.5");
+    s.mgr().SetCellNumberFormat(0, 0, FMT_CURRENCY);
+    s.Set(0, 1, L"=A1*2");
+    s.Set(0, 2, L"hello");
+    ASSERT_WSTR(s.Text(0, 1), L"2469");                 // what GM_GETCELLTEXT gives
+    ASSERT_WSTR(Input(s, 0, 1), L"=A1*2");
+    ASSERT_WSTR(Input(s, 0, 0), L"1234.5");
+    ASSERT_WSTR(Input(s, 0, 2), L"hello");
+    LRESULT needed = 0;
+    ASSERT_WSTR(Input(s, 5, 5, &needed), L"");          // an empty cell
+    ASSERT_TRUE(needed == 1);
+}
+
+TEST(CellInput_SizeQueryAndShortBuffer)
+{
+    Sheet s;
+    s.Set(2, 3, L"=SUM(A1:A9)");                        // 11 characters
+    LRESULT needed = 0;
+    Input(s, 2, 3, &needed, 0);                          // no buffer: size only
+    ASSERT_TRUE(needed == 12);
+    ASSERT_WSTR(Input(s, 2, 3, &needed, 11), L"");       // one short: empty, same size
+    ASSERT_TRUE(needed == 12);
+    ASSERT_WSTR(Input(s, 2, 3, &needed, 12), L"=SUM(A1:A9)");
+    ASSERT_TRUE(s.mgr().OnGetCellInput(GRIDPOINT{ 64, 0 }, nullptr) == 0);   // off the grid
+}
+
 int main()
 {
     std::cout << "Running " << Tests().size() << " CGrid32Mgr tests\n";

@@ -208,6 +208,16 @@ struct tagGCSTREAM;
 // lParam: const GCREPLACESTRUCT*. Replaces every match in the grid as one
 // undo step; returns the number of occurrences replaced.
 #define GM_REPLACEALL                           (WM_USER + 41)
+
+// wParam: const GRIDPOINT*, lParam: GRID_GETTEXT* (out, may be NULL).
+// The cell's content as typed, which is what the inline editor opens with: a
+// formula's source with its "=" ("=A1*B1"), a formatted number's plain value
+// ("1234.5" where the cell shows "$1,234.50"). GM_GETCELLTEXT gives what the
+// cell displays instead. Returns the size the text needs in WCHARs,
+// terminator included (1 for an empty cell), and copies it when nLen is at
+// least that; a smaller buffer receives an empty string, so a host can ask
+// with no buffer, allocate, and ask again. 0: the point is off the grid.
+#define GM_GETCELLINPUT                         (WM_USER + 42)
 // GM_SETCHARFORMAT / GM_SETFORMAT wParam flags
 #define SCF_CURRENTCELL 0x0000
 #define SCF_SELECTION 0x0001
@@ -359,7 +369,8 @@ typedef struct tagGCRENDERSTRUCT
 //   NM_SETFOCUS / NM_KILLFOCUS                   -> (header only)
 //   GN_SELCHANGE                                 -> cellPt (current), range (selection rect)
 //   GN_CELLCHANGED                               -> cellPt or range (caller's choice)
-//   GN_EDITSTART                                 -> cellPt
+//   GN_EDITSTART                                 -> cellPt, text (what the editor opens with; transient)
+//   GN_EDITCHANGE                                -> cellPt, text (the editor's text after a change; transient)
 //   GN_EDITCOMMIT                                -> cellPt, text (transient, valid only for callback)
 //   GN_EDITCANCEL                                -> cellPt
 //   GN_COLWIDTHCHANGED                           -> cellPt.nCol, oldSize, newSize
@@ -396,6 +407,7 @@ typedef struct tagGRIDNMHDR : tagNMHDR {
 #define GN_ROWHEADERCLICK     (GN_FIRST -  8)
 #define GN_CORNERCLICK        (GN_FIRST -  9)
 #define GN_CONTENTCHANGED     (GN_FIRST - 10)  // any edit, paste, fill, sort, undo, load
+#define GN_EDITCHANGE         (GN_FIRST - 11)  // the inline editor's text changed (typing, paste)
 
 typedef DWORD(CALLBACK* GCSTREAMCALLBACK)(struct tagGCSTREAM *);
 

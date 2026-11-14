@@ -3135,6 +3135,7 @@ void CGrid32Mgr::BeginEdit(bool bKeepText)
 
     GRIDNMHDR h{};
     h.cellPt = m_editCell;
+    h.text = text.c_str();
     SendGridNotification(GN_EDITSTART, &h);
     ShowEditControl();
 }
@@ -3211,21 +3212,27 @@ void HideEditor(HWND hWndEdit, HWND hWndGrid, HFONT hDefaultFont)
     if (hadFocus)
         SetFocus(hWndGrid);
 }
+
+// The text in the inline editor.
+std::wstring EditorText(HWND hWndEdit)
+{
+    std::wstring text;
+    const int len = GetWindowTextLength(hWndEdit);
+    if (len > 0)
+    {
+        text.resize((size_t)len + 1);
+        const int got = GetWindowText(hWndEdit, &text[0], len + 1);
+        text.resize(got > 0 ? (size_t)got : 0);
+    }
+    return text;
+}
 }
 
 bool CGrid32Mgr::CommitEdit()
 {
     if (!m_bEditing)
         return false;
-    std::wstring text;
-    const int len = GetWindowTextLength(m_hWndEdit);
-    if (len > 0)
-    {
-        text.resize((size_t)len + 1);
-        const int got = GetWindowText(m_hWndEdit, &text[0], len + 1);
-        text.resize(got > 0 ? (size_t)got : 0);
-    }
-    CommitEditText(text);
+    CommitEditText(EditorText(m_hWndEdit));
     return true;
 }
 
@@ -3272,6 +3279,21 @@ void CGrid32Mgr::CancelEdit()
     h.cellPt = cell;
     SendGridNotification(GN_EDITCANCEL, &h);
     InvalidateCell(cell.nRow, cell.nCol);
+}
+
+// The editor's text changed (EN_CHANGE). Tell the host what it now holds, so
+// a formula bar can show the text as it is typed. BeginEdit loads the editor
+// before it sets m_bEditing, so loading it is not reported as a change.
+void CGrid32Mgr::OnEditTextChanged()
+{
+    if (!m_bEditing)
+        return;
+    const std::wstring text = EditorText(m_hWndEdit);
+    GRIDNMHDR h{};
+    h.cellPt = m_editCell;
+    h.range = { m_editCell, m_editCell };
+    h.text = text.c_str();
+    SendGridNotification(GN_EDITCHANGE, &h);
 }
 
 // ---- clipboard ---------------------------------------------------------------
@@ -3910,6 +3932,31 @@ BOOL CGrid32Mgr::OnGetCellText(const GRIDPOINT& point, GRID_GETTEXT* text) {
     text->wszBuff[0] = L'\0';
     SetLastError(0);
     return TRUE;
+}
+
+// GM_GETCELLINPUT: the cell's content as typed -- EditTextOf, what the inline
+// editor opens with -- for a host's formula bar. GM_GETCELLTEXT is what the
+// cell displays, which for a formula is its result. See grid32.h for the
+// return value and the size-query form.
+LRESULT CGrid32Mgr::OnGetCellInput(const GRIDPOINT& point, GRID_GETTEXT* text)
+{
+    if (point.nRow >= gcs.nHeight || point.nCol >= gcs.nWidth)
+    {
+        SetLastError(GRID_ERROR_OUT_OF_RANGE);
+        return 0;
+    }
+    PGRIDCELL pCell = GetCell(point.nRow, point.nCol);
+    const std::wstring input = pCell ? EditTextOf(*pCell) : std::wstring();
+    const size_t needed = input.length() + 1;
+    if (text && text->wszBuff && text->nLen > 0)
+    {
+        if (text->nLen >= needed)
+            wcscpy_s(text->wszBuff, text->nLen, input.c_str());
+        else
+            text->wszBuff[0] = L'\0';
+    }
+    SetLastError(0);
+    return (LRESULT)needed;
 }
 
 LRESULT CGrid32Mgr::SendGridNotification(INT code, GRIDNMHDR* pNMHDRInfo)

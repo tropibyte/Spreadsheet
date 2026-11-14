@@ -308,6 +308,9 @@ public:
 	// edit is already closed, so a handler that moves focus can't commit it.
 	void CancelEdit();
 	void CommitEditText(const std::wstring& text);
+	// EN_CHANGE from the editor while an edit is open: GN_EDITCHANGE with
+	// the editor's text, so a formula bar can follow the typing.
+	void OnEditTextChanged();
 
 	// ---- clipboard, undo ---------------------------------------------------
 	void OnClear();
@@ -341,6 +344,7 @@ public:
 	bool SetRowHeight(size_t nRow, size_t newHeight);
 	size_t GetRowHeight(size_t nRow);
 	BOOL OnGetCellText(const GRIDPOINT& point, GRID_GETTEXT* text);
+	LRESULT OnGetCellInput(const GRIDPOINT& point, GRID_GETTEXT* text);
 	LRESULT SendGridNotification(INT code, GRIDNMHDR* pNMHDRInfo = nullptr);
 	// Tell the host that persisted content changed, so it can mark its
 	// document dirty. Every mutator that alters what StreamOut would write

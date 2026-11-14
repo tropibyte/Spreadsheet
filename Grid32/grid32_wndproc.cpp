@@ -135,6 +135,11 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
         case WM_KILLFOCUS:
             pMgr->SendGridNotification(NM_KILLFOCUS);
             break;
+        case WM_COMMAND:
+            // The inline editor's text changed: pass it on (GN_EDITCHANGE).
+            if (HIWORD(wParam) == EN_CHANGE && (HWND)lParam == pMgr->m_hWndEdit)
+                pMgr->OnEditTextChanged();
+            break;
         case WM_KEYUP:
             if (pMgr->OnKeyUp((UINT)wParam, (UINT)lParam, 0))
             {
@@ -407,6 +412,16 @@ LRESULT CALLBACK CGrid32Mgr::Grid32_WndProc(HWND hWnd, UINT uMsg, WPARAM wParam,
             }
 
             return pMgr->OnGetCellText(*pt, reinterpret_cast<GRID_GETTEXT*>(lParam));
+        }
+        case GM_GETCELLINPUT:
+        {
+            const GRIDPOINT* pt = GridPointArg(wParam);
+            if (!pt)
+            {
+                pMgr->SetLastError(GRID_ERROR_INVALID_PARAMETER);
+                return 0;
+            }
+            return pMgr->OnGetCellInput(*pt, reinterpret_cast<GRID_GETTEXT*>(lParam));
         }
         case GM_SETREDRAW:
             pMgr->m_bRedraw = wParam != 0 ? TRUE : FALSE;

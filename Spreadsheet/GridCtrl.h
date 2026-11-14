@@ -36,6 +36,10 @@ public:
     BOOL UnmergeSelection();
     BOOL IsCurrentCellMerged();
     BOOL SetCurrentCellText(LPCWSTR text);
+    BOOL SetCellText(const GRIDPOINT& pt, LPCWSTR text);
+    // The cell's content as typed -- a formula's source, not its result
+    // (GM_GETCELLINPUT). Empty for an empty cell.
+    BOOL GetCellInput(const GRIDPOINT& pt, CStringW& text) const;
     BOOL FindText(const GCFINDSTRUCT& fs);
     BOOL ReplaceText(const GCREPLACESTRUCT& rs);
     UINT ReplaceAll(const GCREPLACESTRUCT& rs);    // occurrences replaced
