@@ -6536,11 +6536,12 @@ std::wstring CGrid32Mgr::EvaluateFormula(const std::wstring& expr)
 // rather than becoming garbage.
 static void ApplyFormulaResult(PGRIDCELL pCell, const CFormulator::Result& r)
 {
-    // A date result makes the cell a date (CT_Date, still m_bFormula), so
-    // sorting and export treat it as the date it shows; any other result
-    // keeps CT_Formula.
+    // A date result makes the cell a date (CT_Date, still m_bFormula) and a
+    // logical one a boolean (CT_Boolean), so sorting and export treat it as
+    // what it shows; any other result keeps CT_Formula.
     const bool isDate = r.isDate && !r.isText && !r.isError;
-    pCell->m_eType = isDate ? CT_Date : CT_Formula;
+    const bool isBoolean = r.isBoolean && !r.isText && !r.isError;
+    pCell->m_eType = isDate ? CT_Date : isBoolean ? CT_Boolean : CT_Formula;
     // m_dValue is the number a formula produced, and NaN when it produced
     // text (as for an error): sorting and export go by "finite or not"
     // instead of parsing the display text, which a number format turns into
@@ -6550,6 +6551,13 @@ static void ApplyFormulaResult(PGRIDCELL pCell, const CFormulator::Result& r)
     if (r.isText || r.isError)
     {
         pCell->m_wsText = r.text;
+        return;
+    }
+    if (isBoolean)
+    {
+        // TRUE or FALSE, whatever the number format (as in Excel); m_dValue
+        // is 1 or 0. A comparison showed 1 or 0.
+        pCell->m_wsText = r.value != 0.0 ? L"TRUE" : L"FALSE";
         return;
     }
     std::wstring general = CFormulator::FormatGeneral(r.value);

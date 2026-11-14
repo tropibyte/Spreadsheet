@@ -151,6 +151,13 @@ static bool IsText(const wchar_t* formula, const wchar_t* want)
     return r.isText && !r.isError && r.text == want;
 }
 
+// A formula's result is the logical value `want`.
+static bool IsBool(const wchar_t* formula, bool want)
+{
+    CFormulator::Result r = CFormulator::Evaluate(g_sheet, formula);
+    return r.isBoolean && !r.isText && !r.isError && !r.isDate && r.value == (want ? 1.0 : 0.0);
+}
+
 // A formula's result is the error `code`, with a NaN value.
 static bool IsError(const wchar_t* formula, const wchar_t* code)
 {
@@ -837,10 +844,12 @@ TEST(Errors_MalformedFormulasAreSyntaxErrors)
     ASSERT_TRUE(IsError(L"A1:A3", kSyntax));        // a range outside a function
     ASSERT_TRUE(IsError(L"ABS(1,2)", kSyntax));     // was 1
     ASSERT_TRUE(IsError(L"POWER(2)", kSyntax));     // was 1
-    // Syntax the engine does not have yet is flagged rather than misread.
-    ASSERT_TRUE(IsError(L"2^3", kSyntax));          // was 2
-    ASSERT_TRUE(IsError(L"50%", kSyntax));          // was 50
-    ASSERT_TRUE(IsError(L"$A$1", kSyntax));         // was 0
+    // ^, % and $A$1 were flagged here until they were implemented (see
+    // Operators_PowerPercentConcat and References_AbsoluteMarks); what is
+    // still malformed around them is still a syntax error.
+    ASSERT_TRUE(IsError(L"2^", kSyntax));
+    ASSERT_TRUE(IsError(L"%5", kSyntax));
+    ASSERT_TRUE(IsError(L"1&", kSyntax));
 }
 
 TEST(Errors_UnknownNames)
@@ -898,14 +907,21 @@ TEST(Errors_Propagate)
     ASSERT_NEAR(Eval(L"=A1+1"), 6.0, 1e-12);
 }
 
-TEST(ChainedComparison_IsAnErrorNotIgnored)
+TEST(ChainedComparisons_GoLeftToRightOnLogicals)
 {
-    // Only one comparison is read. The rest used to be dropped silently,
-    // so =1=1=2 was TRUE; now it is flagged until chaining is implemented.
+    // Comparisons chain left to right, as in Excel, on TRUE/FALSE values:
+    // =1=1=1 is (TRUE)=1, and a logical is never equal to a number. Only the
+    // first comparison used to be read (so =1=1=2 was TRUE), then the rest
+    // was a syntax error.
     StandardSheet();
-    ASSERT_TRUE(IsError(L"1=1=2", CFormulator::kErrorSyntax));
-    ASSERT_TRUE(IsError(L"3>2>1", CFormulator::kErrorSyntax));
-    ASSERT_NEAR(Eval(L"=(1=1)=1"), 1.0, 1e-12);     // parenthesized, it is two comparisons
+    ASSERT_TRUE(IsBool(L"1=1=1", false));
+    ASSERT_TRUE(IsBool(L"1=1=2", false));
+    ASSERT_TRUE(IsBool(L"3>2>1", true));             // TRUE > 1: logicals come after numbers
+    ASSERT_TRUE(IsBool(L"1<2<3", false));            // TRUE < 3 is FALSE
+    ASSERT_TRUE(IsBool(L"(1=1)=TRUE", true));
+    ASSERT_TRUE(IsBool(L"(1=1)=1", false));          // was TRUE while logicals were 1 and 0
+    ASSERT_TRUE(IsBool(L"1=1=(2=2)", true));
+    ASSERT_TRUE(IsBool(L"A1>3=TRUE", true));
 }
 
 // ---- Aggregates take several arguments (E4) -----------------------------------
@@ -1583,6 +1599,161 @@ TEST(Characters_NamesAndSpacesAreTheSameEverywhere)
         ASSERT_NEAR(Eval(L"=VALUE(\" 42 \")"), 42.0, 1e-12);
         ASSERT_TRUE(IsError(L"VALUE(\"42\u00A0\")", CFormulator::kErrorValue));
     });
+}
+
+// ---- TRUE and FALSE ----------------------------------------------------------------
+TEST(Booleans_AreTheirOwnKindOfValue)
+{
+    SheetReset();
+    SheetSet(0, 0, L"5");                       // A1
+    SheetSet(1, 0, L"TRUE");                    // A2: a TRUE cell
+    SheetSet(2, 0, L"=A1>3");                   // A3: a logical formula result
+    SheetSet(3, 0, L"=A1<3");                   // A4
+    SheetSet(4, 0, L"hello");                   // A5
+    // Where logicals come from.
+    ASSERT_TRUE(IsBool(L"TRUE", true));
+    ASSERT_TRUE(IsBool(L"FALSE()", false));
+    ASSERT_TRUE(IsBool(L"A1>3", true));
+    ASSERT_TRUE(IsBool(L"A2", true));
+    ASSERT_TRUE(IsBool(L"(A3)", true));
+    ASSERT_TRUE(IsBool(L"AND(A1>1,A2)", true));
+    ASSERT_TRUE(IsBool(L"OR(0,0)", false));
+    ASSERT_TRUE(IsBool(L"NOT(A2)", false));
+    ASSERT_TRUE(IsBool(L"ISERROR(1/0)", true));
+    ASSERT_TRUE(IsBool(L"ISBLANK(Z9)", true));
+    ASSERT_TRUE(IsBool(L"IF(A2,A4,1)", false));            // handed on by IF
+    ASSERT_TRUE(IsBool(L"IF(0,1)", false));                // IF with no else: FALSE (was 0)
+    ASSERT_TRUE(IsBool(L"IFERROR(A3,0)", true));
+    // Arithmetic reads them as 1 and 0.
+    ASSERT_NEAR(Eval(L"=TRUE+1"), 2.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=A2*5"), 5.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=-A3"), -1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=ABS(TRUE)"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=(1<2)+(2<3)"), 2.0, 1e-12);
+    CFormulator::Result r = CFormulator::Evaluate(g_sheet, L"TRUE+1");
+    ASSERT_TRUE(!r.isBoolean);                              // a sum is a number
+    // Comparisons: after every number and text, FALSE before TRUE.
+    ASSERT_TRUE(IsBool(L"TRUE=1", false));                  // was TRUE
+    ASSERT_TRUE(IsBool(L"FALSE=0", false));
+    ASSERT_TRUE(IsBool(L"TRUE>99999", true));
+    ASSERT_TRUE(IsBool(L"FALSE>\"zzz\"", true));
+    ASSERT_TRUE(IsBool(L"FALSE<TRUE", true));
+    ASSERT_TRUE(IsBool(L"TRUE=\"TRUE\"", false));
+    ASSERT_TRUE(IsBool(L"A2=A3", true));
+    ASSERT_TRUE(IsBool(L"Z9=FALSE", true));                 // a blank is FALSE beside a logical
+    ASSERT_TRUE(IsBool(L"Z9=TRUE", false));
+    // As text they are TRUE and FALSE.
+    ASSERT_NEAR(Eval(L"=LEN(1=1)"), 4.0, 1e-12);            // was 1 ("1")
+    ASSERT_TRUE(IsText(L"CONCAT(A2,A4,1=2)", L"TRUEFALSEFALSE"));
+    ASSERT_TRUE(IsText(L"\"x\"&TRUE", L"xTRUE"));
+    ASSERT_TRUE(IsText(L"UPPER(A3)", L"TRUE"));
+    // VALUE reads text, and a logical is not text.
+    ASSERT_TRUE(IsError(L"VALUE(TRUE)", CFormulator::kErrorValue));   // was 1
+    ASSERT_TRUE(IsError(L"VALUE(A2)", CFormulator::kErrorValue));
+    // Conditions take them as they are.
+    ASSERT_NEAR(Eval(L"=IF(A3,10,20)"), 10.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=IF(A4,10,20)"), 20.0, 1e-12);
+}
+
+TEST(Booleans_InRangesAndAsArguments)
+{
+    // A logical formula result in a range is skipped by SUM and friends and
+    // counted by AND/OR, as a TRUE/FALSE cell is (#9). It used to count as
+    // 1 or 0, being one.
+    SheetReset();
+    SheetSet(0, 0, L"10");                      // A1
+    SheetSet(1, 0, L"=A1>5");                   // A2: TRUE
+    SheetSet(2, 0, L"=A1<5");                   // A3: FALSE
+    ASSERT_NEAR(Eval(L"=SUM(A1:A3)"), 10.0, 1e-12);        // was 11
+    ASSERT_NEAR(Eval(L"=COUNT(A1:A3)"), 1.0, 1e-12);       // was 3
+    ASSERT_NEAR(Eval(L"=MIN(A1:A3)"), 10.0, 1e-12);        // was 0
+    ASSERT_TRUE(IsBool(L"OR(A2:A3)", true));
+    ASSERT_TRUE(IsBool(L"AND(A2:A3)", false));
+    // Given directly, they count, as in Excel.
+    ASSERT_NEAR(Eval(L"=SUM(TRUE,A1)"), 11.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=COUNT(TRUE,1=1,\"x\")"), 2.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=SUM(A2)"), 0.0, 1e-12);            // a reference is a range of one
+}
+
+// ---- ^, %, & ----------------------------------------------------------------------------
+TEST(Operators_PowerPercentConcat)
+{
+    SheetReset();
+    SheetSet(0, 0, L"4");                       // A1
+    SheetSet(1, 0, L"2024-01-15");              // A2
+    SheetSetText(2, 0, L"50");                  // A3: text "50"
+    // ^ binds tighter than * and /, looser than a sign; left to right.
+    ASSERT_NEAR(Eval(L"=2^3"), 8.0, 1e-12);                 // was #ERROR! (and 2 before that)
+    ASSERT_NEAR(Eval(L"=2*3^2"), 18.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=(2*3)^2"), 36.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=-2^2"), 4.0, 1e-12);                // Excel: the sign first
+    ASSERT_NEAR(Eval(L"=0-2^2"), -4.0, 1e-12);              // a subtraction is not a sign
+    ASSERT_NEAR(Eval(L"=2^-2"), 0.25, 1e-12);
+    ASSERT_NEAR(Eval(L"=2^3^2"), 64.0, 1e-12);              // (2^3)^2, as in Excel
+    ASSERT_NEAR(Eval(L"=A1^0.5"), 2.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=\"3\"^2"), 9.0, 1e-12);             // numeric text reads as a number
+    ASSERT_TRUE(IsError(L"0^0", CFormulator::kErrorNum));
+    ASSERT_TRUE(IsError(L"0^-1", CFormulator::kErrorDiv0));
+    ASSERT_TRUE(IsError(L"(-8)^(1/3)", CFormulator::kErrorNum));
+    ASSERT_TRUE(IsError(L"10^400", CFormulator::kErrorNum));
+    ASSERT_TRUE(IsError(L"\"a\"^2", CFormulator::kErrorValue));
+    ASSERT_TRUE(IsError(L"POWER(0,0)", CFormulator::kErrorNum));   // was 1; POWER shares ^'s rules
+    ASSERT_TRUE(IsError(L"POWER(0,-1)", CFormulator::kErrorDiv0));
+    // % divides by 100, binding tighter than ^.
+    ASSERT_NEAR(Eval(L"=50%"), 0.5, 1e-12);                 // was #ERROR! (and 50 before that)
+    ASSERT_NEAR(Eval(L"=10%%"), 0.001, 1e-15);
+    ASSERT_NEAR(Eval(L"=-50%"), -0.5, 1e-12);
+    ASSERT_NEAR(Eval(L"=A1%*100"), 4.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=A3%"), 0.5, 1e-12);
+    ASSERT_NEAR(Eval(L"=4^50%"), 2.0, 1e-12);               // 4^(0.5)
+    ASSERT_NEAR(Eval(L"=(1+1)%"), 0.02, 1e-12);
+    ASSERT_TRUE(IsError(L"\"a\"%", CFormulator::kErrorValue));
+    // & joins as text, looser than + and tighter than comparisons.
+    ASSERT_TRUE(IsText(L"\"a\"&\"b\"", L"ab"));             // was #ERROR!
+    ASSERT_TRUE(IsText(L"\"Total: \"&A1*2", L"Total: 8"));
+    ASSERT_TRUE(IsText(L"1&2+3", L"15"));                   // 1&(2+3)
+    ASSERT_TRUE(IsText(L"A1&\"\"", L"4"));
+    ASSERT_TRUE(IsText(L"1/3&\"\"", L"0.333333333333333"));
+    ASSERT_TRUE(IsText(L"A2&\"\"", L"45306"));              // a date as its serial, as in Excel
+    ASSERT_TRUE(IsText(L"\"[\"&Z9&\"]\"", L"[]"));          // a blank as ""
+    ASSERT_TRUE(IsBool(L"\"x\"&1=\"x1\"", true));           // (\"x\"&1)=\"x1\"
+    ASSERT_TRUE(IsError(L"1/0&FOO()", CFormulator::kErrorDiv0));    // the first error
+    ASSERT_TRUE(IsError(L"\"a\"&1/0", CFormulator::kErrorDiv0));
+    ASSERT_NEAR(Eval(L"=LEN(\"ab\"&\"cd\")"), 4.0, 1e-12);
+}
+
+// ---- $A$1 -------------------------------------------------------------------------------
+TEST(References_AbsoluteMarks)
+{
+    // The $ marks say how a copy adjusts a reference; the cell is the same.
+    // They were a syntax error.
+    UINT r = 0, c = 0;
+    ASSERT_TRUE(CFormulator::ParseCellRef(L"$B$3", r, c) && r == 2 && c == 1);
+    ASSERT_TRUE(CFormulator::ParseCellRef(L"$B3", r, c) && r == 2 && c == 1);
+    ASSERT_TRUE(CFormulator::ParseCellRef(L"B$3", r, c) && r == 2 && c == 1);
+    ASSERT_TRUE(CFormulator::ParseCellRef(L"$zz$100", r, c) && r == 99 && c == 701);
+    ASSERT_FALSE(CFormulator::ParseCellRef(L"$$B3", r, c));
+    ASSERT_FALSE(CFormulator::ParseCellRef(L"B$$3", r, c));
+    ASSERT_FALSE(CFormulator::ParseCellRef(L"B3$", r, c));
+    ASSERT_FALSE(CFormulator::ParseCellRef(L"$3", r, c));
+    ASSERT_FALSE(CFormulator::ParseCellRef(L"$B", r, c));
+    ASSERT_FALSE(CFormulator::ParseCellRef(L"$", r, c));
+    UINT sr = 0, sc = 0, er = 0, ec = 0;
+    ASSERT_TRUE(CFormulator::ParseRange(L"$A$1:B$3", sr, sc, er, ec) && er == 2 && ec == 1);
+
+    StandardSheet();                            // A1=5 A2=7 A3=9 B1=2 B2=4
+    ASSERT_NEAR(Eval(L"=$A$1"), 5.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=$A$1+$A2+A$3"), 21.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=SUM($A$1:$A$3)"), 21.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=SUM($A1:B$2)"), 18.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=SUM($A:$A)"), 21.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=SUM($A:B)"), 27.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=SUM($1:$1)"), 7.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=LEN($A$1)"), 1.0, 1e-12);
+    ASSERT_TRUE(IsBool(L"ISBLANK($Z$9)", true));
+    ASSERT_TRUE(IsBool(L"$a$1=A1", true));
+    ASSERT_TRUE(CFormulator::Evaluate(g_sheet, L"$$A1").isError);
+    ASSERT_TRUE(CFormulator::Evaluate(g_sheet, L"$").isError);
 }
 
 // ---- runner ----------------------------------------------------------------

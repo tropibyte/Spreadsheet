@@ -414,6 +414,14 @@ TEST(FormatCellValue_DatesOutsideTheRangeKeepTheirText)
     ASSERT_TRUE(FormatCellValue(CT_Number, 2958465.0, L"2958465", FMT_DATE_ISO) == L"9999-12-31");
 }
 
+TEST(FormatCellValue_LogicalsIgnoreNumberFormats)
+{
+    ASSERT_TRUE(FormatCellValue(CT_Boolean, 1.0, L"TRUE", FMT_NUMBER) == L"TRUE");     // was "1.00"
+    ASSERT_TRUE(FormatCellValue(CT_Boolean, 0.0, L"FALSE", FMT_CURRENCY) == L"FALSE"); // was "$0.00"
+    ASSERT_TRUE(FormatCellValue(CT_Boolean, 1.0, L"true", FMT_PERCENT) == L"TRUE");
+    ASSERT_TRUE(FormatCellValue(CT_Boolean, 1.0, L"true", FMT_GENERAL) == L"true");    // General shows what was typed
+}
+
 // ---- Case mapping (grid32_case.h) -------------------------------------------
 TEST(CaseTable_MapsLettersAndNothingElse)
 {

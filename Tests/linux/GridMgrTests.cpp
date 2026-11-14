@@ -1085,7 +1085,7 @@ TEST(Apostrophe_TypesTheRestAsText)
     s.Set(0, 1, L"=VALUE(A1)");
     ASSERT_WSTR(s.Text(0, 1), L"42");
     s.Set(1, 1, L"=ISBLANK(A1)");
-    ASSERT_WSTR(s.Text(1, 1), L"0");
+    ASSERT_WSTR(s.Text(1, 1), L"FALSE");
     s.Set(2, 1, L"=VALUE(A6)");
     ASSERT_WSTR(s.Text(2, 1), L"#VALUE!");
     // Undo gives back what was there.

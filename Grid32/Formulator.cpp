@@ -182,11 +182,13 @@ namespace {
     }
 
     // A character of a name, number or reference token: ASCII letters and
-    // digits, '.', and any other character that is not ASCII. Names with
+    // digits, '.', '$' (absolute references, $A$1), and any other character
+    // that is not ASCII. Names with
     // such characters are never valid (=café, =É1), but reading them as one
     // token makes them #NAME? everywhere rather than a locale's choice.
     inline bool IsTokenChar(wchar_t c) {
-        return IsAsciiLetter(c) || IsAsciiDigit(c) || c == L'.' || (c >= 0x80 && !IsFormulaSpace(c));
+        return IsAsciiLetter(c) || IsAsciiDigit(c) || c == L'.' || c == L'$' ||
+            (c >= 0x80 && !IsFormulaSpace(c));
     }
 
     // Read text as a number the way a person would: "42", " -3.5 ", "1e3",
@@ -404,9 +406,10 @@ namespace {
         Ok,         // sr..er x sc..ec, inclusive and inside the grid
     };
 
-    // Column letters only ("A", "zz"), as a 0-based column index.
-    bool ParseColumnLetters(const std::wstring& t, UINT& col)
+    // Column letters only ("A", "zz", "$B"), as a 0-based column index.
+    bool ParseColumnLetters(std::wstring t, UINT& col)
     {
+        if (!t.empty() && t[0] == L'$') t.erase(0, 1);      // $A:$A is A:A
         if (t.empty() || t.size() > 7) return false;
         unsigned long long c = 0;
         for (wchar_t ch : t)
@@ -420,9 +423,10 @@ namespace {
         return true;
     }
 
-    // Row digits only ("7"), as a 0-based row index.
-    bool ParseRowDigits(const std::wstring& t, UINT& row)
+    // Row digits only ("7", "$7"), as a 0-based row index.
+    bool ParseRowDigits(std::wstring t, UINT& row)
     {
+        if (!t.empty() && t[0] == L'$') t.erase(0, 1);      // $1:$2 is 1:2
         if (t.empty() || t.size() > 10) return false;
         unsigned long long r = 0;
         for (wchar_t ch : t)
@@ -637,7 +641,8 @@ struct CFormulator::Engine
         enum Kind : unsigned char {
             Number,     // num; isDate when it is a date (a General cell shows it as one)
             Text,       // text
-            Blank,      // a reference to an empty cell: 0 as a number, "" as text
+            Boolean,    // TRUE or FALSE: num is 1 or 0
+            Blank,      // a reference to an empty cell: 0 as a number, "" as text, FALSE as a logical
             Error,      // error, a CFormulator::kError* code
         };
         Kind kind = Number;
@@ -648,22 +653,25 @@ struct CFormulator::Engine
 
         static Value Num(double v, bool date = false) { Value x; x.num = v; x.isDate = date; return x; }
         static Value Str(std::wstring t) { Value x; x.kind = Text; x.text = std::move(t); return x; }
+        static Value Bool(bool b) { Value x; x.kind = Boolean; x.num = b ? 1.0 : 0.0; return x; }
         static Value Empty() { Value x; x.kind = Blank; return x; }
         static Value Err(const wchar_t* code) { Value x; x.kind = Error; x.error = code; return x; }
         bool IsError() const { return kind == Error; }
     };
 
-    // A value where a number is needed — an operand of + - * / or of a minus
-    // sign, a numeric function's argument. A number is itself (a date stays a
-    // date, for the + and - rules); a blank cell is 0; text is the number it
+    // A value where a number is needed — an operand of + - * / ^ % or of a
+    // minus sign, a numeric function's argument. A number is itself (a date
+    // stays a date, for the + and - rules); TRUE and FALSE are 1 and 0; a
+    // blank cell is 0; text is the number it
     // reads as ("42", "$1,234.50", "25%", or a date such as "2024-01-15"), as
     // in Excel, and #VALUE! if it reads as none; an error is itself.
     static Value ToNumber(const Value& v)
     {
         switch (v.kind)
         {
-        case Value::Number: return v;
-        case Value::Blank:  return Value::Num(0.0);
+        case Value::Number:  return v;
+        case Value::Boolean: return Value::Num(v.num);     // TRUE+1 is 2
+        case Value::Blank:   return Value::Num(0.0);
         case Value::Text:
         {
             double n = 0.0;
@@ -685,16 +693,17 @@ struct CFormulator::Engine
         return ToNumber(v);
     }
 
-    // A value where text is needed (LEN, LEFT, CONCAT, ...): text is itself, a
-    // number its General form (a date its serial, as in Excel), a blank cell
-    // "", an error itself.
+    // A value where text is needed (LEN, LEFT, CONCAT, &, ...): text is
+    // itself, a number its General form (a date its serial, as in Excel),
+    // TRUE/FALSE "TRUE"/"FALSE", a blank cell "", an error itself.
     static Value ToText(const Value& v)
     {
         switch (v.kind)
         {
-        case Value::Number: return Value::Str(FormatGeneral(v.num));
-        case Value::Blank:  return Value::Str(std::wstring());
-        default:            return v;
+        case Value::Number:  return Value::Str(FormatGeneral(v.num));
+        case Value::Boolean: return Value::Str(v.num != 0.0 ? L"TRUE" : L"FALSE");   // LEN(1=1) is 4
+        case Value::Blank:   return Value::Str(std::wstring());
+        default:             return v;
         }
     }
 
@@ -713,6 +722,7 @@ struct CFormulator::Engine
     {
         if (r.isError) return Value::Err(ErrorCode(r.text));
         if (r.isText) return Value::Str(r.text);
+        if (r.isBoolean) return Value::Bool(r.value != 0.0);
         return Value::Num(r.value, r.isDate);
     }
 
@@ -745,6 +755,10 @@ struct CFormulator::Engine
             return r;
         }
         case Value::Blank:
+            return r;
+        case Value::Boolean:
+            r.value = v.num;
+            r.isBoolean = true;
             return r;
         default:
             if (!std::isfinite(v.num)) return ErrorResult(kErrorNum);
@@ -836,7 +850,7 @@ struct CFormulator::Engine
         {
             FormulaCellResult(mgr, key, cell, visited, out);
             // A formula cell the user formatted as a date reads as one too.
-            if (!out.isText && !out.isError && IsDateFormat(cell->m_nFormat))
+            if (!out.isText && !out.isError && !out.isBoolean && IsDateFormat(cell->m_nFormat))
                 out.isDate = true;
             return out;
         }
@@ -848,10 +862,11 @@ struct CFormulator::Engine
             out.value = ParseNumericText(out.text, n) ? n : 0.0;
             return out;
         }
-        // Blank or typed: its value, as any other reference reads it.
+        // Blank or typed: its value, as any other reference reads it. A
+        // TRUE/FALSE cell is a logical value.
         double v = 0.0;
         bool isNumber = false;
-        ReadCell(mgr, key, cell, visited, v, isNumber, nullptr, &out.isDate);
+        ReadCell(mgr, key, cell, visited, v, isNumber, nullptr, &out.isDate, &out.isBoolean);
         out.value = isNumber ? v : 0.0;
         return out;
     }
@@ -976,7 +991,8 @@ struct CFormulator::Engine
             if (r.isText) return true;                  // text: not a number
             value = r.value;
             isNumber = true;
-            if (isDate) *isDate = r.isDate || IsDateFormat(cell->m_nFormat);
+            if (isLogical) *isLogical = r.isBoolean;    // =A1>0: a logical, as a TRUE cell is
+            if (isDate) *isDate = !r.isBoolean && (r.isDate || IsDateFormat(cell->m_nFormat));
             return true;
         }
 
@@ -1011,9 +1027,10 @@ struct CFormulator::Engine
         {
             Result r;
             FormulaCellResult(mgr, key, cell, visited, r);   // a cycle reads as 0 here too
-            if (r.isError) return Value::Err(ErrorCode(r.text));
-            return Value::Str(r.isText ? r.text : FormatGeneral(r.value));
+            return ToText(FromResult(r));
         }
+        if (cell->m_eType == CT_Boolean && !cell->m_wsText.empty())
+            return Value::Str(cell->m_dValue != 0.0 ? L"TRUE" : L"FALSE");   // "true" typed reads TRUE
         if (cell->m_nFormat != FMT_GENERAL && !cell->m_wsText.empty() &&
             (cell->m_eType == CT_Number || cell->m_eType == CT_Date || cell->m_eType == CT_Boolean))
         {
@@ -1042,8 +1059,10 @@ struct CFormulator::Engine
     //  - numbers, at the 15 significant digits Excel works in (Snap15), so
     //    0.1+0.2 = 0.3 while 1000000000 and 1000000001 differ;
     //  - text, case-insensitively, as in Excel ("abc" = "ABC");
+    //  - TRUE and FALSE after every number and text, FALSE before TRUE;
     //  - a blank cell as whatever the other side is: "" against text, 0
-    //    against a number, so =A1="" and =A1=0 are both true for empty A1 —
+    //    against a number, FALSE against a logical, so =A1="" and =A1=0 are
+    //    both true for empty A1 —
     //    and so are =(A1)="" and =IF(TRUE,A1)="", which the old source-text
     //    check could not see;
     //  - text against a number: numerically when the text reads as a number
@@ -1053,10 +1072,21 @@ struct CFormulator::Engine
     {
         if (a.kind == Value::Blank && b.kind == Value::Blank)
             return ApplyCompare(op, 0);
-        if (a.kind == Value::Blank)
-            a = b.kind == Value::Text ? Value::Str(std::wstring()) : Value::Num(0.0);
-        if (b.kind == Value::Blank)
-            b = a.kind == Value::Text ? Value::Str(std::wstring()) : Value::Num(0.0);
+        auto emptyLike = [](const Value& other) {
+            return other.kind == Value::Text ? Value::Str(std::wstring())
+                 : other.kind == Value::Boolean ? Value::Bool(false) : Value::Num(0.0);
+        };
+        if (a.kind == Value::Blank) a = emptyLike(b);
+        if (b.kind == Value::Blank) b = emptyLike(a);
+
+        // Logical values come after every number and every text, FALSE before
+        // TRUE, as Excel orders them: TRUE=1 is FALSE, and 2>1>0 is TRUE
+        // (TRUE > 0). They used to be the numbers 1 and 0.
+        if (a.kind == Value::Boolean || b.kind == Value::Boolean)
+        {
+            if (a.kind != b.kind) return ApplyCompare(op, a.kind == Value::Boolean ? 1 : -1);
+            return ApplyCompare(op, a.num < b.num ? -1 : a.num > b.num ? 1 : 0);
+        }
 
         if (a.kind == Value::Text && b.kind == Value::Text)
             return ApplyCompare(op, CompareTextNoCase(a.text, b.text));
@@ -1083,45 +1113,72 @@ struct CFormulator::Engine
     }
 
     // ---- The grammar ---------------------------------------------------------
-    //   expression := additive [ ( = <> < > <= >= ) additive ]
+    // Excel's operators and precedence, loosest first:
+    //   expression := concat { ( = <> < > <= >= ) concat }       left to right
+    //   concat     := additive { & additive }
     //   additive   := term { ( + - ) term }
-    //   term       := factor { ( * / ) factor }
-    //   factor     := ( expression ) | "text" | +factor | -factor
-    //               | number | reference | TRUE | FALSE | name( arguments )
+    //   term       := power { ( * / ) power }
+    //   power      := unary { ^ unary }                          left to right
+    //   unary      := + unary | - unary | postfix
+    //   postfix    := primary { % }
+    //   primary    := ( expression ) | "text" | number | reference
+    //               | TRUE | FALSE | name( arguments )
+    // So -2^2 is 4 and 2^3^2 is 64, as in Excel; 50% is 0.5.
     //
     // Every level parses all of its input even after an error, so the
     // position is right for what follows, and returns the first error met.
 
     // Comparisons bind least tightly, so "A1+1 > B1*2" compares the two
-    // arithmetic results. Only one comparison is read; a second ("=1=1=1")
-    // is left over, which ParseWhole reports as a syntax error. The result
-    // is 1 (true) or 0 (false).
+    // arithmetic results, and they chain left to right as in Excel: =1=1=1
+    // is (TRUE)=1, which is FALSE, and =3>2>1 is TRUE>1, which is TRUE. (A
+    // second comparison used to be left over and a syntax error.) The result
+    // is TRUE or FALSE.
     static Value ParseExpression(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos, Path& visited)
     {
         FormulaDepthGuard depth;
         if (depth.overflowed)
             return Value::Err(kErrorSyntax);    // nested too deeply to evaluate
 
-        Value lhs = ParseAdditive(mgr, expr, pos, visited);
+        Value lhs = ParseConcat(mgr, expr, pos, visited);
+        for (;;)
+        {
+            SkipSpaces(expr, pos);
+            if (pos >= expr.size()) return lhs;
 
-        SkipSpaces(expr, pos);
-        if (pos >= expr.size()) return lhs;
+            // Two-character operators first, so "<=" isn't read as "<"
+            // followed by a stray "=".
+            CompareOp op = CompareOp::None;
+            if (expr.compare(pos, 2, L"<>") == 0)      { op = CompareOp::Ne; pos += 2; }
+            else if (expr.compare(pos, 2, L"<=") == 0) { op = CompareOp::Le; pos += 2; }
+            else if (expr.compare(pos, 2, L">=") == 0) { op = CompareOp::Ge; pos += 2; }
+            else if (expr[pos] == L'<')                { op = CompareOp::Lt; ++pos; }
+            else if (expr[pos] == L'>')                { op = CompareOp::Gt; ++pos; }
+            else if (expr[pos] == L'=')                { op = CompareOp::Eq; ++pos; }
+            else return lhs;
 
-        // Two-character operators first, so "<=" isn't read as "<" followed
-        // by a stray "=".
-        CompareOp op = CompareOp::None;
-        if (expr.compare(pos, 2, L"<>") == 0)      { op = CompareOp::Ne; pos += 2; }
-        else if (expr.compare(pos, 2, L"<=") == 0) { op = CompareOp::Le; pos += 2; }
-        else if (expr.compare(pos, 2, L">=") == 0) { op = CompareOp::Ge; pos += 2; }
-        else if (expr[pos] == L'<')                { op = CompareOp::Lt; ++pos; }
-        else if (expr[pos] == L'>')                { op = CompareOp::Gt; ++pos; }
-        else if (expr[pos] == L'=')                { op = CompareOp::Eq; ++pos; }
-        else return lhs;
+            const Value rhs = ParseConcat(mgr, expr, pos, visited);
+            if (lhs.IsError()) continue;
+            if (rhs.IsError()) { lhs = rhs; continue; }
+            lhs = Value::Bool(Compare(op, lhs, rhs));
+        }
+    }
 
-        Value rhs = ParseAdditive(mgr, expr, pos, visited);
-        if (lhs.IsError()) return lhs;
-        if (rhs.IsError()) return rhs;
-        return Value::Num(Compare(op, lhs, rhs) ? 1.0 : 0.0);
+    // & joins two values as text (ToText): ="a"&1 is "a1", =A1&" days".
+    static Value ParseConcat(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos, Path& visited)
+    {
+        Value value = ParseAdditive(mgr, expr, pos, visited);
+        for (;;)
+        {
+            SkipSpaces(expr, pos);
+            if (pos >= expr.size() || expr[pos] != L'&') break;
+            ++pos;
+            const Value a = ToText(value);
+            const Value b = ToText(ParseAdditive(mgr, expr, pos, visited));
+            if (a.IsError()) { value = a; continue; }
+            if (b.IsError()) { value = b; continue; }
+            value = Value::Str(a.text + b.text);
+        }
+        return value;
     }
 
     // + and -: both operands as numbers (ToNumber). A date moved by a number
@@ -1152,7 +1209,7 @@ struct CFormulator::Engine
     // before that the dividend, L7).
     static Value ParseTerm(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos, Path& visited)
     {
-        Value value = ParseFactor(mgr, expr, pos, visited);
+        Value value = ParsePower(mgr, expr, pos, visited);
         for (;;)
         {
             SkipSpaces(expr, pos);
@@ -1161,7 +1218,7 @@ struct CFormulator::Engine
             if (op != L'*' && op != L'/') break;
             ++pos;
             const Value a = ToNumber(value);
-            const Value b = ToNumber(ParseFactor(mgr, expr, pos, visited));
+            const Value b = ToNumber(ParsePower(mgr, expr, pos, visited));
             if (a.IsError()) { value = a; continue; }
             if (b.IsError()) { value = b; continue; }
             if (op == L'*')          value = Value::Num(a.num * b.num);
@@ -1171,15 +1228,75 @@ struct CFormulator::Engine
         return value;
     }
 
-    static Value ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos, Path& visited)
+    // a^b: both as numbers, left to right (2^3^2 is 64).
+    static Value ParsePower(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos, Path& visited)
     {
-        // Unary +/- below recurses straight back into ParseFactor, which would
-        // otherwise sidestep ParseExpression's guard and let "=-----...-1" run
-        // the stack out.
+        Value value = ParseUnary(mgr, expr, pos, visited);
+        for (;;)
+        {
+            SkipSpaces(expr, pos);
+            if (pos >= expr.size() || expr[pos] != L'^') break;
+            ++pos;
+            const Value a = ToNumber(value);
+            const Value b = ToNumber(ParseUnary(mgr, expr, pos, visited));
+            if (a.IsError()) { value = a; continue; }
+            if (b.IsError()) { value = b; continue; }
+            value = Power(a.num, b.num);
+        }
+        return value;
+    }
+
+    // a to the power b, for ^ and POWER, with Excel's answers where there is
+    // no number: 0^0 is #NUM!, 0 to a negative power #DIV/0!, and a negative
+    // number to a fractional power (or an overflow) #NUM!. POWER(0,0) was 1.
+    static Value Power(double a, double b)
+    {
+        if (a == 0.0 && b == 0.0) return Value::Err(kErrorNum);
+        if (a == 0.0 && b < 0.0) return Value::Err(kErrorDiv0);
+        const double r = std::pow(a, b);
+        return std::isfinite(r) ? Value::Num(r) : Value::Err(kErrorNum);
+    }
+
+    // Unary + and -, which bind tighter than ^ (-2^2 is 4, as in Excel).
+    static Value ParseUnary(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos, Path& visited)
+    {
+        // The sign recurses straight back into ParseUnary, which would
+        // otherwise sidestep ParseExpression's guard and let "=-----...-1"
+        // run the stack out.
         FormulaDepthGuard depth;
         if (depth.overflowed)
             return Value::Err(kErrorSyntax);
 
+        SkipSpaces(expr, pos);
+        if (pos < expr.size() && (expr[pos] == L'+' || expr[pos] == L'-'))
+        {
+            const bool neg = expr[pos] == L'-';
+            ++pos;
+            Value v = ParseUnary(mgr, expr, pos, visited);
+            if (!neg) return v;                  // +A1 is A1, text included
+            const Value n = ToNumber(v);        // -"abc" is #VALUE!; -LEFT("5",1) is -5
+            return n.IsError() ? n : Value::Num(-n.num);
+        }
+        return ParsePostfix(mgr, expr, pos, visited);
+    }
+
+    // A value followed by % signs, each dividing it by 100: 50% is 0.5.
+    static Value ParsePostfix(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos, Path& visited)
+    {
+        Value value = ParsePrimary(mgr, expr, pos, visited);
+        for (;;)
+        {
+            SkipSpaces(expr, pos);
+            if (pos >= expr.size() || expr[pos] != L'%') break;
+            ++pos;
+            const Value n = ToNumber(value);
+            value = n.IsError() ? n : Value::Num(n.num / 100.0);
+        }
+        return value;
+    }
+
+    static Value ParsePrimary(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos, Path& visited)
+    {
         SkipSpaces(expr, pos);
         if (pos >= expr.size())
             return Value::Err(kErrorSyntax);    // an operand is missing: "=", "=1+", "=("
@@ -1212,16 +1329,6 @@ struct CFormulator::Engine
             }
             return Value::Err(kErrorSyntax);    // no closing quote
         }
-        if (expr[pos] == L'+' || expr[pos] == L'-')
-        {
-            const bool neg = expr[pos] == L'-';
-            ++pos;
-            Value v = ParseFactor(mgr, expr, pos, visited);
-            if (!neg) return v;                  // +A1 is A1, text included
-            const Value n = ToNumber(v);        // -"abc" is #VALUE!; -LEFT("5",1) is -5
-            return n.IsError() ? n : Value::Num(-n.num);
-        }
-
         const size_t start = pos;
         while (pos < expr.size() && IsTokenChar(expr[pos])) ++pos;
         // A numeric literal with a signed exponent ("1e-3", "2.5E+2"): the scan
@@ -1305,8 +1412,8 @@ struct CFormulator::Engine
             return FromResult(ReferenceValue(mgr, row, col, visited));
         }
 
-        if (_wcsicmp(token.c_str(), L"TRUE") == 0) return Value::Num(1.0);
-        if (_wcsicmp(token.c_str(), L"FALSE") == 0) return Value::Num(0.0);
+        if (_wcsicmp(token.c_str(), L"TRUE") == 0) return Value::Bool(true);
+        if (_wcsicmp(token.c_str(), L"FALSE") == 0) return Value::Bool(false);
 
         // A name that is neither a reference nor a keyword. It used to read
         // as 0.
@@ -1456,7 +1563,7 @@ struct CFormulator::Engine
             }, true))
             return Value::Err(e);
         if (!any) return Value::Err(kErrorValue);
-        return Value::Num((isAnd ? all : some) ? 1.0 : 0.0);
+        return Value::Bool(isAnd ? all : some);
     }
 
     // ---- Functions ---------------------------------------------------------------
@@ -1503,7 +1610,7 @@ struct CFormulator::Engine
             if (cond.IsError()) return cond;
             if (cond.num != 0.0) return EvalValue(mgr, args[1], visited);
             if (args.size() == 3) return EvalValue(mgr, args[2], visited);
-            return Value::Num(0.0);
+            return Value::Bool(false);                  // IF(FALSE,1) is FALSE, as in Excel
         }
         if (fn == L"IFS")
         {
@@ -1525,7 +1632,7 @@ struct CFormulator::Engine
             if (TrimWs(arg).empty()) return Value::Err(kErrorSyntax);
             const Value cond = EvalCondition(mgr, arg, visited);
             if (cond.IsError()) return cond;
-            return Value::Num(cond.num == 0.0 ? 1.0 : 0.0);
+            return Value::Bool(cond.num == 0.0);
         }
 
         // -------- Errors and blanks -----------------------------------------
@@ -1549,7 +1656,7 @@ struct CFormulator::Engine
             if (TrimWs(arg).empty()) return Value::Err(kErrorSyntax);
             const Value v = EvalValue(mgr, arg, visited);
             if (v.IsError() && v.error == kErrorSyntax) return v;
-            return Value::Num(v.IsError() ? 1.0 : 0.0);
+            return Value::Bool(v.IsError());
         }
         if (fn == L"ISBLANK")
         {
@@ -1562,10 +1669,10 @@ struct CFormulator::Engine
             if (t.empty()) return Value::Err(kErrorSyntax);
             UINT row = 0, col = 0;
             if (ParseCellRef(t, row, col))
-                return Value::Num((!InGrid(mgr, row, col) || IsBlankCell(mgr->GetCell(row, col))) ? 1.0 : 0.0);
+                return Value::Bool(!InGrid(mgr, row, col) || IsBlankCell(mgr->GetCell(row, col)));
             const Value v = EvalValue(mgr, t, visited);
             if (v.IsError() && v.error == kErrorSyntax) return v;
-            return Value::Num(v.kind == Value::Blank ? 1.0 : 0.0);
+            return Value::Bool(v.kind == Value::Blank);
         }
 
         // -------- Maths --------------------------------------------------------
@@ -1579,14 +1686,13 @@ struct CFormulator::Engine
         {
             // Split at top-level commas only: arg.find(L',') cut
             // POWER(ROUND(2.5,0),2) inside ROUND's own argument list. Exactly
-            // two: POWER(2) read as 0^0 = 1. No finite result (POWER(0,-1))
-            // is #NUM!.
+            // two: POWER(2) read as 0^0 = 1. The edge cases are ^'s (Power).
             const auto args = SplitArgs(arg);
             if (args.size() != 2) return Value::Err(kErrorSyntax);
             const Value base = EvalNumber(mgr, args[0], visited);
             const Value exp = EvalNumber(mgr, args[1], visited);
             if (const Value* e = FirstError({ &base, &exp })) return *e;
-            return Value::Num(std::pow(base.num, exp.num));
+            return Power(base.num, exp.num);
         }
         if (fn == L"ROOT")
         {
@@ -1768,8 +1874,11 @@ struct CFormulator::Engine
             // "1,234.50", "$1,234.50", "25%" = 0.25, and date text as its
             // serial, as in Excel. A number passes through (a plain number,
             // not a date) and a blank cell is 0.
+            // TRUE and FALSE are not text to read: #VALUE!, as in Excel.
             if (TrimWs(arg).empty()) return Value::Err(kErrorSyntax);  // VALUE() has nothing to read
-            const Value v = ToNumber(EvalValue(mgr, arg, visited));
+            const Value raw = EvalValue(mgr, arg, visited);
+            if (raw.kind == Value::Boolean) return Value::Err(kErrorValue);
+            const Value v = ToNumber(raw);
             return v.IsError() ? v : Value::Num(v.num);
         }
 
@@ -1815,8 +1924,8 @@ struct CFormulator::Engine
             return Value::Num(fn == L"YEAR" ? (double)y : fn == L"MONTH" ? (double)m : (double)d);
         }
 
-        if (fn == L"TRUE")  return Value::Num(1.0);
-        if (fn == L"FALSE") return Value::Num(0.0);
+        if (fn == L"TRUE")  return Value::Bool(true);
+        if (fn == L"FALSE") return Value::Bool(false);
 
         // Not a function this engine knows. It used to read as 0.
         return Value::Err((IsAsciiLetter(name[0]) || name[0] >= 0x80) ? kErrorName : kErrorSyntax);
@@ -1887,7 +1996,13 @@ bool CFormulator::ParseCellRef(const std::wstring& token, UINT& row, UINT& col) 
     auto asciiLetter = [](wchar_t ch) {
         return (ch >= L'A' && ch <= L'Z') || (ch >= L'a' && ch <= L'z');
     };
+    // An absolute reference marks the column, the row or both with '$'
+    // ($A$1, $A1, A$1). The marks say how a copy of the formula adjusts the
+    // reference; the cell is the same, so they are read and set aside. They
+    // used to be a syntax error.
     size_t i = 0;
+    if (i < token.size() && token[i] == L'$') ++i;
+    const size_t lettersStart = i;
     unsigned long long c = 0;
     while (i < token.size() && asciiLetter(token[i])) {
         const wchar_t upper = (token[i] >= L'a') ? (wchar_t)(token[i] - L'a' + L'A') : token[i];
@@ -1895,7 +2010,9 @@ bool CFormulator::ParseCellRef(const std::wstring& token, UINT& row, UINT& col) 
         if (c > 0xFFFFFFFFull) return false;   // column index overflow
         ++i;
     }
-    if (i == 0 || i >= token.size()) return false;
+    if (i == lettersStart) return false;
+    if (i < token.size() && token[i] == L'$') ++i;
+    if (i >= token.size()) return false;
 
     // The remainder must be digits and nothing else. std::stoul stops at the
     // first non-digit without complaining, so without this check "A1:B10"

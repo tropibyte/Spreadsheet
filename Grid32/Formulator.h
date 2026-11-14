@@ -20,12 +20,17 @@ public:
 	// A numeric result that is a date (DATE, TODAY, NOW, a date cell, a date
 	// plus or minus a number, MIN/MAX of dates) sets `isDate`; `value` is its
 	// serial, and a General cell shows it as a date.
+	//
+	// A logical result (a comparison, TRUE/FALSE, AND, OR, NOT, ISERROR,
+	// ISBLANK, a TRUE/FALSE cell) sets `isBoolean`; `value` is 1 or 0, and the
+	// cell shows TRUE or FALSE.
 	struct Result
 	{
 		double value = 0.0;
 		bool isText = false;
 		bool isError = false;
 		bool isDate = false;
+		bool isBoolean = false;
 		std::wstring text;
 	};
 
@@ -75,7 +80,8 @@ public:
 	static size_t CellEvaluationCount();
 
 	// Reference syntax, public for the grid and the tools (GoTo, the console).
-	// Accepts a *whole* reference token only ("A1"); anything with trailing
+	// Accepts a *whole* reference token only ("A1", or absolute: "$A$1",
+	// "$A1", "A$1"); anything with trailing
 	// characters ("A1:B10", "A1B") is rejected so range syntax can't be
 	// mistaken for a single cell. Syntax only: whether the cell lies inside a
 	// particular grid is checked where the reference is evaluated.

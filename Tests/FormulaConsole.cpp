@@ -196,7 +196,7 @@ const char* TypeName(CellType t)
 // What kind of value a Result is, as the console reports it.
 const char* ResultKind(const CFormulator::Result& r)
 {
-    return r.isError ? "error" : r.isText ? "text" : r.isDate ? "date" : "number";
+    return r.isError ? "error" : r.isText ? "text" : r.isBoolean ? "boolean" : r.isDate ? "date" : "number";
 }
 
 // What a cell shows for a Result. A copy of ApplyFormulaResult in
@@ -207,11 +207,19 @@ void RenderFormulaResult(PGRIDCELL pCell, const CFormulator::Result& r)
     // sorting and export treat it as the date it shows; any other result
     // keeps CT_Formula.
     const bool isDate = r.isDate && !r.isText && !r.isError;
-    pCell->m_eType = isDate ? CT_Date : CT_Formula;
+    const bool isBoolean = r.isBoolean && !r.isText && !r.isError;
+    pCell->m_eType = isDate ? CT_Date : isBoolean ? CT_Boolean : CT_Formula;
     pCell->m_dValue = r.isText ? std::numeric_limits<double>::quiet_NaN() : r.value;
     if (r.isText || r.isError)
     {
         pCell->m_wsText = r.text;
+        return;
+    }
+    if (isBoolean)
+    {
+        // TRUE or FALSE, whatever the number format (as in Excel); m_dValue
+        // is 1 or 0. A comparison showed 1 or 0.
+        pCell->m_wsText = r.value != 0.0 ? L"TRUE" : L"FALSE";
         return;
     }
     std::wstring general = CFormulator::FormatGeneral(r.value);
@@ -446,6 +454,7 @@ struct Console
             if (r->isError) return std::string("error ") + Narrow(r->text);
             if (r->isText) return "text \"" + Narrow(r->text) + "\"";
             if (r->isDate) return "date, serial " + Narrow(CFormulator::FormatGeneral(r->value));
+            if (r->isBoolean) return std::string("boolean ") + (r->value != 0.0 ? "TRUE" : "FALSE");
             return "number " + Narrow(CFormulator::FormatGeneral(r->value));
         }
         if (cell->m_wsText.empty()) return "(blank)";
@@ -533,7 +542,7 @@ struct Console
                 if (cell->m_bFormula)
                 {
                     const CFormulator::Result* res = sheet.ResultOf(CellKey(r, c));
-                    isRight = res && !res->isText && !res->isError;
+                    isRight = res && !res->isText && !res->isError && !res->isBoolean;
                 }
                 else
                 {

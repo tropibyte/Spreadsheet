@@ -832,6 +832,24 @@ TEST(FormulaResults_ExportTheirValueWhateverTheFormat)
     ASSERT_TRUE(dst.Cell(0, 3)->m_eType == CT_Text);
 }
 
+TEST(FormulaResults_LogicalsExportAsBooleans)
+{
+    Sheet src;
+    src.Set(0, 0, L"5");
+    src.Set(0, 1, L"=A1>3");
+    src.Set(0, 2, L"=A1<3");
+    const std::wstring xml = Out(src, SF_XML);
+    ASSERT_CONTAINS(xml, L"<Data ss:Type=\"Boolean\">1</Data>");
+    ASSERT_CONTAINS(xml, L"<Data ss:Type=\"Boolean\">0</Data>");
+    const std::wstring odf = Out(src, SF_ODF);
+    ASSERT_CONTAINS(odf, L"office:value-type=\"boolean\" office:boolean-value=\"true\"");
+    ASSERT_CONTAINS(odf, L"office:value-type=\"boolean\" office:boolean-value=\"false\"");
+    Sheet dst;
+    ASSERT_TRUE(RoundTrip(src, SF_XML, dst));
+    ASSERT_TRUE(dst.Cell(0, 1)->m_eType == CT_Boolean && dst.Cell(0, 1)->m_dValue == 1.0);
+    ASSERT_WSTR(dst.Text(0, 2), L"FALSE");
+}
+
 TEST(Xml_RoundTripsValuesTypesAndFormats)
 {
     Sheet src;

@@ -235,6 +235,10 @@ inline std::wstring FormatCellValue(CellType type, double value,
                                     const std::wstring& rawText, UINT format)
 {
     if (type == CT_Text || format == FMT_GENERAL) return rawText;
+    // A logical value shows TRUE or FALSE whatever the number format, as in
+    // Excel, and as a formula's logical result does. It showed "1.00" under
+    // Number, "$1.00" under Currency.
+    if (type == CT_Boolean) return value != 0.0 ? L"TRUE" : L"FALSE";
 
     auto formatDate = [&rawText](double serial, bool iso) -> std::wstring {
         // Outside Excel's date range (negative, or past 9999-12-31) there is

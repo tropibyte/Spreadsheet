@@ -348,6 +348,27 @@ TEST(FormulaCell_DateResultShowsAsADate)
     ASSERT_WSTR(s.Text(2, 0), L"2958470");
 }
 
+TEST(FormulaCell_LogicalResultShowsTrueOrFalse)
+{
+    // A comparison showed 1 or 0.
+    Sheet s;
+    s.Set(0, 0, L"5");
+    s.Set(0, 1, L"=A1>3");
+    ASSERT_WSTR(s.Text(0, 1), L"TRUE");
+    ASSERT_TRUE(s.Type(0, 1) == CT_Boolean);       // exports and sorts as a logical
+    ASSERT_NEAR(s.Value(0, 1), 1.0, 1e-12);
+    s.Format(0, 1, FMT_CURRENCY);                  // number formats do not apply
+    ASSERT_WSTR(s.Text(0, 1), L"TRUE");
+    s.Set(0, 0, L"1");
+    ASSERT_WSTR(s.Text(0, 1), L"FALSE");
+    ASSERT_NEAR(s.Value(0, 1), 0.0, 1e-12);
+    s.Set(1, 1, L"=B1+1");                         // arithmetic on it is a number
+    ASSERT_WSTR(s.Text(1, 1), L"1");
+    ASSERT_TRUE(s.Type(1, 1) == CT_Formula);
+    s.Set(2, 1, L"=IF(A1>3,\"big\")");             // IF with no else
+    ASSERT_WSTR(s.Text(2, 1), L"FALSE");
+}
+
 TEST(FormulaCell_ReadersOfAFormattedFormulaSeeItsValue)
 {
     Sheet s;
