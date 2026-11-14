@@ -1136,6 +1136,196 @@ TEST(Value_ErrorPropagatesThroughCells)
     ASSERT_TRUE(IsError(L"MAX(B1:C1)", CFormulator::kErrorValue));
 }
 
+// ---- #6: date results ------------------------------------------------------------
+static bool IsDate(const wchar_t* formula, double serial)
+{
+    CFormulator::Result r = CFormulator::Evaluate(g_sheet, formula);
+    return r.isDate && !r.isText && !r.isError && r.value == serial;
+}
+static bool IsPlainNumber(const wchar_t* formula, double value)
+{
+    CFormulator::Result r = CFormulator::Evaluate(g_sheet, formula);
+    return !r.isDate && !r.isText && !r.isError && std::fabs(r.value - value) < 1e-9;
+}
+
+TEST(DateResults_AreMarkedAsDates)
+{
+    SheetReset();
+    SheetSet(0, 0, L"2024-01-15");                       // A1: a typed date, 45306
+    SheetSet(1, 0, L"2024-03-01");                       // A2: 45352
+    SheetSetFormatted(2, 0, L"45306", FMT_DATE_ISO);     // A3: a number shown as a date
+    SheetSet(3, 0, L"=A1+30");                           // A4: a formula date
+    SheetSetFormatted(4, 0, L"=45306", FMT_DATE_US);     // A5: a formula formatted as a date
+    SheetSet(5, 0, L"7");                                // A6: a plain number
+
+    // Where dates come from.
+    ASSERT_TRUE(IsDate(L"DATE(2024,1,15)", 45306.0));
+    ASSERT_TRUE(IsDate(L"A1", 45306.0));
+    ASSERT_TRUE(IsDate(L"(A1)", 45306.0));
+    ASSERT_TRUE(IsDate(L"A3", 45306.0));
+    ASSERT_TRUE(IsDate(L"A4", 45336.0));
+    ASSERT_TRUE(IsDate(L"A5", 45306.0));
+    CFormulator::Result today = CFormulator::Evaluate(g_sheet, L"TODAY()");
+    ASSERT_TRUE(today.isDate && today.value > 46000.0);
+    ASSERT_TRUE(CFormulator::Evaluate(g_sheet, L"NOW()").isDate);
+    // A date moved by days is a date; the days between two dates are not.
+    ASSERT_TRUE(IsDate(L"A1+7", 45313.0));
+    ASSERT_TRUE(IsDate(L"7+A1", 45313.0));
+    ASSERT_TRUE(IsDate(L"A1-7", 45299.0));
+    ASSERT_TRUE(IsDate(L"A1+A6", 45313.0));
+    ASSERT_TRUE(IsPlainNumber(L"A2-A1", 46.0));
+    ASSERT_TRUE(IsPlainNumber(L"A1+A2", 90658.0));
+    ASSERT_TRUE(IsPlainNumber(L"7-A1", 7.0 - 45306.0));
+    ASSERT_TRUE(IsPlainNumber(L"A1*1", 45306.0));
+    ASSERT_TRUE(IsPlainNumber(L"-A1", -45306.0));
+    ASSERT_TRUE(IsPlainNumber(L"A6+1", 8.0));
+    // A date on the left of * is not mistaken for the right operand's.
+    ASSERT_TRUE(IsPlainNumber(L"A1*A6", 45306.0 * 7.0));
+    // Functions: date functions and choices pass a date on; the rest do not.
+    ASSERT_TRUE(IsDate(L"MAX(A1:A2)", 45352.0));
+    ASSERT_TRUE(IsDate(L"MIN(A1,A2)", 45306.0));
+    ASSERT_TRUE(IsPlainNumber(L"MAX(A1:A2,100000)", 100000.0));   // not all dates
+    ASSERT_TRUE(IsDate(L"IF(A1>A2,A1,A2)", 45352.0));
+    ASSERT_TRUE(IsDate(L"IFERROR(A1,0)", 45306.0));
+    ASSERT_TRUE(IsPlainNumber(L"YEAR(A1)", 2024.0));
+    ASSERT_TRUE(IsPlainNumber(L"ROUND(A1,0)", 45306.0));
+    ASSERT_TRUE(IsPlainNumber(L"SUM(A1:A2)", 90658.0));
+    ASSERT_TRUE(IsPlainNumber(L"A1=A3", 1.0));
+    ASSERT_TRUE(IsPlainNumber(L"VALUE(\"2024-01-15\")", 45306.0));   // VALUE gives a number
+}
+
+TEST(DateParts_ReadDateText)
+{
+    StandardSheet();
+    ASSERT_NEAR(Eval(L"=YEAR(\"2024-01-15\")"), 2024.0, 1e-9);     // was #NUM!
+    ASSERT_NEAR(Eval(L"=MONTH(\"5/15/2026\")"), 5.0, 1e-9);
+    ASSERT_NEAR(Eval(L"=DAY(\" 2024-01-15 \")"), 15.0, 1e-9);
+    ASSERT_NEAR(Eval(L"=YEAR(\"45306\")"), 2024.0, 1e-9);          // numeric text too
+    ASSERT_TRUE(IsError(L"DAY(\"abc\")", CFormulator::kErrorValue));
+    ASSERT_TRUE(IsError(L"YEAR(\"\")", CFormulator::kErrorValue));
+}
+
+// ---- #7: ranges where Excel takes them -------------------------------------------
+TEST(AndOr_TakeRangesAndSeeEveryArgument)
+{
+    SheetReset();
+    SheetSet(0, 0, L"1");  SheetSet(1, 0, L"2");  SheetSet(2, 0, L"0");  SheetSet(3, 0, L"hello");
+    SheetSet(0, 2, L"=1/0");                                       // C1
+    ASSERT_NEAR(Eval(L"=AND(A1:A2)"), 1.0, 1e-12);                 // was #ERROR!
+    ASSERT_NEAR(Eval(L"=AND(A1:A3)"), 0.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=AND(A1:A4)"), 0.0, 1e-12);                 // text is skipped
+    ASSERT_NEAR(Eval(L"=AND(A1,A2)"), 1.0, 1e-12);                 // blanks are skipped
+    ASSERT_NEAR(Eval(L"=OR(A1:A3)"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=OR(A3)"), 0.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=OR(A3, A1>0)"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=AND(A1>0,A2>1,A3<1)"), 1.0, 1e-12);
+    // Every argument is looked at, so an error is the answer.
+    ASSERT_TRUE(IsError(L"AND(0,1/0)", CFormulator::kErrorDiv0));   // was 0
+    ASSERT_TRUE(IsError(L"OR(1,C1)", CFormulator::kErrorDiv0));     // was 1
+    // Nothing to look at: no answer.
+    ASSERT_TRUE(IsError(L"AND(A4)", CFormulator::kErrorValue));
+    ASSERT_TRUE(IsError(L"OR(Z1:Z9)", CFormulator::kErrorValue));
+    ASSERT_TRUE(IsError(L"AND()", CFormulator::kErrorValue));
+}
+
+TEST(Concat_TakesRanges)
+{
+    SheetReset();
+    SheetSet(0, 0, L"1");  SheetSet(1, 0, L"2");  SheetSet(2, 0, L"x");
+    SheetSet(0, 1, L"a");  SheetSet(1, 1, L"b");
+    SheetSet(0, 2, L"=1/0");                                       // C1
+    ASSERT_TRUE(IsText(L"CONCAT(A1:A3)", L"12x"));                  // was #ERROR!
+    ASSERT_TRUE(IsText(L"CONCAT(A1:B2)", L"1a2b"));                 // row by row
+    ASSERT_TRUE(IsText(L"CONCAT(A1:A9, \"-\", B1:B2)", L"12x-ab")); // blanks add nothing
+    ASSERT_TRUE(IsText(L"CONCATENATE(\"<\",A1:A2,\">\")", L"<12>"));
+    ASSERT_TRUE(IsText(L"CONCAT(A:A)", L"12x"));
+    ASSERT_TRUE(IsText(L"CONCAT(A1,B1)", L"1a"));
+    ASSERT_TRUE(IsText(L"CONCAT(A1:A4097)", L""));                  // off the grid: nothing
+    ASSERT_TRUE(IsError(L"CONCAT(A1:C1)", CFormulator::kErrorDiv0));
+}
+
+TEST(Ranges_WholeColumnsAndRows)
+{
+    SheetReset();
+    SheetSet(0, 0, L"1");  SheetSet(1, 0, L"2");  SheetSet(4095, 0, L"4");   // A1, A2, A4096
+    SheetSet(0, 1, L"10"); SheetSet(1, 2, L"100");                           // B1, C2
+    ASSERT_NEAR(Eval(L"=SUM(A:A)"), 7.0, 1e-12);                   // was #NAME?
+    ASSERT_NEAR(Eval(L"=SUM(a:a)"), 7.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=SUM(A:B)"), 17.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=SUM(B:A)"), 17.0, 1e-12);                  // either end first
+    ASSERT_NEAR(Eval(L"=SUM(1:1)"), 11.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=SUM(2:1)"), 113.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=SUM(4096:4096)"), 4.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=COUNT(A:C)"), 5.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=MAX(1:2)"), 100.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=SUM(A:A, 10)"), 17.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=SUM( A : A )"), 7.0, 1e-12);
+    // Columns or rows past the grid are rejected whole, as a cell range is.
+    ASSERT_NEAR(Eval(L"=SUM(A:AAA)"), 0.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=SUM(4097:4097)"), 0.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=SUM(1:4294967297)"), 0.0, 1e-12);
+    // Mixed forms are not ranges; read as an expression, "A" is an unknown name.
+    ASSERT_TRUE(IsError(L"SUM(A:1)", CFormulator::kErrorName));
+    // A formula inside its own column reads itself as 0 (a cycle), as before.
+    SheetSet(9, 0, L"=SUM(A:A)");                                  // A10
+    ASSERT_NEAR(Eval(L"=A10"), 7.0, 1e-12);
+}
+
+// ---- #8: IFERROR, ISERROR, ISBLANK -------------------------------------------------
+TEST(IfError_CatchesValueErrorsOnly)
+{
+    SheetReset();
+    SheetSet(0, 0, L"1");                                          // A1
+    SheetSet(0, 2, L"=1/0");                                       // C1
+    SheetSetText(1, 0, L"abc");                                    // A2
+    ASSERT_TRUE(IsText(L"IFERROR(1/0,\"oops\")", L"oops"));
+    ASSERT_NEAR(Eval(L"=IFERROR(C1,0)"), 0.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=IFERROR(C1*2,-1)"), -1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=IFERROR(A1*2,0)"), 2.0, 1e-12);            // no error: the value
+    ASSERT_TRUE(IsText(L"IFERROR(UPPER(\"ok\"),0)", L"OK"));       // text passes through
+    ASSERT_TRUE(IsText(L"IFERROR(FOO(1),\"unknown\")", L"unknown"));   // #NAME? is caught
+    ASSERT_NEAR(Eval(L"=IFERROR(VALUE(A2),-1)"), -1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=IFERROR(SQRT(-1),0)"), 0.0, 1e-12);
+    ASSERT_TRUE(IsError(L"IFERROR(1/0,A1/0)", CFormulator::kErrorDiv0));   // the fallback's own
+    ASSERT_NEAR(Eval(L"=IFERROR(1/0,0)+5"), 5.0, 1e-12);
+    // A malformed formula is not an error value: it is not hidden.
+    ASSERT_TRUE(IsError(L"IFERROR(12abc,0)", CFormulator::kErrorSyntax));
+    ASSERT_TRUE(IsError(L"IFERROR(1)", CFormulator::kErrorSyntax));
+    ASSERT_TRUE(IsError(L"IFERROR(1,2,3)", CFormulator::kErrorSyntax));
+    // An error before IFERROR is still the formula's.
+    ASSERT_TRUE(IsError(L"1/0+IFERROR(1,2)", CFormulator::kErrorDiv0));
+}
+
+TEST(IsError_And_IsBlank)
+{
+    SheetReset();
+    SheetSet(0, 0, L"1");                                          // A1
+    SheetSet(0, 2, L"=1/0");                                       // C1
+    SheetSet(1, 0, L"=\"\"");                                      // A2: a formula whose result is ""
+    SheetSet(2, 0, L"0");                                          // A3
+    ASSERT_NEAR(Eval(L"=ISERROR(C1)"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=ISERROR(A1)"), 0.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=ISERROR(VALUE(\"x\"))"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=ISERROR(FOO())"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=IF(ISERROR(C1),\"bad\",C1)") , 0.0, 1e-12);   // text "bad" reads as 0
+    ASSERT_TRUE(IsText(L"IF(ISERROR(C1),\"bad\",C1)", L"bad"));
+    ASSERT_TRUE(IsError(L"ISERROR(1 2)", CFormulator::kErrorSyntax));
+
+    ASSERT_NEAR(Eval(L"=ISBLANK(Z1)"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=ISBLANK(A1)"), 0.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=ISBLANK(A2)"), 0.0, 1e-12);                // "" from a formula is not blank
+    ASSERT_NEAR(Eval(L"=ISBLANK(A3)"), 0.0, 1e-12);                // 0 is not blank
+    ASSERT_NEAR(Eval(L"=ISBLANK(\"\")"), 0.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=ISBLANK(A4097)"), 1.0, 1e-12);             // off the grid: nothing there
+    ASSERT_NEAR(Eval(L"=ISBLANK(1/0)"), 0.0, 1e-12);               // not an error either
+    ASSERT_TRUE(IsText(L"IF(ISBLANK(Z5),\"empty\",\"full\")", L"empty"));
+    ASSERT_TRUE(IsError(L"ISBLANK()", CFormulator::kErrorSyntax));
+    // A cleared cell keeps its old type but is blank.
+    SheetSet(3, 0, L"7");
+    SheetCell(3, 0)->m_wsText.clear();
+    ASSERT_NEAR(Eval(L"=ISBLANK(A4)"), 1.0, 1e-12);
+}
+
 // ---- runner ----------------------------------------------------------------
 int main()
 {

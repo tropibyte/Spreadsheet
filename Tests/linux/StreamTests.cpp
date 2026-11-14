@@ -774,6 +774,27 @@ TEST(Dates_EarlyIn1900KeepExcelSerialsThroughEveryFormat)
     }
 }
 
+TEST(Dates_FormulaDateResultsExportAsDates)
+{
+    // A formula whose result is a date is a date cell (CT_Date) and exports
+    // as one; it used to export as its display text, a string.
+    Sheet src;
+    src.Set(0, 0, L"2024-01-15");
+    src.Set(0, 1, L"=A1+1");
+    src.Set(0, 2, L"=A1*1");                                // a number, not a date
+    const std::wstring xml = Out(src, SF_XML);
+    ASSERT_CONTAINS(xml, L"<Data ss:Type=\"DateTime\">2024-01-16T00:00:00.000</Data>");
+    ASSERT_CONTAINS(xml, L"<Data ss:Type=\"Number\">45306</Data>");
+    const std::wstring odf = Out(src, SF_ODF);
+    ASSERT_CONTAINS(odf, L"office:date-value=\"2024-01-16\"");
+    const std::wstring csv = Out(src, SF_CSV);
+    ASSERT_CONTAINS(csv, L"2024-01-16");
+    Sheet dst;
+    ASSERT_TRUE(RoundTrip(src, SF_SSF, dst));              // SSF keeps the formula
+    ASSERT_TRUE(dst.Cell(0, 1)->m_bFormula && dst.Cell(0, 1)->m_eType == CT_Date);
+    ASSERT_WSTR(dst.Text(0, 1), L"2024-01-16");
+}
+
 TEST(Xml_RoundTripsValuesTypesAndFormats)
 {
     Sheet src;

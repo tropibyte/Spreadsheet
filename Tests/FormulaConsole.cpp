@@ -196,14 +196,18 @@ const char* TypeName(CellType t)
 // What kind of value a Result is, as the console reports it.
 const char* ResultKind(const CFormulator::Result& r)
 {
-    return r.isError ? "error" : r.isText ? "text" : "number";
+    return r.isError ? "error" : r.isText ? "text" : r.isDate ? "date" : "number";
 }
 
 // What a cell shows for a Result. A copy of ApplyFormulaResult in
 // Grid32Mgr.cpp — keep the two in step.
 void RenderFormulaResult(PGRIDCELL pCell, const CFormulator::Result& r)
 {
-    pCell->m_eType = CT_Formula;
+    // A date result makes the cell a date (CT_Date, still m_bFormula), so
+    // sorting and export treat it as the date it shows; any other result
+    // keeps CT_Formula.
+    const bool isDate = r.isDate && !r.isText && !r.isError;
+    pCell->m_eType = isDate ? CT_Date : CT_Formula;
     pCell->m_dValue = r.value;
     if (r.isText || r.isError)
     {
@@ -211,6 +215,13 @@ void RenderFormulaResult(PGRIDCELL pCell, const CFormulator::Result& r)
         return;
     }
     std::wstring general = CFormulator::FormatGeneral(r.value);
+    if (isDate && pCell->m_nFormat == FMT_GENERAL)
+    {
+        // A date shows as a date in General, as a typed one does
+        // (=TODAY() showed 46340); a Number format shows the serial.
+        pCell->m_wsText = Grid32Detail::FormatGeneralDate(r.value, general);
+        return;
+    }
     const bool renderable = std::isfinite(r.value) && std::fabs(r.value) < 1e14;
     pCell->m_wsText = renderable
         ? Grid32Detail::FormatCellValue(CT_Formula, r.value, general, pCell->m_nFormat)
@@ -423,6 +434,7 @@ struct Console
             if (!r) return "?";
             if (r->isError) return std::string("error ") + Narrow(r->text);
             if (r->isText) return "text \"" + Narrow(r->text) + "\"";
+            if (r->isDate) return "date, serial " + Narrow(CFormulator::FormatGeneral(r->value));
             return "number " + Narrow(CFormulator::FormatGeneral(r->value));
         }
         if (cell->m_wsText.empty()) return "(blank)";

@@ -77,7 +77,8 @@ enum CellType {
         CT_Number  = 1,
         CT_Date    = 2,   // m_dValue is days since 1899-12-30 (Excel serial)
         CT_Boolean = 3,
-        CT_Formula = 4,   // m_wsFormula carries the source; m_dValue is the last evaluated number; m_wsText is the displayed result
+        CT_Formula = 4,   // m_wsFormula carries the source; m_dValue is the last evaluated number; m_wsText is the displayed result.
+                          // A formula cell (m_bFormula) whose result is a date is CT_Date instead, so it sorts and exports as one.
         CT_Error   = 5,
 };
 

@@ -90,6 +90,11 @@ public:
         PGRIDCELL c = GetCell(row, col);
         return c ? c->m_dValue : 0.0;
     }
+    CellType Type(UINT row, UINT col)
+    {
+        PGRIDCELL c = GetCell(row, col);
+        return c ? c->m_eType : CT_Text;
+    }
     void HoldRecalc(bool hold) { m_bDeferRecalc = hold ? TRUE : FALSE; }
 private:
     bool m_ok;
@@ -306,6 +311,39 @@ TEST(FormulaCell_NegativeZeroShowsAsZero)
     ASSERT_WSTR(s.Text(0, 1), L"0.00");
     s.Set(0, 0, L"2");
     ASSERT_WSTR(s.Text(0, 1), L"-2.00");
+}
+
+TEST(FormulaCell_DateResultShowsAsADate)
+{
+    // A General formula cell showed a date result as its serial: =A1+30 on
+    // a date read 45336.
+    Sheet s;
+    s.Set(0, 0, L"2024-01-15");
+    s.Set(0, 1, L"=A1+30");
+    ASSERT_WSTR(s.Text(0, 1), L"2024-02-14");
+    ASSERT_TRUE(s.Type(0, 1) == CT_Date);          // sorts and exports as a date
+    ASSERT_NEAR(s.Value(0, 1), 45336.0, 1e-9);
+    s.Set(0, 2, L"=DATE(2024,1,15)+0.5");
+    ASSERT_WSTR(s.Text(0, 2), L"2024-01-15 12:00");
+    // A number format shows the serial, a date format its own form.
+    s.Format(0, 1, FMT_NUMBER);
+    ASSERT_WSTR(s.Text(0, 1), L"45336.00");
+    s.Format(0, 1, FMT_DATE_US);
+    ASSERT_WSTR(s.Text(0, 1), L"2/14/2024");
+    s.Format(0, 1, FMT_GENERAL);
+    ASSERT_WSTR(s.Text(0, 1), L"2024-02-14");
+    // Days between dates are a number.
+    s.Set(1, 0, L"2024-03-01");
+    s.Set(1, 1, L"=A2-A1");
+    ASSERT_WSTR(s.Text(1, 1), L"46");
+    ASSERT_TRUE(s.Type(1, 1) == CT_Formula);
+    // When the source stops being a date, so does the result.
+    s.Set(0, 0, L"5");
+    ASSERT_WSTR(s.Text(0, 1), L"35");
+    ASSERT_TRUE(s.Type(0, 1) == CT_Formula);
+    // A date result too far out for a date keeps its number.
+    s.Set(2, 0, L"=DATE(9999,12,31)+5");
+    ASSERT_WSTR(s.Text(2, 0), L"2958470");
 }
 
 TEST(FormulaCell_ReadersOfAFormattedFormulaSeeItsValue)

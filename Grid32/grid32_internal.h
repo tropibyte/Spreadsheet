@@ -259,6 +259,30 @@ inline std::wstring FormatCellValue(CellType type, double value,
     }
 }
 
+// How a formula's date result (CFormulator::Result::isDate) shows in a General
+// cell: "2024-01-15", with " 13:45" (or " 13:45:07") when it has a time of
+// day. A serial outside Excel's dates has no date to show and keeps `general`,
+// its number's text. Other formats render it as they render any number.
+inline std::wstring FormatGeneralDate(double serial, const std::wstring& general)
+{
+    if (!(serial >= 0.0 && serial < kMaxDateSerial + 1.0)) return general;
+    double day = std::floor(serial);
+    long secs = std::lround((serial - day) * 86400.0);
+    if (secs >= 86400) { day += 1.0; secs = 0; }            // 23:59:59.7 rounds to midnight
+    if (day > kMaxDateSerial) return general;
+    int y = 0, m = 0, d = 0;
+    SerialToYMD(day, y, m, d);
+    wchar_t buf[40];
+    if (secs == 0)
+        swprintf_s(buf, 40, L"%04d-%02d-%02d", y, m, d);
+    else if (secs % 60 == 0)
+        swprintf_s(buf, 40, L"%04d-%02d-%02d %02ld:%02ld", y, m, d, secs / 3600, (secs / 60) % 60);
+    else
+        swprintf_s(buf, 40, L"%04d-%02d-%02d %02ld:%02ld:%02ld", y, m, d,
+                   secs / 3600, (secs / 60) % 60, secs % 60);
+    return buf;
+}
+
 // Render the value the user should see when re-entering edit mode on a
 // formatted typed cell. Numbers come back as their natural form (no trailing
 // zeros, no thousands separators, no currency symbol), dates as ISO, booleans

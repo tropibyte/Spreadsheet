@@ -74,11 +74,14 @@ B3: 4
 expect E2 => 2.5
 expect E3 => 3.5
 
-# ---- Dates are Excel serials: 1900-01-01 is 1, and 60 is Excel's 1900-02-29
+# ---- Dates are Excel serials: 1900-01-01 is 1, and 60 is Excel's 1900-02-29.
+# A date result shows as a date; *1 (or a Number format) shows the serial.
 G1: 2024-01-15
-expect =G1 => 45306
+expect =G1 => 2024-01-15
+expect =G1*1 => 45306
+expect =G1+20 => 2024-02-04
 expect =DAY(G1+20) => 4
-expect =DATE(1900,1,1) => 1
+expect =DATE(1900,1,1)*1 => 1
 expect =DATE(24,1,1)=DATE(1924,1,1) => 1
 expect =DATE(2024,15,1)=DATE(2025,3,1) => 1
 expect =DATE(10000,1,1) => #NUM!
@@ -95,6 +98,24 @@ expect =-Z99 => 0
 expect =LEFT("abc",1e20) => abc
 expect =LEN(TRIM("a	b")) => 3
 expect =YEAR(1e15) => #NUM!
+
+# ---- Ranges in AND / OR / CONCAT, and whole columns and rows
+H1: 1
+H2: 2
+H3: x
+expect =AND(H1:H2) => 1
+expect =OR(H1:H3) => 1
+expect =CONCAT(H1:H3) => 12x
+expect =SUM(H:H) => 3
+expect =COUNT(H:H) => 2
+
+# ---- Catching errors, and blanks
+expect =IFERROR(1/0,"none") => none
+expect =IFERROR(H1*2,0) => 2
+expect =IFERROR(12abc,0) => #ERROR!
+expect =ISERROR(E2) => 0
+expect =ISBLANK(H9) => 1
+expect =ISBLANK(H1) => 0
 
 # ---- Unsupported syntax is flagged rather than guessed at
 expect =2^3 => #ERROR!

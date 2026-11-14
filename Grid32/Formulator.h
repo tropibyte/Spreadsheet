@@ -16,11 +16,16 @@ public:
 	//
 	// A formula that cannot be evaluated produces an error: `isError` is set,
 	// `text` is its code (see the kError* constants) and `value` is NaN.
+	//
+	// A numeric result that is a date (DATE, TODAY, NOW, a date cell, a date
+	// plus or minus a number, MIN/MAX of dates) sets `isDate`; `value` is its
+	// serial, and a General cell shows it as a date.
 	struct Result
 	{
 		double value = 0.0;
 		bool isText = false;
 		bool isError = false;
+		bool isDate = false;
 		std::wstring text;
 	};
 
@@ -30,6 +35,10 @@ public:
 	static constexpr const wchar_t* kErrorDiv0 = L"#DIV/0!";    // division by zero
 	static constexpr const wchar_t* kErrorNum = L"#NUM!";       // no finite result
 	static constexpr const wchar_t* kErrorValue = L"#VALUE!";   // a value of the wrong kind (VALUE("abc"))
+
+	// IFERROR and ISERROR see every error but kErrorSyntax: a malformed
+	// formula is a mistake in the formula, not a value it produced, and
+	// catching it would hide the typo.
 
 	// Evaluate formula source (no leading '='). `self` is the cell that holds
 	// the formula, if any: it is on the evaluation path from the start, so a
@@ -85,8 +94,9 @@ private:
 	// SUM(A1:A3, B7, 12).
 	static double SumRange(CGrid32Mgr* mgr, const std::wstring& arg,
 		std::set<std::pair<UINT, UINT>>& visited);
+	// `isDate`: every value it saw was a date, so the result is one.
 	static double MinMaxRange(CGrid32Mgr* mgr, const std::wstring& arg,
-		std::set<std::pair<UINT, UINT>>& visited, bool bMax);
+		std::set<std::pair<UINT, UINT>>& visited, bool bMax, bool& isDate);
 	static double CountRange(CGrid32Mgr* mgr, const std::wstring& arg,
 		std::set<std::pair<UINT, UINT>>& visited);
 	static double AverageRange(CGrid32Mgr* mgr, const std::wstring& arg,

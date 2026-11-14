@@ -6505,7 +6505,11 @@ std::wstring CGrid32Mgr::EvaluateFormula(const std::wstring& expr)
 // rather than becoming garbage.
 static void ApplyFormulaResult(PGRIDCELL pCell, const CFormulator::Result& r)
 {
-    pCell->m_eType = CT_Formula;
+    // A date result makes the cell a date (CT_Date, still m_bFormula), so
+    // sorting and export treat it as the date it shows; any other result
+    // keeps CT_Formula.
+    const bool isDate = r.isDate && !r.isText && !r.isError;
+    pCell->m_eType = isDate ? CT_Date : CT_Formula;
     pCell->m_dValue = r.value;
     if (r.isText || r.isError)
     {
@@ -6513,6 +6517,13 @@ static void ApplyFormulaResult(PGRIDCELL pCell, const CFormulator::Result& r)
         return;
     }
     std::wstring general = CFormulator::FormatGeneral(r.value);
+    if (isDate && pCell->m_nFormat == FMT_GENERAL)
+    {
+        // A date shows as a date in General, as a typed one does
+        // (=TODAY() showed 46340); a Number format shows the serial.
+        pCell->m_wsText = Grid32Detail::FormatGeneralDate(r.value, general);
+        return;
+    }
     const bool renderable = std::isfinite(r.value) && std::fabs(r.value) < 1e14;
     pCell->m_wsText = renderable
         ? Grid32Detail::FormatCellValue(CT_Formula, r.value, general, pCell->m_nFormat)
