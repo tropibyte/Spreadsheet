@@ -241,6 +241,21 @@ TEST(FormulaCell_CachedValueIsTheNumberNotItsText)
     ASSERT_NEAR(s.Value(0, 0), 1234567.89, 1e-6);
 }
 
+TEST(FormulaCell_GeneralShowsTheWholeNumber)
+{
+    // A General formula cell showed six significant digits: a total of
+    // 2,500,000 read "2.5e+06" and =1234567.89 read "1.23457e+06".
+    Sheet s;
+    s.Set(0, 0, L"=1234567.89");
+    ASSERT_WSTR(s.Text(0, 0), L"1234567.89");
+    s.Set(1, 0, L"1000000");
+    s.Set(2, 0, L"1500000");
+    s.Set(3, 0, L"=SUM(A2:A3)");
+    ASSERT_WSTR(s.Text(3, 0), L"2500000");
+    s.Set(4, 0, L"=0.1+0.2");
+    ASSERT_WSTR(s.Text(4, 0), L"0.3");
+}
+
 TEST(FormulaCell_ReadersOfAFormattedFormulaSeeItsValue)
 {
     Sheet s;

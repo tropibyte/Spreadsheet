@@ -590,6 +590,104 @@ TEST(DeepDoubledChain_ResolvesInLinearWork)
     ASSERT_TRUE(ElapsedSeconds(start) < 5.0);
 }
 
+// ---- Parser fixes (2026-11) -------------------------------------------------
+TEST(Mod_TakesTheDivisorsSign)
+{
+    // std::fmod takes the dividend's sign; Excel's MOD takes the divisor's.
+    StandardSheet();
+    ASSERT_NEAR(Eval(L"=MOD(7,3)"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=MOD(-3,2)"), 1.0, 1e-12);      // was -1
+    ASSERT_NEAR(Eval(L"=MOD(3,-2)"), -1.0, 1e-12);     // was 1
+    ASSERT_NEAR(Eval(L"=MOD(-3,-2)"), -1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=MOD(5.5,-2)"), -0.5, 1e-12);
+    ASSERT_NEAR(Eval(L"=MOD(1,0)"), 0.0, 1e-12);
+    // An exact multiple is +0, not -0 (which displays as "-0").
+    CFormulator::Result r = CFormulator::Evaluate(g_sheet, L"MOD(-6,3)");
+    ASSERT_TRUE(r.value == 0.0 && !std::signbit(r.value));
+}
+
+TEST(NumberLiterals_SignedExponent)
+{
+    // The token scan stopped at the exponent's sign: "1e-3" read as 1 - 3.
+    StandardSheet();
+    ASSERT_NEAR(Eval(L"=1e-3"), 0.001, 1e-15);         // was -2
+    ASSERT_NEAR(Eval(L"=2.5e+2"), 250.0, 1e-12);       // was 4.5
+    ASSERT_NEAR(Eval(L"=2E-1*10"), 2.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=-1.5e-7"), -1.5e-7, 1e-20);
+    ASSERT_NEAR(Eval(L"=1e3"), 1000.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=A1-1"), 4.0, 1e-12);           // references untouched
+}
+
+TEST(PowerAndRoot_SplitAtTopLevelCommas)
+{
+    // arg.find(L',') cut POWER(ROUND(2.5,0),2) inside ROUND's argument list.
+    StandardSheet();
+    ASSERT_NEAR(Eval(L"=POWER(ROUND(2.5,0),2)"), 9.0, 1e-12);   // was 1
+    ASSERT_NEAR(Eval(L"=ROOT(POWER(3,4),4)"), 3.0, 1e-12);      // was 1
+    ASSERT_NEAR(Eval(L"=POWER(2,10)"), 1024.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=ROOT(16)"), 4.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=ROOT(27,3)"), 3.0, 1e-12);
+}
+
+TEST(FunctionCall_ParenthesesInStringsAreText)
+{
+    // The scan for the closing ')' ignored quotes: LEN("a)b") measured "a.
+    StandardSheet();
+    ASSERT_NEAR(Eval(L"=LEN(\"a)b\")"), 3.0, 1e-12);           // was 1
+    ASSERT_NEAR(Eval(L"=LEN(\"a(b\")+1"), 4.0, 1e-12);         // was 3
+    ASSERT_NEAR(Eval(L"=LEN(\"a\"\"b)\")"), 4.0, 1e-12);       // escaped quote
+    CFormulator::Result r = CFormulator::Evaluate(g_sheet, L"UPPER(\"x)y\")");
+    ASSERT_TRUE(r.isText && r.text == L"X)Y");                  // was "X"
+    r = CFormulator::Evaluate(g_sheet, L"CONCAT(\"(\",\")\")");
+    ASSERT_TRUE(r.isText && r.text == L"()");
+}
+
+TEST(TextFunction_DoesNotLeakThroughArithmetic)
+{
+    // The same leak TextResult_DoesNotLeakIntoArithmetic closed for a
+    // referenced cell, but with the text function inline: whatever consumed
+    // its result, the formula still showed the text.
+    StandardSheet();
+    CFormulator::Result r = CFormulator::Evaluate(g_sheet, L"1+LEFT(\"5\",1)");
+    ASSERT_FALSE(r.isText);
+    ASSERT_NEAR(r.value, 6.0, 1e-12);                           // was "5"
+    r = CFormulator::Evaluate(g_sheet, L"ABS(LEFT(\"-5\",2))");
+    ASSERT_FALSE(r.isText);
+    ASSERT_NEAR(r.value, 5.0, 1e-12);                           // was "-5"
+    r = CFormulator::Evaluate(g_sheet, L"-LEFT(\"5\",1)");
+    ASSERT_FALSE(r.isText);
+    ASSERT_NEAR(r.value, -5.0, 1e-12);
+    r = CFormulator::Evaluate(g_sheet, L"LEFT(\"x\",1)*2");
+    ASSERT_FALSE(r.isText);
+    ASSERT_NEAR(r.value, 0.0, 1e-12);                           // "x" reads as 0
+    r = CFormulator::Evaluate(g_sheet, L"IF(LEFT(\"1\",1),5,0)");
+    ASSERT_FALSE(r.isText);                                     // the condition is consumed
+    ASSERT_NEAR(r.value, 5.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=LEN(1+LEFT(\"5\",1))"), 1.0, 1e-12);    // "6"
+
+    // What is text still is.
+    r = CFormulator::Evaluate(g_sheet, L"IF(0,5,UPPER(\"n\"))");
+    ASSERT_TRUE(r.isText && r.text == L"N");
+    r = CFormulator::Evaluate(g_sheet, L"(UPPER(LEFT(\"abc\",2)))");
+    ASSERT_TRUE(r.isText && r.text == L"AB");
+    r = CFormulator::Evaluate(g_sheet, L"CONCAT(LEFT(\"ab\",1),1+1)");
+    ASSERT_TRUE(r.isText && r.text == L"a2");
+}
+
+TEST(FormatGeneral_ShowsFifteenSignificantDigits)
+{
+    // The stream default of six digits showed 1234567 as "1.23457e+06", and
+    // the text functions saw that rendering.
+    StandardSheet();
+    ASSERT_TRUE(CFormulator::FormatGeneral(1234567.0) == L"1234567");
+    ASSERT_TRUE(CFormulator::FormatGeneral(1234567.89) == L"1234567.89");
+    ASSERT_TRUE(CFormulator::FormatGeneral(0.1 + 0.2) == L"0.3");
+    ASSERT_TRUE(CFormulator::FormatGeneral(-2.5) == L"-2.5");
+    ASSERT_NEAR(Eval(L"=LEN(123456789)"), 9.0, 1e-12);          // was 11
+    CFormulator::Result r = CFormulator::Evaluate(g_sheet, L"CONCAT(\"a\",1234567)");
+    ASSERT_TRUE(r.isText && r.text == L"a1234567");
+}
+
 // ---- runner ----------------------------------------------------------------
 int main()
 {

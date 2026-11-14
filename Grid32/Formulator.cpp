@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <map>
 #include <vector>
+#include <locale>
+#include <sstream>
 
 
 // --- Formula evaluation helpers ---
@@ -276,6 +278,17 @@ namespace {
         return true;
     }
 
+    // A text function's result. The text goes in the slot, where it becomes
+    // the formula's result if nothing consumes it; the return value is the
+    // text read as a number, which is what arithmetic around the call sees
+    // (as it does for a text cell): =1+LEFT("5",1) is 6, not the text "5".
+    double TextResult(const std::wstring& text)
+    {
+        Grid32FormulaText::SetText(text);
+        double n = 0.0;
+        return ParseNumericText(text, n) ? n : 0.0;
+    }
+
     // A reference names a cell only if that cell is inside the grid. ParseCellRef
     // accepts any syntactically valid reference up to row 2^32, so without this
     // =SUM(A1:A4294967296) walked four billion rows on the UI thread (H21).
@@ -433,6 +446,17 @@ namespace {
                 if (s->path[i] == key) { depth = i + 1; break; }
         }
         if (depth < s->minCutDepth) s->minCutDepth = depth;
+    }
+
+    // The functions whose result is text (see TextResult).
+    bool IsTextFunction(const std::wstring& name)
+    {
+        static const wchar_t* const kNames[] = {
+            L"LEFT", L"RIGHT", L"MID", L"CONCAT", L"CONCATENATE",
+            L"UPPER", L"LOWER", L"TRIM" };
+        for (const wchar_t* n : kNames)
+            if (_wcsicmp(name.c_str(), n) == 0) return true;
+        return false;
     }
 
     // Comparison operators, lowest precedence in the grammar.
@@ -902,6 +926,8 @@ double CFormulator::ParseTerm(CGrid32Mgr* mgr, const std::wstring& expr, size_t&
             // dividend. Spreadsheet host will format these distinctly.
             value /= rhs;
         }
+        // The operands were read as numbers; a text operand is not the result.
+        Grid32FormulaText::ResetText();
     }
     return value;
 }
@@ -944,6 +970,7 @@ double CFormulator::ParseAdditive(CGrid32Mgr* mgr, const std::wstring& expr, siz
         ++pos;
         double rhs = ParseTerm(mgr, expr, pos, visited);
         if (op == L'+') value += rhs; else value -= rhs;
+        Grid32FormulaText::ResetText();   // as in ParseTerm
     }
     return value;
 }
@@ -977,6 +1004,7 @@ double CFormulator::ParseExpression(CGrid32Mgr* mgr, const std::wstring& expr, s
     else return lhs;
 
     double rhs = ParseAdditive(mgr, expr, pos, visited);
+    Grid32FormulaText::ResetText();   // a comparison's result is a number
 
     // Compare with a small relative tolerance. Cell values arrive as doubles
     // parsed from text, so an exact == would make =A1=0.3 false whenever A1
@@ -1017,11 +1045,31 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
         bool neg = (expr[pos] == L'-');
         ++pos;
         double val = ParseFactor(mgr, expr, pos, visited);
-        return neg ? -val : val;
+        if (!neg) return val;
+        Grid32FormulaText::ResetText();   // -LEFT("5",1) is the number -5
+        return -val;
     }
 
     size_t start = pos;
     while (pos < expr.size() && (iswalnum(expr[pos]) || expr[pos] == L'.')) ++pos;
+    // A numeric literal with a signed exponent ("1e-3", "2.5E+2"): the scan
+    // above stops at the sign, which left "1e" to be read as 1 and the "-3"
+    // to be subtracted from it. A token that starts with a digit or '.' is
+    // never a cell reference or a function name, so this cannot steal one.
+    if (pos > start && pos + 1 < expr.size() &&
+        (expr[pos] == L'+' || expr[pos] == L'-') && IsAsciiDigit(expr[pos + 1]) &&
+        (IsAsciiDigit(expr[start]) || expr[start] == L'.') &&
+        (expr[pos - 1] == L'e' || expr[pos - 1] == L'E'))
+    {
+        bool mantissa = true;
+        for (size_t i = start; i + 1 < pos; ++i)
+            if (!IsAsciiDigit(expr[i]) && expr[i] != L'.') { mantissa = false; break; }
+        if (mantissa)
+        {
+            pos += 2;   // the sign and the first exponent digit
+            while (pos < expr.size() && IsAsciiDigit(expr[pos])) ++pos;
+        }
+    }
     std::wstring token = expr.substr(start, pos - start);
     if (token.empty()) return 0.0;
 
@@ -1029,11 +1077,18 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
     {
         ++pos; // skip '('
         size_t argStart = pos;
+        // Find the matching ')'. Parentheses inside a string literal are
+        // text, not structure: without tracking quotes, LEN("a)b") closed at
+        // the quoted ')' and measured "a. "" inside a literal is an escaped
+        // quote and leaves quote mode unchanged, as in SplitArgs.
         int depth = 1;
+        bool inQuote = false;
         while (pos < expr.size() && depth > 0)
         {
-            if (expr[pos] == L'(') depth++;
-            else if (expr[pos] == L')') depth--;
+            const wchar_t c = expr[pos];
+            if (c == L'"') inQuote = !inQuote;
+            else if (!inQuote && c == L'(') depth++;
+            else if (!inQuote && c == L')') depth--;
             if (depth > 0) ++pos;
         }
         std::wstring arg = expr.substr(argStart, pos - argStart);
@@ -1077,32 +1132,22 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
         }
         else if (_wcsicmp(token.c_str(), L"POWER") == 0)
         {
-            size_t comma = arg.find(L',');
+            // Split at top-level commas only: arg.find(L',') cut
+            // POWER(ROUND(2.5,0),2) inside ROUND's own argument list.
+            auto args = SplitArgs(arg);
             double base = 0.0, exp = 0.0;
-            if (comma != std::wstring::npos)
+            if (args.size() >= 2)
             {
-                size_t p = 0;
-                base = ParseExpression(mgr, arg.substr(0, comma), p, visited);
-                p = 0;
-                exp = ParseExpression(mgr, arg.substr(comma + 1), p, visited);
+                base = EvalArg(mgr, args[0], visited);
+                exp = EvalArg(mgr, args[1], visited);
             }
             res = pow(base, exp);
         }
         else if (_wcsicmp(token.c_str(), L"ROOT") == 0)
         {
-            size_t comma = arg.find(L',');
-            double val = 0.0, n = 2.0;
-            size_t p = 0;
-            if (comma != std::wstring::npos)
-            {
-                val = ParseExpression(mgr, arg.substr(0, comma), p, visited);
-                p = 0;
-                n = ParseExpression(mgr, arg.substr(comma + 1), p, visited);
-            }
-            else
-            {
-                val = ParseExpression(mgr, arg, p, visited);
-            }
+            auto args = SplitArgs(arg);
+            double val = args.size() >= 1 ? EvalArg(mgr, args[0], visited) : 0.0;
+            double n = args.size() >= 2 ? EvalArg(mgr, args[1], visited) : 2.0;
             res = n != 0.0 ? pow(val, 1.0 / n) : 0.0;
         }
         else if (_wcsicmp(token.c_str(), L"LOG") == 0)
@@ -1122,6 +1167,9 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
             if (args.size() >= 2)
             {
                 double cond = EvalArg(mgr, args[0], visited);
+                // The condition is consumed here; only the branch taken may
+                // hand a text result on.
+                Grid32FormulaText::ResetText();
                 if (cond != 0.0)
                     res = EvalArg(mgr, args[1], visited);
                 else if (args.size() >= 3)
@@ -1136,7 +1184,9 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
             auto args = SplitArgs(arg);
             for (size_t i = 0; i + 1 < args.size(); i += 2)
             {
-                if (EvalArg(mgr, args[i], visited) != 0.0)
+                const double cond = EvalArg(mgr, args[i], visited);
+                Grid32FormulaText::ResetText();
+                if (cond != 0.0)
                 {
                     res = EvalArg(mgr, args[i + 1], visited);
                     break;
@@ -1197,7 +1247,18 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
             auto args = SplitArgs(arg);
             double d1 = args.size() >= 1 ? EvalArg(mgr, args[0], visited) : 0.0;
             double d2 = args.size() >= 2 ? EvalArg(mgr, args[1], visited) : 0.0;
-            res = d2 != 0.0 ? std::fmod(d1, d2) : 0.0;
+            // The result takes the divisor's sign, as in Excel:
+            // MOD(-3,2) = 1 and MOD(3,-2) = -1. std::fmod takes the
+            // dividend's, and gave -1 and 1.
+            res = 0.0;
+            if (d2 != 0.0)
+            {
+                res = std::fmod(d1, d2);
+                if (res == 0.0)
+                    res = 0.0;      // fmod(-6,3) is -0.0, which shows as "-0"
+                else if ((res < 0.0) != (d2 < 0.0))
+                    res += d2;
+            }
         }
         else if (_wcsicmp(token.c_str(), L"INT") == 0)
         {
@@ -1228,8 +1289,7 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
             int n = args.size() >= 2 ? (int)EvalArg(mgr, args[1], visited) : 1;
             if (n < 0) n = 0;
             if ((size_t)n > s.size()) n = (int)s.size();
-            Grid32FormulaText::SetText(s.substr(0, n));
-            res = 0.0;
+            res = TextResult(s.substr(0, n));
         }
         else if (_wcsicmp(token.c_str(), L"RIGHT") == 0)
         {
@@ -1238,8 +1298,7 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
             int n = args.size() >= 2 ? (int)EvalArg(mgr, args[1], visited) : 1;
             if (n < 0) n = 0;
             if ((size_t)n > s.size()) n = (int)s.size();
-            Grid32FormulaText::SetText(s.substr(s.size() - n));
-            res = 0.0;
+            res = TextResult(s.substr(s.size() - n));
         }
         else if (_wcsicmp(token.c_str(), L"MID") == 0)
         {
@@ -1250,13 +1309,12 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
             int n = args.size() >= 3 ? (int)EvalArg(mgr, args[2], visited) : 0;
             if (start < 1) start = 1;
             size_t idx = (size_t)(start - 1);
-            if (idx >= s.size() || n <= 0) Grid32FormulaText::SetText(std::wstring());
+            if (idx >= s.size() || n <= 0) res = TextResult(std::wstring());
             else
             {
                 if ((size_t)n > s.size() - idx) n = (int)(s.size() - idx);
-                Grid32FormulaText::SetText(s.substr(idx, n));
+                res = TextResult(s.substr(idx, n));
             }
-            res = 0.0;
         }
         else if (_wcsicmp(token.c_str(), L"CONCAT") == 0 ||
                  _wcsicmp(token.c_str(), L"CONCATENATE") == 0)
@@ -1264,22 +1322,19 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
             auto args = SplitArgs(arg);
             std::wstring out;
             for (auto& a : args) out += Engine::EvalAsString(mgr, a, visited);
-            Grid32FormulaText::SetText(out);
-            res = 0.0;
+            res = TextResult(out);
         }
         else if (_wcsicmp(token.c_str(), L"UPPER") == 0)
         {
             std::wstring s = Engine::EvalAsString(mgr, arg, visited);
             std::transform(s.begin(), s.end(), s.begin(), ::towupper);
-            Grid32FormulaText::SetText(s);
-            res = 0.0;
+            res = TextResult(s);
         }
         else if (_wcsicmp(token.c_str(), L"LOWER") == 0)
         {
             std::wstring s = Engine::EvalAsString(mgr, arg, visited);
             std::transform(s.begin(), s.end(), s.begin(), ::towlower);
-            Grid32FormulaText::SetText(s);
-            res = 0.0;
+            res = TextResult(s);
         }
         else if (_wcsicmp(token.c_str(), L"TRIM") == 0)
         {
@@ -1299,8 +1354,7 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
             }
             // Strip a possible trailing space added before final non-space.
             while (!out.empty() && iswspace(out.back())) out.pop_back();
-            Grid32FormulaText::SetText(out);
-            res = 0.0;
+            res = TextResult(out);
         }
         // -------- Date functions -----------------------------------------
         else if (_wcsicmp(token.c_str(), L"TODAY") == 0)
@@ -1334,6 +1388,16 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
         else
         {
             // Unknown function, treat as 0
+        }
+
+        // A function that returns a number consumes any text its arguments
+        // produced: =ABS(LEFT("-5",2)) is 5, not the text "-5". Only the text
+        // functions, and IF/IFS handing on the branch they took, leave a
+        // text result in the slot.
+        if (!IsTextFunction(token) &&
+            _wcsicmp(token.c_str(), L"IF") != 0 && _wcsicmp(token.c_str(), L"IFS") != 0)
+        {
+            Grid32FormulaText::ResetText();
         }
         return res;
     }
@@ -1414,9 +1478,17 @@ CFormulator::RecalcPass::~RecalcPass()
     delete m_pSession;
 }
 
+// Up to 15 significant digits, as Excel shows a General number. The stream's
+// default of 6 showed =1234567 as "1.23457e+06" and fed that text to LEN,
+// CONCAT and the other text functions (=LEN(123456789) was 11). 15 rather
+// than the 17 a round trip needs, so =0.1+0.2 still reads 0.3. The classic
+// locale keeps a global C++ locale from adding grouping separators or a
+// comma decimal point.
 std::wstring CFormulator::FormatGeneral(double value)
 {
-    std::wstringstream ss;
+    std::wostringstream ss;
+    ss.imbue(std::locale::classic());
+    ss.precision(15);
     ss << value;
     return ss.str();
 }
