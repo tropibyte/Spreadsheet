@@ -218,12 +218,13 @@ TEST(FormulaCell_TextResultIgnoresNumberFormat)
 
 TEST(FormulaCell_UnrenderableResultKeepsGeneralText)
 {
-    // FormatFixed's integer arithmetic cannot hold an infinity or a huge
-    // magnitude; those keep their general text instead of turning to garbage.
+    // FormatFixed's integer arithmetic cannot hold a huge magnitude; that
+    // keeps its general text instead of turning to garbage. An error shows
+    // its code whatever the format (=1/0 showed "inf" before errors existed).
     Sheet s;
     s.Set(0, 0, L"=1/0");
     s.Format(0, 0, FMT_CURRENCY);
-    ASSERT_WSTR(s.Text(0, 0), CFormulator::FormatGeneral(1.0 / 0.0));
+    ASSERT_WSTR(s.Text(0, 0), L"#DIV/0!");
     s.Set(1, 0, L"=POWER(10,20)");
     s.Format(1, 0, FMT_PERCENT);
     ASSERT_WSTR(s.Text(1, 0), CFormulator::FormatGeneral(1e20));
@@ -254,6 +255,57 @@ TEST(FormulaCell_GeneralShowsTheWholeNumber)
     ASSERT_WSTR(s.Text(3, 0), L"2500000");
     s.Set(4, 0, L"=0.1+0.2");
     ASSERT_WSTR(s.Text(4, 0), L"0.3");
+}
+
+TEST(FormulaCell_ErrorsShowAndClearWithTheirCause)
+{
+    Sheet s;
+    s.Set(0, 0, L"0");
+    s.Set(0, 1, L"=10/A1");                 // B1
+    s.Set(0, 2, L"=B1+1");                  // C1
+    s.Set(0, 3, L"=SUM(B1:C1)");            // D1
+    s.Set(0, 4, L"=COUNT(A1:D1)");          // E1
+    ASSERT_WSTR(s.Text(0, 1), L"#DIV/0!");
+    ASSERT_WSTR(s.Text(0, 2), L"#DIV/0!");
+    ASSERT_WSTR(s.Text(0, 3), L"#DIV/0!");
+    ASSERT_WSTR(s.Text(0, 4), L"1");
+    ASSERT_TRUE(std::isnan(s.Value(0, 1)));  // sorts with the text, not as 0
+    s.Set(0, 0, L"4");
+    ASSERT_WSTR(s.Text(0, 1), L"2.5");
+    ASSERT_WSTR(s.Text(0, 2), L"3.5");
+    ASSERT_WSTR(s.Text(0, 3), L"6");
+    ASSERT_WSTR(s.Text(0, 4), L"4");
+    s.Set(1, 0, L"=12abc");
+    ASSERT_WSTR(s.Text(1, 0), L"#ERROR!");
+    s.Set(2, 0, L"=SUMM(A1)");
+    ASSERT_WSTR(s.Text(2, 0), L"#NAME?");
+}
+
+TEST(FormulaCell_TextComparisonsAndLiterals)
+{
+    Sheet s;
+    s.Set(0, 0, L"Paid");
+    s.Set(0, 1, L"=IF(A1=\"paid\",\"Done\",\"Open\")");
+    ASSERT_WSTR(s.Text(0, 1), L"Done");
+    s.Set(0, 0, L"Due");
+    ASSERT_WSTR(s.Text(0, 1), L"Open");
+    s.Set(1, 1, L"=IF(A2=\"\",\"(blank)\",A2)");
+    ASSERT_WSTR(s.Text(1, 1), L"(blank)");
+    s.Set(1, 0, L"x");
+    ASSERT_WSTR(s.Text(1, 1), L"x");
+}
+
+TEST(FormulaCell_NegativeZeroShowsAsZero)
+{
+    // =-A1 with A1 empty showed "-0", in General and in a number format.
+    Sheet s;
+    s.Set(0, 1, L"=-A1");
+    ASSERT_WSTR(s.Text(0, 1), L"0");
+    ASSERT_TRUE(!std::signbit(s.Value(0, 1)));
+    s.Format(0, 1, FMT_NUMBER);
+    ASSERT_WSTR(s.Text(0, 1), L"0.00");
+    s.Set(0, 0, L"2");
+    ASSERT_WSTR(s.Text(0, 1), L"-2.00");
 }
 
 TEST(FormulaCell_ReadersOfAFormattedFormulaSeeItsValue)

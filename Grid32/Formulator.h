@@ -9,15 +9,26 @@ class CFormulator
 
 public:
 	// What a formula evaluates to. Most formulas produce a number; one whose
-	// outermost operation is a text function (LEFT, CONCAT, UPPER, ...)
-	// produces a string, and `value` then holds that string read as a number
-	// ("12" -> 12, "abc" -> 0) for callers that need one.
+	// outermost operation is a text function (LEFT, CONCAT, UPPER, ...), a
+	// string literal or a reference to text produces a string, and `value`
+	// then holds that string read as a number ("12" -> 12, "abc" -> 0) for
+	// callers that need one.
+	//
+	// A formula that cannot be evaluated produces an error: `isError` is set,
+	// `text` is its code (see the kError* constants) and `value` is NaN.
 	struct Result
 	{
 		double value = 0.0;
 		bool isText = false;
+		bool isError = false;
 		std::wstring text;
 	};
+
+	// The error codes a formula can produce.
+	static constexpr const wchar_t* kErrorSyntax = L"#ERROR!";  // malformed formula
+	static constexpr const wchar_t* kErrorName = L"#NAME?";     // unknown function or name
+	static constexpr const wchar_t* kErrorDiv0 = L"#DIV/0!";    // division by zero
+	static constexpr const wchar_t* kErrorNum = L"#NUM!";       // no finite result
 
 	// Evaluate formula source (no leading '='). `self` is the cell that holds
 	// the formula, if any: it is on the evaluation path from the start, so a
@@ -66,12 +77,11 @@ private:
 
 	static void SkipSpaces(const std::wstring& s, size_t& pos);
 	static bool IsValidCellReference(const std::wstring& s, size_t& pos, size_t& row, size_t& col);
-	static double GetCellValue(CGrid32Mgr* mgr, UINT row, UINT col,
-		std::set<std::pair<UINT, UINT>>& visited);
-
 	static double ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_t& pos,
 		std::set<std::pair<UINT, UINT>>& visited);
 
+	// The aggregates take any mix of ranges, references and expressions:
+	// SUM(A1:A3, B7, 12).
 	static double SumRange(CGrid32Mgr* mgr, const std::wstring& arg,
 		std::set<std::pair<UINT, UINT>>& visited);
 	static double MinMaxRange(CGrid32Mgr* mgr, const std::wstring& arg,

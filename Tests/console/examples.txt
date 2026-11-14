@@ -1,0 +1,101 @@
+# Formula console examples. Run with:
+#   FormulaConsole console/examples.txt        (exit code 1 if an expect fails)
+#   FormulaConsole -i console/examples.txt     (then keep typing)
+# `make check` runs this file too, so every expect here must hold.
+
+# ---- Typing into cells: values are typed, "=" makes a formula
+A1: 5
+A2: 7
+A3: 9
+B1: 2
+B2: =A1*B1
+expect B2 => 10
+A1: 6
+expect B2 => 12
+show
+
+# ---- Evaluating at the prompt (a bare expression, or one starting with =)
+=SUM(A1:A3)
+expect =SUM(A1:A3) => 22
+expect =SUM(A1:A3, B1, 100) => 124
+expect =AVERAGE(A1:A3, 10) => 8
+
+# ---- Rounding works on the decimal you wrote
+expect =ROUND(1.005,2) => 1.01
+expect =FLOOR(0.3,0.1) => 0.3
+expect =TRUNC(-1.79,1) => -1.7
+
+# ---- Text: literals, text functions, comparisons
+C1: Paid
+C2: =IF(C1="paid","Done","Open")
+expect C2 => Done
+C1: Due
+expect C2 => Open
+expect =UPPER(LEFT("hello",2)) => HE
+expect =LEN("a)b") => 3
+expect =IF(D1="","blank","not blank") => blank
+expect ="abc"="ABC" => 1
+
+# Text that looks like a number: typed it becomes a number, `text` keeps it text
+text D2 42
+D2
+expect =D2=42 => 1
+expect =D2+1 => 43
+
+# ---- Number formats apply to formula results
+E1: =A1*1000.5
+format E1 currency
+expect E1 => $6,003.00
+format E1 general
+expect E1 => 6003
+expect =1234567 => 1234567
+
+# ---- Errors
+expect =1/0 => #DIV/0!
+expect =12abc => #ERROR!
+expect =FOO(1) => #NAME?
+expect =SQRT(-1) => #NUM!
+E2: =10/B3
+expect E2 => #DIV/0!
+E3: =E2+1
+expect E3 => #DIV/0!
+expect =COUNT(E1:E3) => 1
+B3: 4
+expect E2 => 2.5
+expect E3 => 3.5
+
+# ---- Dates are Excel serials: 1900-01-01 is 1, and 60 is Excel's 1900-02-29
+G1: 2024-01-15
+expect =G1 => 45306
+expect =DAY(G1+20) => 4
+expect =DATE(1900,1,1) => 1
+expect =DATE(24,1,1)=DATE(1924,1,1) => 1
+expect =DATE(2024,15,1)=DATE(2025,3,1) => 1
+expect =DATE(10000,1,1) => #NUM!
+G2: =DATE(1900,2,29)
+format G2 date
+expect G2 => 1900-02-29
+
+# ---- Comparisons are exact at 15 significant digits
+expect =1000000000=1000000001 => 0
+expect =0.1+0.2=0.3 => 1
+
+# ---- Edge cases that used to go wrong silently
+expect =-Z99 => 0
+expect =LEFT("abc",1e20) => abc
+expect =LEN(TRIM("a	b")) => 3
+expect =YEAR(1e15) => #NUM!
+
+# ---- Unsupported syntax is flagged rather than guessed at
+expect =2^3 => #ERROR!
+expect =1=1=2 => #ERROR!
+
+# ---- Cycles terminate. A cycle has no error value yet (#CYCLE!, audit E2):
+# each cell reads the other as 0 when it is the one reached first, so the two
+# can disagree. Shown, not pinned.
+F1: =F2+1
+F2: =F1+1
+show F1:F2
+
+list
+dump

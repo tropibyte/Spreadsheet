@@ -24,6 +24,8 @@
 #include <cstdio>
 #include <cwchar>
 #include <chrono>
+#include <clocale>
+#include <string>
 
 // ---- tiny test harness (same shape as Grid32Tests.cpp) ---------------------
 struct TestCase {
@@ -274,13 +276,14 @@ TEST(DeepChain_DoesNotOverflowStack)
 TEST(LongUnaryChain_DoesNotOverflowStack)
 {
     // Unary +/- recurses straight back into ParseFactor. Without a guard there
-    // this segfaults.
+    // this segfaults. Past the guard the expression cannot be evaluated, and
+    // says so: it used to come out as whatever had been read when the guard
+    // tripped.
     StandardSheet();
     std::wstring expr(100000, L'-');
     expr += L"1";
-    std::set<std::pair<UINT, UINT>> visited;
-    double v = CFormulator::EvalArg(g_sheet, expr, visited);
-    ASSERT_TRUE(std::isfinite(v));
+    CFormulator::Result r = CFormulator::Evaluate(g_sheet, expr);
+    ASSERT_TRUE(r.isError && r.text == CFormulator::kErrorSyntax);
 }
 
 // ---- Comparison operators (H6) ---------------------------------------------
@@ -686,6 +689,388 @@ TEST(FormatGeneral_ShowsFifteenSignificantDigits)
     ASSERT_NEAR(Eval(L"=LEN(123456789)"), 9.0, 1e-12);          // was 11
     CFormulator::Result r = CFormulator::Evaluate(g_sheet, L"CONCAT(\"a\",1234567)");
     ASSERT_TRUE(r.isText && r.text == L"a1234567");
+}
+
+// ---- Rounding on the decimal value -------------------------------------------
+TEST(Round_RoundsTheDecimalTheUserWrote)
+{
+    // 1.005 is stored as 1.00499999999999989..., so a plain round gave 1.
+    StandardSheet();
+    ASSERT_NEAR(Eval(L"=ROUND(1.005,2)"), 1.01, 1e-12);     // was 1
+    ASSERT_NEAR(Eval(L"=ROUND(1.015,2)"), 1.02, 1e-12);     // was 1.01
+    ASSERT_NEAR(Eval(L"=ROUND(0.285,2)"), 0.29, 1e-12);     // was 0.28
+    ASSERT_NEAR(Eval(L"=ROUND(-1.005,2)"), -1.01, 1e-12);
+    ASSERT_NEAR(Eval(L"=ROUND(2.5,0)"), 3.0, 1e-12);        // half away from zero
+    ASSERT_NEAR(Eval(L"=ROUND(-2.5,0)"), -3.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=ROUND(1250,-2)"), 1300.0, 1e-9);
+    ASSERT_NEAR(Eval(L"=ROUND(3.14159,2)"), 3.14, 1e-12);
+    ASSERT_NEAR(Eval(L"=ROUND(1.25,1.9)"), 1.3, 1e-12);     // digits truncate to 1; was 1.2463...
+    ASSERT_NEAR(Eval(L"=ROUND(1,400)"), 1.0, 1e-12);        // was nan
+    ASSERT_NEAR(Eval(L"=ROUND(123,-400)"), 0.0, 1e-12);     // was nan
+}
+
+TEST(CeilingFloorTrunc_RoundTheDecimalToo)
+{
+    StandardSheet();
+    ASSERT_NEAR(Eval(L"=FLOOR(0.3,0.1)"), 0.3, 1e-12);      // was 0.2
+    ASSERT_NEAR(Eval(L"=CEILING(2.1,0.1)"), 2.1, 1e-12);
+    ASSERT_NEAR(Eval(L"=CEILING(4.42,0.05)"), 4.45, 1e-12);
+    ASSERT_NEAR(Eval(L"=FLOOR(-2.1,1)"), -3.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=TRUNC(0.29,2)"), 0.29, 1e-12);      // the digits argument was ignored
+    ASSERT_NEAR(Eval(L"=TRUNC(-1.79,1)"), -1.7, 1e-12);
+    ASSERT_NEAR(Eval(L"=TRUNC(1234,-2)"), 1200.0, 1e-9);
+    ASSERT_NEAR(Eval(L"=TRUNC(-1.7)"), -1.0, 1e-12);
+}
+
+// ---- Text values: literals and comparisons ----------------------------------
+static bool IsText(const wchar_t* formula, const wchar_t* want)
+{
+    CFormulator::Result r = CFormulator::Evaluate(g_sheet, formula);
+    return r.isText && !r.isError && r.text == want;
+}
+
+TEST(StringLiterals_AreTextValues)
+{
+    // A quoted literal outside a text function read as 0.
+    StandardSheet();
+    ASSERT_TRUE(IsText(L"\"abc\"", L"abc"));
+    ASSERT_TRUE(IsText(L"\"a\"\"b\"", L"a\"b"));
+    ASSERT_TRUE(IsText(L"IF(A1>3,\"yes\",\"no\")", L"yes"));    // was 0
+    ASSERT_TRUE(IsText(L"IF(A1<3,\"yes\",\"no\")", L"no"));
+    ASSERT_TRUE(IsText(L"IF(A1>3,UPPER(\"y\"),0)", L"Y"));
+    ASSERT_NEAR(Eval(L"=\"5\"+1"), 6.0, 1e-12);                 // arithmetic reads it as a number
+    ASSERT_NEAR(Eval(L"=LEN(\"a\"\"b\")"), 3.0, 1e-12);
+    // Everything after a literal's closing quote used to be ignored in a
+    // text function's argument.
+    ASSERT_TRUE(IsText(L"UPPER(\"a\"+1)", L"1"));
+    CFormulator::Result r = CFormulator::Evaluate(g_sheet, L"\"abc");
+    ASSERT_TRUE(r.isError && r.text == CFormulator::kErrorSyntax);
+}
+
+TEST(References_ToTextCarryTheText)
+{
+    SheetReset();
+    SheetSet(0, 0, L"hello");               // A1
+    SheetSet(1, 0, L"=UPPER(\"abc\")");     // A2
+    ASSERT_TRUE(IsText(L"(A1)", L"hello"));
+    ASSERT_TRUE(IsText(L"IF(1,A1,0)", L"hello"));
+    ASSERT_TRUE(IsText(L"IF(1,A2,0)", L"ABC"));
+    ASSERT_NEAR(Eval(L"=A1+1"), 1.0, 1e-12);                     // still 0 in arithmetic
+}
+
+TEST(Comparisons_CompareText)
+{
+    SheetReset();
+    SheetSet(0, 0, L"hello");               // A1
+    SheetSet(1, 0, L"=\"ABC\"");            // A2, a text result
+    SheetSetText(2, 0, L"42");              // A3, text that reads as a number
+    SheetSet(3, 0, L"5");                   // A4
+    ASSERT_NEAR(Eval(L"=A1=\"hello\""), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=A1=\"HELLO\""), 1.0, 1e-12);             // case-insensitive, as in Excel
+    ASSERT_NEAR(Eval(L"=A1<>\"hello\""), 0.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=A1=\"world\""), 0.0, 1e-12);             // was 1: both read as 0
+    ASSERT_NEAR(Eval(L"=A1>\"abc\""), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=A1<\"abc\""), 0.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=A2=\"abc\""), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=LEFT(A1,1)=\"h\""), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=IF(A1=\"hello\",A4*2,0)"), 10.0, 1e-12);
+    // Text is greater than any number, unless it reads as one.
+    ASSERT_NEAR(Eval(L"=A1>99999"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=A4<\"x\""), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=A3=42"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=A3>41"), 1.0, 1e-12);
+    // Text in a comparison inside arithmetic is not mistaken for a sibling's.
+    ASSERT_NEAR(Eval(L"=LEFT(\"a\",1)*(A4=5)"), 0.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=2*(A4=5)"), 2.0, 1e-12);
+}
+
+TEST(Comparisons_BlankIsEmptyTextAndZero)
+{
+    SheetReset();
+    SheetSet(0, 0, L"0");                   // A1
+    SheetSet(1, 0, L"x");                   // A2
+    // C1 is blank.
+    ASSERT_NEAR(Eval(L"=C1=\"\""), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=C1=0"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=C1<>\"\""), 0.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=\"\"=C1"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=C1=D1"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=A1=\"\""), 0.0, 1e-12);                  // 0 is not empty
+    ASSERT_NEAR(Eval(L"=A2=\"\""), 0.0, 1e-12);
+    ASSERT_TRUE(IsText(L"IF(C1=\"\",\"empty\",\"full\")", L"empty"));
+    ASSERT_TRUE(IsText(L"IF(A2=\"\",\"empty\",\"full\")", L"full"));
+}
+
+// ---- Error values (E2, part) --------------------------------------------------
+static bool IsError(const wchar_t* formula, const wchar_t* code)
+{
+    CFormulator::Result r = CFormulator::Evaluate(g_sheet, formula);
+    return r.isError && !r.isText && r.text == code && std::isnan(r.value);
+}
+
+TEST(Errors_MalformedFormulasAreSyntaxErrors)
+{
+    // Each of these used to show whatever had been parsed before the problem.
+    StandardSheet();
+    const wchar_t* kSyntax = CFormulator::kErrorSyntax;
+    ASSERT_TRUE(IsError(L"12abc", kSyntax));        // was 12
+    ASSERT_TRUE(IsError(L"1.2.3", kSyntax));
+    ASSERT_TRUE(IsError(L"2(3)", kSyntax));         // was 0
+    ASSERT_TRUE(IsError(L"1 2", kSyntax));          // was 1
+    ASSERT_TRUE(IsError(L"1)", kSyntax));
+    ASSERT_TRUE(IsError(L"1+", kSyntax));           // was 1
+    ASSERT_TRUE(IsError(L"", kSyntax));             // a cell holding just "="
+    ASSERT_TRUE(IsError(L"*2", kSyntax));
+    ASSERT_TRUE(IsError(L"(1+2", kSyntax));         // was 3
+    ASSERT_TRUE(IsError(L"SUM(A1:A3", kSyntax));    // was 21
+    ASSERT_TRUE(IsError(L"A1:A3", kSyntax));        // a range outside a function
+    ASSERT_TRUE(IsError(L"ABS(1,2)", kSyntax));     // was 1
+    ASSERT_TRUE(IsError(L"POWER(2)", kSyntax));     // was 1
+    // Syntax the engine does not have yet is flagged rather than misread.
+    ASSERT_TRUE(IsError(L"2^3", kSyntax));          // was 2
+    ASSERT_TRUE(IsError(L"50%", kSyntax));          // was 50
+    ASSERT_TRUE(IsError(L"$A$1", kSyntax));         // was 0
+}
+
+TEST(Errors_UnknownNames)
+{
+    StandardSheet();
+    ASSERT_TRUE(IsError(L"abc", CFormulator::kErrorName));       // was 0
+    ASSERT_TRUE(IsError(L"FOO(1)", CFormulator::kErrorName));    // was 0
+    ASSERT_TRUE(IsError(L"A1+SUMM(A1:A3)", CFormulator::kErrorName));
+    // TRUE and FALSE are not unknown names.
+    ASSERT_NEAR(Eval(L"=TRUE"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=FALSE+1"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=IF(TRUE(),2,3)"), 2.0, 1e-12);
+    // A reference off the grid still reads as 0 (H21), not as a name.
+    ASSERT_NEAR(Eval(L"=A4097"), 0.0, 1e-12);
+}
+
+TEST(Errors_ArithmeticWithNoResult)
+{
+    StandardSheet();
+    ASSERT_TRUE(IsError(L"1/0", CFormulator::kErrorDiv0));          // was inf
+    ASSERT_TRUE(IsError(L"A1/(B1-2)", CFormulator::kErrorDiv0));
+    ASSERT_TRUE(IsError(L"MOD(1,0)", CFormulator::kErrorDiv0));     // was 0
+    ASSERT_TRUE(IsError(L"AVERAGE(D1:D9)", CFormulator::kErrorDiv0)); // was 0
+    ASSERT_TRUE(IsError(L"SQRT(-1)", CFormulator::kErrorNum));      // was 0
+    ASSERT_TRUE(IsError(L"LOG(0)", CFormulator::kErrorNum));        // was -inf
+    ASSERT_TRUE(IsError(L"LN(-1)", CFormulator::kErrorNum));        // was nan
+    ASSERT_TRUE(IsError(L"POWER(10,400)", CFormulator::kErrorNum)); // was inf
+    ASSERT_TRUE(IsError(L"1e999", CFormulator::kErrorNum));
+    // The first error wins.
+    ASSERT_TRUE(IsError(L"1/0+abc", CFormulator::kErrorDiv0));
+    ASSERT_TRUE(IsError(L"abc+1/0", CFormulator::kErrorName));
+    // MIN and MAX of nothing are still 0, as in Excel.
+    ASSERT_NEAR(Eval(L"=MAX(D1:D9)"), 0.0, 1e-12);
+}
+
+TEST(Errors_Propagate)
+{
+    StandardSheet();
+    SheetSet(0, 2, L"=1/0");                // C1
+    SheetSet(1, 2, L"=C1+1");               // C2
+    ASSERT_TRUE(IsError(L"C1", CFormulator::kErrorDiv0));
+    ASSERT_TRUE(IsError(L"C2*2", CFormulator::kErrorDiv0));
+    ASSERT_TRUE(IsError(L"SUM(A1:C3)", CFormulator::kErrorDiv0));
+    ASSERT_TRUE(IsError(L"MAX(C1:C2)", CFormulator::kErrorDiv0));
+    ASSERT_TRUE(IsError(L"LEN(C1)", CFormulator::kErrorDiv0));
+    ASSERT_TRUE(IsError(L"C1=1", CFormulator::kErrorDiv0));
+    ASSERT_TRUE(IsError(L"SUM(1/0,1)", CFormulator::kErrorDiv0));
+    // Only what is evaluated counts: IF does not evaluate the other branch.
+    ASSERT_NEAR(Eval(L"=IF(1,5,C1)"), 5.0, 1e-12);
+    ASSERT_TRUE(IsError(L"IF(0,5,C1)", CFormulator::kErrorDiv0));
+    // COUNT counts numbers; an error is not one, and does not make COUNT fail.
+    ASSERT_NEAR(Eval(L"=COUNT(A1:C3)"), 5.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=COUNT(1/0,1)"), 1.0, 1e-12);
+    // A formula that reads an error is not itself reported as the cause.
+    ASSERT_NEAR(Eval(L"=A1+1"), 6.0, 1e-12);
+}
+
+TEST(ChainedComparison_IsAnErrorNotIgnored)
+{
+    // Only one comparison is read. The rest used to be dropped silently,
+    // so =1=1=2 was TRUE; now it is flagged until chaining is implemented.
+    StandardSheet();
+    ASSERT_TRUE(IsError(L"1=1=2", CFormulator::kErrorSyntax));
+    ASSERT_TRUE(IsError(L"3>2>1", CFormulator::kErrorSyntax));
+    ASSERT_NEAR(Eval(L"=(1=1)=1"), 1.0, 1e-12);     // parenthesized, it is two comparisons
+}
+
+// ---- Aggregates take several arguments (E4) -----------------------------------
+TEST(Aggregates_TakeSeveralArguments)
+{
+    StandardSheet();                        // A1=5 A2=7 A3=9 B1=2 B2=4
+    ASSERT_NEAR(Eval(L"=SUM(A1:A3,B1)"), 23.0, 1e-12);                 // was 0
+    ASSERT_NEAR(Eval(L"=SUM(A1:A3, B1:B2, 100)"), 127.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=SUM(A1,A2)"), 12.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=SUM(A1,,A2)"), 12.0, 1e-12);                   // an omitted argument
+    ASSERT_NEAR(Eval(L"=SUM(A1*2,1)"), 11.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=AVERAGE(A1:A3,10)"), 7.75, 1e-12);
+    ASSERT_NEAR(Eval(L"=MIN(A1:A3,0)"), 0.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=MAX(A1:A3,B1*10)"), 20.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=COUNT(A1:A3,1,\"x\",\"5\")"), 5.0, 1e-12);      // "x" is not a number
+    ASSERT_NEAR(Eval(L"=SUM(\"abc\",1)"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=SUM(A1:A4097,1)"), 1.0, 1e-12);               // off the grid: nothing
+    ASSERT_NEAR(Eval(L"=SUM(SUM(A1:A2),A3)"), 21.0, 1e-12);
+}
+
+// ---- Quick fixes (2026-11, round 4) ---------------------------------------------
+TEST(Comparisons_ExactAtFifteenDigits)
+{
+    // The tolerance was 1e-9 of the larger side, so it grew with the numbers.
+    StandardSheet();
+    ASSERT_NEAR(Eval(L"=1000000000=1000000001"), 0.0, 1e-12);      // was 1
+    ASSERT_NEAR(Eval(L"=1000000000<1000000001"), 1.0, 1e-12);      // was 0
+    ASSERT_NEAR(Eval(L"=1000000001>1000000000"), 1.0, 1e-12);      // was 0
+    ASSERT_NEAR(Eval(L"=1000000000<>1000000001"), 1.0, 1e-12);     // was 0
+    ASSERT_NEAR(Eval(L"=123456789012=123456789000"), 0.0, 1e-12);  // was 1
+    ASSERT_NEAR(Eval(L"=0.1234567890=0.1234567891"), 0.0, 1e-12);  // was 1
+    // One second apart on a date: 45306 + 1/86400. The tolerance was ~4 s.
+    ASSERT_NEAR(Eval(L"=45306+1/86400>45306"), 1.0, 1e-12);        // was 0
+    ASSERT_NEAR(Eval(L"=45306+1/86400=45306"), 0.0, 1e-12);        // was 1
+    // Binary rounding still does not make equal decimals unequal.
+    ASSERT_NEAR(Eval(L"=0.1+0.2=0.3"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=1-0.9=0.1"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=0.1*3=0.3"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=0.1+0.2<=0.3"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=0.1+0.2>0.3"), 0.0, 1e-12);
+    // A leftover that is not 0 at 15 digits is not 0, as in Excel.
+    ASSERT_NEAR(Eval(L"=0.1+0.2-0.3=0"), 0.0, 1e-12);
+}
+
+// Run `body` with a locale whose iswalpha knows letters beyond ASCII, as
+// MSVC's does, so the test means the same on Linux as on Windows.
+template <class Fn>
+static void WithUnicodeLocale(Fn body)
+{
+    const char* old = std::setlocale(LC_ALL, nullptr);
+    const std::string saved = old ? old : "C";
+    if (!std::setlocale(LC_ALL, "C.UTF-8") && !std::setlocale(LC_ALL, ".UTF8"))
+        std::cout << "  note: no UTF-8 locale; running under the current one\n";
+    body();
+    std::setlocale(LC_ALL, saved.c_str());
+}
+
+TEST(ParseCellRef_ColumnLettersAreAsciiOnly)
+{
+    // Under a Unicode-aware iswalpha, "É1" parsed as column 'É'-'A'+1 = 137.
+    WithUnicodeLocale([] {
+        UINT r = 0, c = 0;
+        ASSERT_FALSE(CFormulator::ParseCellRef(L"\u00C91", r, c));      // É1, was EG1
+        ASSERT_FALSE(CFormulator::ParseCellRef(L"\u00E91", r, c));      // é1
+        ASSERT_FALSE(CFormulator::ParseCellRef(L"A\u00C91", r, c));
+        ASSERT_FALSE(CFormulator::ParseCellRef(L"A\u0661", r, c));      // an Arabic-Indic digit
+        ASSERT_TRUE(CFormulator::ParseCellRef(L"eg1", r, c));
+        ASSERT_TRUE(r == 0 && c == 136);
+
+        SheetReset();
+        SheetSet(0, 136, L"7");                                       // EG1
+        CFormulator::Result res = CFormulator::Evaluate(g_sheet, L"\u00C91");
+        ASSERT_TRUE(res.isError);                                     // was 7
+    });
+}
+
+TEST(TextFunctions_HugeCountsDoNotOverflow)
+{
+    // The counts were cast to int, undefined past INT_MAX.
+    StandardSheet();
+    ASSERT_TRUE(IsText(L"LEFT(\"abc\",1e20)", L"abc"));           // was ""
+    ASSERT_TRUE(IsText(L"RIGHT(\"abc\",3e9)", L"abc"));           // was ""
+    ASSERT_TRUE(IsText(L"MID(\"abcdef\",2,1e10)", L"bcdef"));     // was ""
+    ASSERT_TRUE(IsText(L"MID(\"abcdef\",3e9,2)", L""));           // was "ab"
+    // In range they behave as before: counts truncate, a start below 1 is 1.
+    ASSERT_TRUE(IsText(L"LEFT(\"abc\",2.9)", L"ab"));
+    ASSERT_TRUE(IsText(L"LEFT(\"abc\")", L"a"));
+    ASSERT_TRUE(IsText(L"LEFT(\"abc\",0)", L""));
+    ASSERT_TRUE(IsText(L"RIGHT(\"abc\",2)", L"bc"));
+    ASSERT_TRUE(IsText(L"MID(\"abcdef\",2.9,2.9)", L"bc"));
+    ASSERT_TRUE(IsText(L"MID(\"abcdef\",-5,2)", L"ab"));
+    ASSERT_TRUE(IsText(L"MID(\"abcdef\",7,2)", L""));
+}
+
+TEST(DateParts_OutOfRangeAreNumErrors)
+{
+    StandardSheet();
+    ASSERT_TRUE(IsError(L"DATE(2024,1,1e10)", CFormulator::kErrorNum));   // undefined cast
+    ASSERT_TRUE(IsError(L"DATE(1e300,1,1)", CFormulator::kErrorNum));
+    ASSERT_TRUE(IsError(L"YEAR(1e15)", CFormulator::kErrorNum));          // was 2012841336
+    ASSERT_TRUE(IsError(L"DAY(-1e15)", CFormulator::kErrorNum));
+    ASSERT_NEAR(Eval(L"=DATE(2024,1,15)"), 45306.0, 1e-9);
+    ASSERT_NEAR(Eval(L"=YEAR(DATE(2024,1,15))"), 2024.0, 1e-9);
+    ASSERT_NEAR(Eval(L"=MONTH(45306)"), 1.0, 1e-9);
+}
+
+TEST(Date_FollowsExcel)
+{
+    StandardSheet();
+    // Years 0..1899 are offsets from 1900.
+    ASSERT_NEAR(Eval(L"=DATE(24,1,1)"), 8767.0, 1e-9);               // 1924-01-01; was -685193
+    ASSERT_NEAR(Eval(L"=YEAR(DATE(24,1,1))"), 1924.0, 1e-9);         // was 24
+    ASSERT_NEAR(Eval(L"=DATE(0,1,1)"), 1.0, 1e-9);
+    ASSERT_NEAR(Eval(L"=YEAR(DATE(1899,12,31))"), 3799.0, 1e-9);
+    // Excel's serials, 1900-02-29 included.
+    ASSERT_NEAR(Eval(L"=DATE(1900,1,1)"), 1.0, 1e-9);                // was 2
+    ASSERT_NEAR(Eval(L"=DATE(1900,2,28)"), 59.0, 1e-9);              // was 60
+    ASSERT_NEAR(Eval(L"=DATE(1900,2,29)"), 60.0, 1e-9);
+    ASSERT_NEAR(Eval(L"=DATE(1900,3,0)"), 60.0, 1e-9);
+    ASSERT_NEAR(Eval(L"=DATE(1900,3,1)"), 61.0, 1e-9);
+    ASSERT_NEAR(Eval(L"=DATE(1900,1,0)"), 0.0, 1e-9);
+    ASSERT_NEAR(Eval(L"=DATE(9999,12,31)"), 2958465.0, 1e-9);
+    // Months and days roll over, however far.
+    ASSERT_NEAR(Eval(L"=DATE(2024,15,1)-DATE(2025,3,1)"), 0.0, 1e-9);   // was 2
+    ASSERT_NEAR(Eval(L"=DATE(2024,-10,1)-DATE(2023,2,1)"), 0.0, 1e-9);  // was -3
+    ASSERT_NEAR(Eval(L"=DATE(2024,1,0)-DATE(2023,12,31)"), 0.0, 1e-9);
+    ASSERT_NEAR(Eval(L"=DATE(2024.9,1,1)-DATE(2024,1,1)"), 0.0, 1e-9);  // parts truncate
+    // Outside 1900-01-00 .. 9999-12-31 there is no date.
+    ASSERT_TRUE(IsError(L"DATE(1900,1,-1)", CFormulator::kErrorNum));
+    ASSERT_TRUE(IsError(L"DATE(-1,1,1)", CFormulator::kErrorNum));
+    ASSERT_TRUE(IsError(L"DATE(9999,12,32)", CFormulator::kErrorNum));
+    ASSERT_TRUE(IsError(L"DATE(10000,1,1)", CFormulator::kErrorNum));      // was 2958466
+}
+
+TEST(DateParts_FollowExcel)
+{
+    StandardSheet();
+    ASSERT_NEAR(Eval(L"=YEAR(0)"), 1900.0, 1e-9);                    // 1900-01-00; was 1899
+    ASSERT_NEAR(Eval(L"=MONTH(0)"), 1.0, 1e-9);
+    ASSERT_NEAR(Eval(L"=DAY(0)"), 0.0, 1e-9);
+    ASSERT_NEAR(Eval(L"=DAY(1)"), 1.0, 1e-9);                        // 1900-01-01
+    ASSERT_NEAR(Eval(L"=MONTH(60)"), 2.0, 1e-9);                     // 1900-02-29
+    ASSERT_NEAR(Eval(L"=DAY(60)"), 29.0, 1e-9);
+    ASSERT_NEAR(Eval(L"=DAY(61)"), 1.0, 1e-9);
+    ASSERT_NEAR(Eval(L"=YEAR(2958465)"), 9999.0, 1e-9);
+    ASSERT_NEAR(Eval(L"=DAY(45306.75)"), 15.0, 1e-9);                // the time of day is ignored
+    ASSERT_TRUE(IsError(L"YEAR(-5)", CFormulator::kErrorNum));        // was 1899
+    ASSERT_TRUE(IsError(L"YEAR(2958466)", CFormulator::kErrorNum));
+    ASSERT_TRUE(IsError(L"MONTH(-0.5)", CFormulator::kErrorNum));
+}
+
+TEST(NegativeZero_IsZero)
+{
+    // =-A1 with A1 blank showed "-0".
+    StandardSheet();
+    CFormulator::Result r = CFormulator::Evaluate(g_sheet, L"-D9");
+    ASSERT_TRUE(!r.isError && r.value == 0.0 && !std::signbit(r.value));
+    r = CFormulator::Evaluate(g_sheet, L"0*-1");
+    ASSERT_TRUE(r.value == 0.0 && !std::signbit(r.value));
+    ASSERT_TRUE(CFormulator::FormatGeneral(-0.0) == L"0");
+    ASSERT_NEAR(Eval(L"=LEN(-0)"), 1.0, 1e-12);                         // "0", was "-0"
+    ASSERT_TRUE(CFormulator::FormatGeneral(-2.5) == L"-2.5");
+}
+
+TEST(Trim_TouchesSpacesOnly)
+{
+    // Excel's TRIM removes spaces (U+0020) only. iswspace also took tabs and
+    // line breaks, and turned each into a space.
+    StandardSheet();
+    ASSERT_TRUE(IsText(L"TRIM(\"  a   b  \")", L"a b"));
+    ASSERT_TRUE(IsText(L"TRIM(\"a\tb\")", L"a\tb"));                  // was "a b"
+    ASSERT_TRUE(IsText(L"TRIM(\"\tx \")", L"\tx"));                  // was "x"
+    ASSERT_TRUE(IsText(L"TRIM(\"a\nb\")", L"a\nb"));
+    ASSERT_TRUE(IsText(L"TRIM(\"a \t b\")", L"a \t b"));
+    ASSERT_TRUE(IsText(L"TRIM(\"a\u00A0b\")", L"a\u00A0b"));          // no-break space is text
+    ASSERT_TRUE(IsText(L"TRIM(\"   \")", L""));
 }
 
 // ---- runner ----------------------------------------------------------------

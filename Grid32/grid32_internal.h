@@ -13,29 +13,85 @@ bool UnregisterPhotoGalleryClass(HINSTANCE hInstance);
 //      linking against the manager impl) -----------------------------------
 namespace Grid32Detail {
 
-// Convert calendar Y/M/D to Excel-style serial (days since 1899-12-30).
-inline double DateToSerial(int y, int m, int d)
-{
-    if (m <= 2) { y -= 1; m += 12; }
-    int a = y / 100;
-    int b = 2 - a + a / 4;
-    long long jdn = (long long)(365.25 * (y + 4716)) + (long long)(30.6001 * (m + 1)) + d + b - 1524;
-    return (double)(jdn - 2415019);
+// ---- Dates -----------------------------------------------------------------
+// A date is a serial number of days in Excel's 1900 date system:
+//
+//   1 = 1900-01-01 ... 59 = 1900-02-28, 60 = 1900-02-29, 61 = 1900-03-01 ...
+//   2958465 = 9999-12-31, and 0 = "1900-01-00", the day before 1900-01-01.
+//
+// Excel treats 1900 as a leap year (for Lotus 1-2-3 compatibility), so 60 is a
+// day that never existed, every serial from 61 on is the number of days since
+// 1899-12-30, and those before it are one less. These helpers used to count
+// from 1899-12-30 throughout, which put 1900-01-01 at 2 and every date before
+// 1900-03-01 a day later than Excel does.
+//
+// The helpers carry on below 0 (-1 = 1899-12-30) so the arithmetic stays
+// continuous; what is a date a sheet can hold (Excel's 0..2958465) is for the
+// callers to decide, and kMaxDateSerial is the top of it.
+constexpr double kMaxDateSerial = 2958465.0;    // 9999-12-31
+
+namespace DateCalc {
+    // Days from 1970-01-01 to y-m-d (m 1..12) in the proleptic Gregorian
+    // calendar, exactly, for any y (H. Hinnant's days_from_civil).
+    inline long long DaysFromCivil(long long y, long long m, long long d)
+    {
+        if (m <= 2) y -= 1;
+        const long long era = (y >= 0 ? y : y - 399) / 400;
+        const long long yoe = y - era * 400;
+        const long long doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+        const long long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        return era * 146097 + doe - 719468;
+    }
+
+    // The inverse (civil_from_days).
+    inline void CivilFromDays(long long z, long long& y, long long& m, long long& d)
+    {
+        z += 719468;
+        const long long era = (z >= 0 ? z : z - 146096) / 146097;
+        const long long doe = z - era * 146097;
+        const long long yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+        const long long doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        const long long mp = (5 * doy + 2) / 153;
+        d = doy - (153 * mp + 2) / 5 + 1;
+        m = mp < 10 ? mp + 3 : mp - 9;
+        y = yoe + era * 400 + (m <= 2 ? 1 : 0);
+    }
+
+    // 1970-01-01 is serial 25569.
+    constexpr long long kUnixEpochSerial = 25569;
 }
 
-// Inverse of DateToSerial. Valid for serial >= 1.
+// Calendar Y/M/D to a serial. A month outside 1..12 rolls into the years
+// around it and a day outside the month into the months around it, as Excel's
+// DATE does: (2024,13,1) is 2025-01-01, (2024,1,0) is 2023-12-31, and
+// (1900,3,0) is Excel's 1900-02-29, 60. (The old formula only got months
+// 0..14 right: (2024,15,1) came out two days late.)
+inline double DateToSerial(int y, int m, int d)
+{
+    long long yy = y;
+    long long mm = (long long)m - 1;                    // 0-based, then into 0..11
+    long long carry = mm >= 0 ? mm / 12 : -((11 - mm) / 12);
+    yy += carry;
+    mm -= carry * 12;
+    long long first = DateCalc::DaysFromCivil(yy, mm + 1, 1) + DateCalc::kUnixEpochSerial;
+    if (first < 61) first -= 1;                         // before 1900-03-01: Excel's count
+    return (double)(first + (long long)d - 1);
+}
+
+// Inverse of DateToSerial for the day `serial` falls on (its fraction, the
+// time of day, is ignored). 0 is 1900-01-00 and 60 is 1900-02-29, as Excel
+// shows them. Serials too large for any calendar arithmetic (beyond +-1e11
+// days) come back as 0-00-00.
 inline void SerialToYMD(double serial, int& y, int& m, int& d)
 {
-    long long jdn = (long long)serial + 2415019;
-    long long a = jdn + 32044;
-    long long b = (4 * a + 3) / 146097;
-    long long c = a - (146097 * b) / 4;
-    long long dd = (4 * c + 3) / 1461;
-    long long e = c - (1461 * dd) / 4;
-    long long mm = (5 * e + 2) / 153;
-    d = (int)(e - (153 * mm + 2) / 5 + 1);
-    m = (int)(mm + 3 - 12 * (mm / 10));
-    y = (int)(100 * b + dd - 4800 + mm / 10);
+    const double day = std::floor(serial);
+    if (!(std::fabs(day) <= 1e11)) { y = m = d = 0; return; }
+    const long long s = (long long)day;
+    if (s == 0)  { y = 1900; m = 1; d = 0;  return; }
+    if (s == 60) { y = 1900; m = 2; d = 29; return; }
+    long long yy = 0, mm = 0, dd = 0;
+    DateCalc::CivilFromDays((s < 60 ? s + 1 : s) - DateCalc::kUnixEpochSerial, yy, mm, dd);
+    y = (int)yy; m = (int)mm; d = (int)dd;
 }
 
 inline bool TryParseDate(const std::wstring& text, double& serialOut)
@@ -164,7 +220,10 @@ inline std::wstring FormatCellValue(CellType type, double value,
 {
     if (type == CT_Text || format == FMT_GENERAL) return rawText;
 
-    auto formatDate = [](double serial, bool iso) -> std::wstring {
+    auto formatDate = [&rawText](double serial, bool iso) -> std::wstring {
+        // Outside Excel's date range (negative, or past 9999-12-31) there is
+        // no date to show; keep the value's own text rather than invent one.
+        if (!(serial >= 0.0 && serial < kMaxDateSerial + 1.0)) return rawText;
         int y = 0, m = 0, d = 0;
         SerialToYMD(serial, y, m, d);
         wchar_t buf[16];

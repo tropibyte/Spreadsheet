@@ -50,17 +50,40 @@ struct TestReg { TestReg(const char* n, std::function<void()> f) { Tests().push_
 using namespace Grid32Detail;
 
 // ---- DateToSerial ----------------------------------------------------------
-// Excel reference: 1899-12-30 = 0, 1900-01-01 = 2 (Excel quirk), 1900-03-01 = 61,
-// 2026-05-15 = 46157. Our impl doesn't carry the 1900-leap-year-quirk so
-// values past Feb 1900 differ by 1 from Excel.
+// Excel's 1900 date system: 1900-01-01 = 1, and 1900 is treated as a leap year,
+// so 60 is "1900-02-29" and 1900-03-01 = 61; from there a serial is the days
+// since 1899-12-30. 0 is "1900-01-00". (This test used to pin 1900-01-01 = 2,
+// under a comment calling that the Excel quirk; it is not what Excel does.)
 TEST(DateToSerial_KnownValues)
 {
-    // 1899-12-31 = 1 day after epoch in our calendar
-    ASSERT_EQ((int)DateToSerial(1899, 12, 31), 1);
-    // 1900-01-01 = 2 in our calendar
-    ASSERT_EQ((int)DateToSerial(1900, 1, 1), 2);
-    // 2000-01-01 known to be 36526 (Excel says 36526)
+    ASSERT_EQ((int)DateToSerial(1900, 1, 1), 1);
+    ASSERT_EQ((int)DateToSerial(1900, 1, 31), 31);
+    ASSERT_EQ((int)DateToSerial(1900, 2, 1), 32);
+    ASSERT_EQ((int)DateToSerial(1900, 2, 28), 59);
+    ASSERT_EQ((int)DateToSerial(1900, 2, 29), 60);      // Excel's phantom day
+    ASSERT_EQ((int)DateToSerial(1900, 3, 1), 61);
+    ASSERT_EQ((int)DateToSerial(1900, 3, 0), 60);       // the day before March 1st
+    ASSERT_EQ((int)DateToSerial(1900, 1, 0), 0);        // "1900-01-00"
     ASSERT_EQ((int)DateToSerial(2000, 1, 1), 36526);
+    ASSERT_EQ((int)DateToSerial(2026, 5, 15), 46157);
+    ASSERT_EQ((int)DateToSerial(9999, 12, 31), 2958465);
+}
+
+TEST(DateToSerial_RollsMonthsAndDaysOver)
+{
+    // Months outside 1..12 roll into the years around them. The old formula
+    // only got months 0..14 right: (2024,15,1) came out as 2025-03-03.
+    ASSERT_EQ((int)DateToSerial(2024, 13, 1), (int)DateToSerial(2025, 1, 1));
+    ASSERT_EQ((int)DateToSerial(2024, 15, 1), (int)DateToSerial(2025, 3, 1));
+    ASSERT_EQ((int)DateToSerial(2024, 25, 1), (int)DateToSerial(2026, 1, 1));
+    ASSERT_EQ((int)DateToSerial(2024, 0, 1), (int)DateToSerial(2023, 12, 1));
+    ASSERT_EQ((int)DateToSerial(2024, -10, 1), (int)DateToSerial(2023, 2, 1));
+    ASSERT_EQ((int)DateToSerial(2024, -11, 1), (int)DateToSerial(2023, 1, 1));
+    ASSERT_EQ((int)DateToSerial(2024, -12, 1), (int)DateToSerial(2022, 12, 1));
+    ASSERT_EQ((int)DateToSerial(2024, 1, 0), (int)DateToSerial(2023, 12, 31));
+    ASSERT_EQ((int)DateToSerial(2024, 3, 0), (int)DateToSerial(2024, 2, 29));
+    ASSERT_EQ((int)DateToSerial(2023, 3, 0), (int)DateToSerial(2023, 2, 28));
+    ASSERT_EQ((int)DateToSerial(2024, 1, 366), (int)DateToSerial(2024, 12, 31));
 }
 
 // ---- TryParseDate ----------------------------------------------------------
@@ -331,7 +354,14 @@ TEST(SerialToYMD_RoundTrip)
 {
     struct { int y, m, d; } cases[] = {
         { 1900, 1, 1 },
+        { 1900, 1, 0 },      // serial 0, as Excel shows it
+        { 1900, 2, 28 },
+        { 1900, 2, 29 },     // serial 60, Excel's phantom day
+        { 1900, 3, 1 },
         { 1999, 12, 31 },
+        { 2000, 2, 29 },     // a leap century
+        { 2100, 2, 28 },     // not a leap century
+        { 9999, 12, 31 },
         { 2000, 1, 1 },
         { 2024, 2, 29 },     // leap day
         { 2026, 5, 15 },
@@ -347,6 +377,39 @@ TEST(SerialToYMD_RoundTrip)
             ++g_failCount;
         }
     }
+}
+
+TEST(SerialToYMD_EveryDayRoundTrips)
+{
+    // Every serial Excel can hold maps to a day that maps back to it, and
+    // consecutive serials are consecutive days.
+    int py = 1900, pm = 1, pd = 0;
+    for (int s = 1; s <= 2958465; ++s)
+    {
+        int y = 0, m = 0, d = 0;
+        SerialToYMD((double)s, y, m, d);
+        if ((int)DateToSerial(y, m, d) != s) { FAIL_HERE("no round trip at serial " << s); }
+        const bool next = (y == py && m == pm && d == pd + 1) ||
+                          (y == py && m == pm + 1 && d == 1) ||
+                          (y == py + 1 && m == 1 && pm == 12 && d == 1);
+        if (!next) { FAIL_HERE("serial " << s << " is not the day after " << py << "-" << pm << "-" << pd); }
+        py = y; pm = m; pd = d;
+    }
+    // The time of day does not change the date.
+    int y = 0, m = 0, d = 0;
+    SerialToYMD(45306.999, y, m, d);
+    ASSERT_TRUE(y == 2024 && m == 1 && d == 15);
+}
+
+TEST(FormatCellValue_DatesOutsideTheRangeKeepTheirText)
+{
+    // No date before 1900-01-00 or after 9999-12-31: the value's text stays.
+    ASSERT_TRUE(FormatCellValue(CT_Number, -5.0, L"-5", FMT_DATE_ISO) == L"-5");
+    ASSERT_TRUE(FormatCellValue(CT_Number, 3e6, L"3000000", FMT_DATE_US) == L"3000000");
+    ASSERT_TRUE(FormatCellValue(CT_Number, 1.0, L"1", FMT_DATE_ISO) == L"1900-01-01");
+    ASSERT_TRUE(FormatCellValue(CT_Number, 60.0, L"60", FMT_DATE_ISO) == L"1900-02-29");
+    ASSERT_TRUE(FormatCellValue(CT_Number, 0.0, L"0", FMT_DATE_ISO) == L"1900-01-00");
+    ASSERT_TRUE(FormatCellValue(CT_Number, 2958465.0, L"2958465", FMT_DATE_ISO) == L"9999-12-31");
 }
 
 // ---- driver ----------------------------------------------------------------

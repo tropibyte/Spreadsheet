@@ -4914,11 +4914,15 @@ ExportKind ClassifyForExport(const GRIDCELL& cell, double& number)
 }
 
 // ISO 8601 date (and time, when the serial has a fraction or `alwaysTime` is
-// set) for an Excel-style serial. False for serials outside 1900..9999, which
-// neither Excel nor LibreOffice reads back as a date.
+// set) for an Excel serial. False for serials outside 1900-01-01..9999-12-31,
+// which neither Excel nor LibreOffice reads back as a date, and for 60, Excel's
+// 1900-02-29, which ISO 8601 has no way to write. (The lower bound was 2 when
+// the serials counted 1900-01-01 as 2.)
 bool SerialToIso(double serial, bool alwaysTime, std::wstring& out)
 {
-    if (!std::isfinite(serial) || serial < 2.0 || serial >= 2958466.0)
+    if (!std::isfinite(serial) || serial < 1.0 || serial >= Grid32Detail::kMaxDateSerial + 1.0)
+        return false;
+    if (serial >= 60.0 && serial < 61.0)
         return false;
     const double whole = std::floor(serial);
     int y = 0, m = 0, d = 0;
@@ -6436,7 +6440,7 @@ std::wstring CGrid32Mgr::EvaluateFormula(const std::wstring& expr)
     if (!clean.empty() && clean[0] == L'=')
         clean = clean.substr(1);
     CFormulator::Result r = CFormulator::Evaluate(this, clean);
-    return r.isText ? r.text : CFormulator::FormatGeneral(r.value);
+    return (r.isText || r.isError) ? r.text : CFormulator::FormatGeneral(r.value);
 }
 
 // Store one evaluation result in its formula cell.
@@ -6448,14 +6452,15 @@ std::wstring CGrid32Mgr::EvaluateFormula(const std::wstring& expr)
 // The display text is that number under the cell's own number format (H8):
 // a formula cell formatted as currency shows "$1,234.50", and keeps doing so
 // as it recalculates. A text result (LEFT, CONCAT, ...) is shown as-is, since
-// number formats do not apply to text. So is a value FormatFixed cannot
-// render: an infinity or NaN (=1/0), or a magnitude past what its integer
-// arithmetic holds, keeps its general text rather than becoming garbage.
+// number formats do not apply to text, and so is an error's code ("#DIV/0!"),
+// whose m_dValue is NaN so that sorting files it with the text. A magnitude
+// past what FormatFixed's integer arithmetic holds keeps its general text
+// rather than becoming garbage.
 static void ApplyFormulaResult(PGRIDCELL pCell, const CFormulator::Result& r)
 {
     pCell->m_eType = CT_Formula;
     pCell->m_dValue = r.value;
-    if (r.isText)
+    if (r.isText || r.isError)
     {
         pCell->m_wsText = r.text;
         return;

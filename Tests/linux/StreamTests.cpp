@@ -738,6 +738,42 @@ TEST(Xml_IsSpreadsheetML2003)
     ASSERT_NOT_CONTAINS(xml, L"encoding=");
 }
 
+TEST(Dates_EarlyIn1900KeepExcelSerialsThroughEveryFormat)
+{
+    // Excel's serials: 1900-01-01 = 1, 1900-02-28 = 59, 1900-03-01 = 61 (60 is
+    // its 1900-02-29). The date helpers used to put every date before March
+    // 1900 a day later than Excel, so 1900-01-01 was 2.
+    Sheet src;
+    src.Set(0, 0, L"1900-01-01");
+    src.Set(0, 1, L"1900-02-28");
+    src.Set(0, 2, L"1900-03-01");
+    src.Set(0, 3, L"2026-05-15");
+    ASSERT_TRUE(src.Cell(0, 0)->m_dValue == 1.0);
+    ASSERT_TRUE(src.Cell(0, 1)->m_dValue == 59.0);
+    ASSERT_TRUE(src.Cell(0, 2)->m_dValue == 61.0);
+    ASSERT_TRUE(src.Cell(0, 3)->m_dValue == 46157.0);
+
+    const std::wstring xml = Out(src, SF_XML);
+    ASSERT_CONTAINS(xml, L"<Data ss:Type=\"DateTime\">1900-01-01T00:00:00.000</Data>");
+    ASSERT_CONTAINS(xml, L"<Data ss:Type=\"DateTime\">1900-02-28T00:00:00.000</Data>");
+    ASSERT_CONTAINS(xml, L"<Data ss:Type=\"DateTime\">1900-03-01T00:00:00.000</Data>");
+    const std::wstring odf = Out(src, SF_ODF);
+    ASSERT_CONTAINS(odf, L"office:date-value=\"1900-01-01\"");
+    ASSERT_CONTAINS(odf, L"office:date-value=\"1900-03-01\"");
+
+    for (DWORD fmt : { (DWORD)SF_XML, (DWORD)SF_ODF, (DWORD)SF_SSF })
+    {
+        Sheet dst;
+        ASSERT_TRUE(RoundTrip(src, fmt, dst));
+        for (UINT c = 0; c < 4; ++c)
+        {
+            ASSERT_TRUE(dst.Cell(0, c)->m_eType == CT_Date);
+            ASSERT_TRUE(dst.Cell(0, c)->m_dValue == src.Cell(0, c)->m_dValue);
+            ASSERT_WSTR(dst.Text(0, c), src.Text(0, c));
+        }
+    }
+}
+
 TEST(Xml_RoundTripsValuesTypesAndFormats)
 {
     Sheet src;
