@@ -42,6 +42,16 @@ D2
 expect =D2=42 => 1
 expect =D2+1 => 43
 
+# VALUE reads text as a number strictly: #VALUE! if it is not one.
+# (=D2+0 reads any non-numeric text as 0.)
+text D3 abc
+text D4 $1,234.50
+expect =VALUE(D2) => 42
+expect =VALUE(D4) => 1234.5
+expect =VALUE("2024-01-15") => 45306
+expect =VALUE(D3) => #VALUE!
+expect =D3+0 => 0
+
 # ---- Number formats apply to formula results
 E1: =A1*1000.5
 format E1 currency

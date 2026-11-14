@@ -702,7 +702,7 @@ struct CFormulator::Engine
     // Take on a referenced cell's error as this evaluation's own.
     static void PropagateError(const Result& r)
     {
-        static const wchar_t* const kCodes[] = { kErrorSyntax, kErrorName, kErrorDiv0, kErrorNum };
+        static const wchar_t* const kCodes[] = { kErrorSyntax, kErrorName, kErrorDiv0, kErrorNum, kErrorValue };
         for (const wchar_t* code : kCodes)
             if (r.text == code) { Grid32FormulaText::SetError(code); return; }
         Grid32FormulaText::SetError(kErrorSyntax);
@@ -1729,6 +1729,34 @@ double CFormulator::ParseFactor(CGrid32Mgr* mgr, const std::wstring& expr, size_
                 }
             }
             res = TextResult(out);
+        }
+        else if (_wcsicmp(token.c_str(), L"VALUE") == 0)
+        {
+            // VALUE(text): text read as a number, #VALUE! when it is not one.
+            // Numeric text is what the engine reads as a number everywhere
+            // (ParseNumericText: " 42 ", "1e3", "1,234.50", "$1,234.50",
+            // "25%" = 0.25); date text is what typing into a cell accepts
+            // (TryParseDate: ISO and US), and reads as its serial, as in
+            // Excel. A number passes through and a blank cell is 0. Unlike
+            // =A1+0, which reads any text that is not a number as 0, text
+            // that is neither fails: "abc", "", "12abc", "1,2".
+            if (TrimWs(arg).empty())
+                Grid32FormulaText::SetError(kErrorSyntax);  // VALUE() has nothing to read
+            Grid32FormulaText::ResetText();
+            const double v = EvalArg(mgr, arg, visited);
+            res = v;
+            if (Grid32FormulaText::g_textResultValid)
+            {
+                const std::wstring text = Grid32FormulaText::g_textResult;
+                double n = 0.0;
+                if (ParseNumericText(text, n) || Grid32Detail::TryParseDate(TrimWs(text), n))
+                    res = n;
+                else
+                {
+                    res = 0.0;
+                    Grid32FormulaText::SetError(kErrorValue);
+                }
+            }
         }
         // -------- Date functions -----------------------------------------
         else if (_wcsicmp(token.c_str(), L"TODAY") == 0)

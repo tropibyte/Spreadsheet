@@ -29,6 +29,7 @@ public:
 	static constexpr const wchar_t* kErrorName = L"#NAME?";     // unknown function or name
 	static constexpr const wchar_t* kErrorDiv0 = L"#DIV/0!";    // division by zero
 	static constexpr const wchar_t* kErrorNum = L"#NUM!";       // no finite result
+	static constexpr const wchar_t* kErrorValue = L"#VALUE!";   // a value of the wrong kind (VALUE("abc"))
 
 	// Evaluate formula source (no leading '='). `self` is the cell that holds
 	// the formula, if any: it is on the evaluation path from the start, so a

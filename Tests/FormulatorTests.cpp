@@ -1073,6 +1073,69 @@ TEST(Trim_TouchesSpacesOnly)
     ASSERT_TRUE(IsText(L"TRIM(\"   \")", L""));
 }
 
+// ---- VALUE ---------------------------------------------------------------------
+TEST(Value_ReadsNumericTextOrFails)
+{
+    SheetReset();
+    SheetSetText(0, 0, L"42");              // A1..A9: text cells, as `text A1 42` stores them
+    SheetSetText(1, 0, L"abc");
+    SheetSetText(2, 0, L"$1,234.50");
+    SheetSetText(3, 0, L"  -3.5  ");
+    SheetSetText(4, 0, L"25%");
+    SheetSetText(5, 0, L"2024-01-15");
+    SheetSetText(6, 0, L"1,2");
+    SheetSetText(7, 0, L"12abc");
+    SheetSetText(8, 0, L"0");
+    SheetSet(0, 1, L"7");                   // B1: a number
+    SheetSet(1, 1, L"2024-01-15");          // B2: a typed date
+    SheetSet(2, 1, L"=UPPER(\"1e3\")");     // B3: a text result
+    SheetSet(3, 1, L"=1/0");                // B4: an error
+
+    ASSERT_NEAR(Eval(L"=VALUE(A1)"), 42.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=VALUE(A3)"), 1234.5, 1e-12);
+    ASSERT_NEAR(Eval(L"=VALUE(A4)"), -3.5, 1e-12);
+    ASSERT_NEAR(Eval(L"=VALUE(A5)"), 0.25, 1e-12);
+    ASSERT_NEAR(Eval(L"=VALUE(A6)"), 45306.0, 1e-12);        // date text reads as its serial
+    ASSERT_NEAR(Eval(L"=VALUE(A9)"), 0.0, 1e-12);            // "0" is a number...
+    ASSERT_TRUE(IsError(L"VALUE(A2)", CFormulator::kErrorValue));   // ...and "abc" is not
+    ASSERT_TRUE(IsError(L"VALUE(A7)", CFormulator::kErrorValue));   // badly grouped
+    ASSERT_TRUE(IsError(L"VALUE(A8)", CFormulator::kErrorValue));   // trailing junk
+    ASSERT_TRUE(IsError(L"VALUE(\"\")", CFormulator::kErrorValue));
+    // Literals and text results read the same way.
+    ASSERT_NEAR(Eval(L"=VALUE(\"5/15/2026\")"), 46157.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=VALUE(\" 2024-01-15 \")"), 45306.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=VALUE(B3)"), 1000.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=VALUE(LEFT(\"123abc\",3))*2"), 246.0, 1e-12);
+    // Numbers pass through, a blank cell is 0, an error stays itself.
+    ASSERT_NEAR(Eval(L"=VALUE(B1)"), 7.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=VALUE(B2)"), 45306.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=VALUE(42)"), 42.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=VALUE(Z99)"), 0.0, 1e-12);
+    ASSERT_TRUE(IsError(L"VALUE(B4)", CFormulator::kErrorDiv0));
+    // The result is a number, and the error travels like any other.
+    CFormulator::Result r = CFormulator::Evaluate(g_sheet, L"VALUE(A1)");
+    ASSERT_TRUE(!r.isText && !r.isError && r.value == 42.0);
+    ASSERT_TRUE(IsError(L"VALUE(A2)+1", CFormulator::kErrorValue));
+    ASSERT_TRUE(IsError(L"SUM(VALUE(A1),VALUE(A2))", CFormulator::kErrorValue));
+    ASSERT_NEAR(Eval(L"=COUNT(VALUE(A1),VALUE(A2))"), 1.0, 1e-12);
+    ASSERT_NEAR(Eval(L"=IF(1,5,VALUE(A2))"), 5.0, 1e-12);   // not evaluated, no error
+    // =A2+0 still reads "abc" as 0; VALUE is the strict reading.
+    ASSERT_NEAR(Eval(L"=A2+0"), 0.0, 1e-12);
+    // One argument, and not none.
+    ASSERT_TRUE(IsError(L"VALUE(A1,A2)", CFormulator::kErrorSyntax));
+    ASSERT_TRUE(IsError(L"VALUE()", CFormulator::kErrorSyntax));
+}
+
+TEST(Value_ErrorPropagatesThroughCells)
+{
+    SheetReset();
+    SheetSetText(0, 0, L"abc");             // A1
+    SheetSet(0, 1, L"=VALUE(A1)");          // B1
+    SheetSet(0, 2, L"=B1*2");               // C1
+    ASSERT_TRUE(IsError(L"C1", CFormulator::kErrorValue));
+    ASSERT_TRUE(IsError(L"MAX(B1:C1)", CFormulator::kErrorValue));
+}
+
 // ---- runner ----------------------------------------------------------------
 int main()
 {
