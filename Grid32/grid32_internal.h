@@ -3,6 +3,7 @@
 #include <cwctype>
 #include <cmath>
 #include <cstdlib>
+#include "grid32_case.h"     // ToUpperChar / ToLowerChar: case mapping without the C locale
 
 bool InitializeGridLibrary(HMODULE hModule);
 bool UnInitializeGridLibrary(HMODULE hModule);

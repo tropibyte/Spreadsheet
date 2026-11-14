@@ -414,7 +414,45 @@ TEST(FormatCellValue_DatesOutsideTheRangeKeepTheirText)
     ASSERT_TRUE(FormatCellValue(CT_Number, 2958465.0, L"2958465", FMT_DATE_ISO) == L"9999-12-31");
 }
 
-// ---- driver ----------------------------------------------------------------
+// ---- Case mapping (grid32_case.h) -------------------------------------------
+TEST(CaseTable_MapsLettersAndNothingElse)
+{
+    // ASCII, by the fast path.
+    for (wchar_t c = L'a'; c <= L'z'; ++c)
+    {
+        ASSERT_TRUE(ToUpperChar(c) == c - 32);
+        ASSERT_TRUE(ToLowerChar((wchar_t)(c - 32)) == c);
+    }
+    ASSERT_TRUE(ToUpperChar(L'1') == L'1' && ToUpperChar(L'@') == L'@' && ToLowerChar(L'[') == L'[');
+    // Runs of each shape: a block (à..þ, skipping ÷), alternating pairs
+    // (Latin Extended-A), single far mappings (ÿ, µ, ı), Greek, Cyrillic.
+    ASSERT_TRUE(ToUpperChar(0x00E0) == 0x00C0 && ToUpperChar(0x00FE) == 0x00DE);
+    ASSERT_TRUE(ToUpperChar(0x00F7) == 0x00F7);          // ÷ is no letter
+    ASSERT_TRUE(ToUpperChar(0x0101) == 0x0100 && ToUpperChar(0x0100) == 0x0100);
+    ASSERT_TRUE(ToLowerChar(0x0100) == 0x0101 && ToLowerChar(0x0101) == 0x0101);
+    ASSERT_TRUE(ToUpperChar(0x00FF) == 0x0178 && ToLowerChar(0x0178) == 0x00FF);
+    ASSERT_TRUE(ToUpperChar(0x00B5) == 0x039C);          // µ -> Greek capital mu
+    ASSERT_TRUE(ToUpperChar(0x0131) == L'I');            // dotless ı
+    ASSERT_TRUE(ToUpperChar(0x03C9) == 0x03A9 && ToLowerChar(0x03A9) == 0x03C9);
+    ASSERT_TRUE(ToUpperChar(0x044F) == 0x042F && ToUpperChar(0x0450) == 0x0400);
+    ASSERT_TRUE(ToUpperChar(0x00DF) == 0x00DF);          // ß: no one-character capital
+    // Not letters, surrogate halves, and the last code points: unchanged.
+    ASSERT_TRUE(ToUpperChar(0x20AC) == 0x20AC && ToUpperChar(0x4E2D) == 0x4E2D);
+    ASSERT_TRUE(ToUpperChar(0xD801) == 0xD801 && ToLowerChar(0xDC28) == 0xDC28);
+    ASSERT_TRUE(ToUpperChar(0xFFFF) == 0xFFFF && ToLowerChar(0x0000) == 0x0000);
+    // Every letter's case pair maps back, across the whole BMP: upper(lower(c))
+    // is c for every capital whose lowercase is a different letter that maps
+    // back to it.
+    int checked = 0;
+    for (unsigned long c = 0; c < 0x10000; ++c)
+    {
+        const wchar_t lo = ToLowerChar((wchar_t)c);
+        if (lo != (wchar_t)c && ToUpperChar(lo) == (wchar_t)c) ++checked;
+    }
+    ASSERT_TRUE(checked > 1000);
+}
+
+// ---- driver ----------------------------------------------------------------// ---- driver ----------------------------------------------------------------
 int main()
 {
     int total = (int)Tests().size();

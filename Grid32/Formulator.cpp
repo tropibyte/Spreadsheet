@@ -152,17 +152,41 @@ namespace {
         return out;
     }
 
+    // The engine classifies characters itself rather than with iswspace /
+    // iswalnum / towupper, which follow a C locale the program never sets:
+    // results differed by platform (=É1 was #ERROR! on Linux and #NAME? on
+    // Windows; UPPER("é") was "é" on Linux). Review item #14.
+    //
+    // Whitespace in a formula, and around a number in text, is ASCII
+    // whitespace: space, tab, line breaks, VT and FF. A no-break space is not
+    // whitespace (it is not in Excel formulas either).
+    inline bool IsFormulaSpace(wchar_t c) {
+        return c == L' ' || c == L'\t' || c == L'\n' || c == L'\r' || c == L'\v' || c == L'\f';
+    }
+
     inline std::wstring TrimWs(const std::wstring& s) {
         size_t a = 0, b = s.size();
-        while (a < b && iswspace(s[a])) ++a;
-        while (b > a && iswspace(s[b - 1])) --b;
+        while (a < b && IsFormulaSpace(s[a])) ++a;
+        while (b > a && IsFormulaSpace(s[b - 1])) --b;
         return s.substr(a, b - a);
     }
 
     inline bool IsAsciiDigit(wchar_t c) { return c >= L'0' && c <= L'9'; }
 
     inline void SkipSpaces(const std::wstring& s, size_t& pos) {
-        while (pos < s.size() && iswspace(s[pos])) ++pos;
+        while (pos < s.size() && IsFormulaSpace(s[pos])) ++pos;
+    }
+
+    inline bool IsAsciiLetter(wchar_t c) {
+        return (c >= L'A' && c <= L'Z') || (c >= L'a' && c <= L'z');
+    }
+
+    // A character of a name, number or reference token: ASCII letters and
+    // digits, '.', and any other character that is not ASCII. Names with
+    // such characters are never valid (=café, =É1), but reading them as one
+    // token makes them #NAME? everywhere rather than a locale's choice.
+    inline bool IsTokenChar(wchar_t c) {
+        return IsAsciiLetter(c) || IsAsciiDigit(c) || c == L'.' || (c >= 0x80 && !IsFormulaSpace(c));
     }
 
     // Read text as a number the way a person would: "42", " -3.5 ", "1e3",
@@ -174,8 +198,8 @@ namespace {
     bool ParseNumericText(const std::wstring& s, double& out)
     {
         size_t i = 0, n = s.size();
-        while (i < n && iswspace(s[i])) ++i;
-        while (n > i && iswspace(s[n - 1])) --n;
+        while (i < n && IsFormulaSpace(s[i])) ++i;
+        while (n > i && IsFormulaSpace(s[n - 1])) --n;
         if (i == n) return false;
 
         bool neg = false, signed_ = false, currency = false, percent = false;
@@ -334,13 +358,14 @@ namespace {
     }
 
     // Text comparison for the comparison operators: case-insensitive, as in
-    // Excel ("abc" = "ABC"). Returns <0, 0 or >0.
+    // Excel ("abc" = "ABC", "É" = "é"), by the engine's own Unicode case
+    // table (grid32_case.h). Returns <0, 0 or >0.
     int CompareTextNoCase(const std::wstring& a, const std::wstring& b)
     {
         const size_t n = a.size() < b.size() ? a.size() : b.size();
         for (size_t i = 0; i < n; ++i)
         {
-            const wint_t ca = towupper(a[i]), cb = towupper(b[i]);
+            const wchar_t ca = Grid32Detail::ToUpperChar(a[i]), cb = Grid32Detail::ToUpperChar(b[i]);
             if (ca != cb) return ca < cb ? -1 : 1;
         }
         return a.size() == b.size() ? 0 : (a.size() < b.size() ? -1 : 1);
@@ -1198,7 +1223,7 @@ struct CFormulator::Engine
         }
 
         const size_t start = pos;
-        while (pos < expr.size() && (iswalnum(expr[pos]) || expr[pos] == L'.')) ++pos;
+        while (pos < expr.size() && IsTokenChar(expr[pos])) ++pos;
         // A numeric literal with a signed exponent ("1e-3", "2.5E+2"): the scan
         // above stops at the sign, which left "1e" to be read as 1 and the "-3"
         // to be subtracted from it. A token that starts with a digit or '.' is
@@ -1705,8 +1730,11 @@ struct CFormulator::Engine
         {
             Value s = EvalText(mgr, arg, visited);
             if (s.IsError()) return s;
-            std::transform(s.text.begin(), s.text.end(), s.text.begin(),
-                fn == L"UPPER" ? ::towupper : ::towlower);
+            // By the engine's Unicode case table, not the C library's
+            // locale: UPPER("héllo") is "HÉLLO" everywhere. One character
+            // to one, so "ß" stays "ß" and LEN is unchanged.
+            for (wchar_t& c : s.text)
+                c = fn == L"UPPER" ? Grid32Detail::ToUpperChar(c) : Grid32Detail::ToLowerChar(c);
             return s;
         }
         if (fn == L"TRIM")
@@ -1791,7 +1819,7 @@ struct CFormulator::Engine
         if (fn == L"FALSE") return Value::Num(0.0);
 
         // Not a function this engine knows. It used to read as 0.
-        return Value::Err(iswalpha(name[0]) ? kErrorName : kErrorSyntax);
+        return Value::Err((IsAsciiLetter(name[0]) || name[0] >= 0x80) ? kErrorName : kErrorSyntax);
     }
 
     // ---- Deep chains -----------------------------------------------------------

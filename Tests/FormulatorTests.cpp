@@ -1526,6 +1526,65 @@ TEST(Ranges_SkipTextAndLogicalCells)
     ASSERT_TRUE(IsError(L"OR(A5:A6)", CFormulator::kErrorValue));      // only text: nothing to test
 }
 
+// ---- #14: text case and characters, whatever the C locale ----------------------------
+// Run `body` under the "C" locale and then under a UTF-8 one: the engine must
+// give the same answers under both, because it never consults the locale.
+template <class Fn>
+static void UnderBothLocales(Fn body)
+{
+    const char* old = std::setlocale(LC_ALL, nullptr);
+    const std::string saved = old ? old : "C";
+    std::setlocale(LC_ALL, "C");
+    body();
+    if (std::setlocale(LC_ALL, "C.UTF-8") || std::setlocale(LC_ALL, ".UTF8"))
+        body();
+    else
+        std::cout << "  note: no UTF-8 locale; checked under \"C\" only\n";
+    std::setlocale(LC_ALL, saved.c_str());
+}
+
+TEST(Case_UpperLowerAndComparisonsCoverUnicode)
+{
+    // UPPER/LOWER and the case-insensitive comparisons used towupper /
+    // towlower, which follow a locale the program never sets: under "C",
+    // UPPER("héllo") was "HéLLO" and "É"="é" was FALSE.
+    UnderBothLocales([] {
+        StandardSheet();
+        ASSERT_TRUE(IsText(L"UPPER(\"h\u00E9llo\")", L"H\u00C9LLO"));                 // héllo
+        ASSERT_TRUE(IsText(L"LOWER(\"\u00C9COLE\")", L"\u00E9cole"));                  // ÉCOLE
+        ASSERT_TRUE(IsText(L"UPPER(\"\u03C3\u03BF\u03C6\u03B9\u03B1\")", L"\u03A3\u039F\u03A6\u0399\u0391"));   // Greek
+        ASSERT_TRUE(IsText(L"UPPER(\"\u043F\u0440\u0438\u0432\u0435\u0442\")", L"\u041F\u0420\u0418\u0412\u0415\u0422"));   // Cyrillic
+        ASSERT_TRUE(IsText(L"UPPER(\"\u0101\u0107\u017C\")", L"\u0100\u0106\u017B"));    // Latin Extended-A, alternating pairs
+        ASSERT_TRUE(IsText(L"UPPER(\"\u00FF\")", L"\u0178"));                            // ÿ -> Ÿ, far apart
+        ASSERT_TRUE(IsText(L"UPPER(\"\u03C2\")", L"\u03A3"));                            // final sigma
+        ASSERT_NEAR(Eval(L"=\"\u00C9\"=\"\u00E9\""), 1.0, 1e-12);                          // "É" = "é"
+        ASSERT_NEAR(Eval(L"=\"\u03A3\u039F\u03A6\u0399\u0391\"=\"\u03C3\u03BF\u03C6\u03B9\u03B1\""), 1.0, 1e-12);
+        ASSERT_NEAR(Eval(L"=\"\u00E9\"=\"e\""), 0.0, 1e-12);                               // accents still count
+        // One character to one: "ß" has no one-character capital, and stays.
+        ASSERT_TRUE(IsText(L"UPPER(\"stra\u00DFe\")", L"STRA\u00DFE"));
+        ASSERT_NEAR(Eval(L"=LEN(UPPER(\"stra\u00DFe\"))"), 6.0, 1e-12);
+        // Not letters: unchanged.
+        ASSERT_TRUE(IsText(L"UPPER(\"1-2 \u20AC \u4E2D\")", L"1-2 \u20AC \u4E2D"));
+    });
+}
+
+TEST(Characters_NamesAndSpacesAreTheSameEverywhere)
+{
+    // Tokens were scanned with iswalnum and spaces skipped with iswspace:
+    // =É1 was #ERROR! under "C" and #NAME? where the CRT knows É is a letter.
+    UnderBothLocales([] {
+        StandardSheet();
+        ASSERT_TRUE(IsError(L"\u00C91", CFormulator::kErrorName));          // É1
+        ASSERT_TRUE(IsError(L"caf\u00E9", CFormulator::kErrorName));        // café
+        ASSERT_TRUE(IsError(L"caf\u00E9(1)", CFormulator::kErrorName));
+        // Formula whitespace is ASCII whitespace; a no-break space is not.
+        ASSERT_NEAR(Eval(L"=1\t+\r\n1"), 2.0, 1e-12);
+        ASSERT_TRUE(CFormulator::Evaluate(g_sheet, L"1\u00A0+1").isError);
+        ASSERT_NEAR(Eval(L"=VALUE(\" 42 \")"), 42.0, 1e-12);
+        ASSERT_TRUE(IsError(L"VALUE(\"42\u00A0\")", CFormulator::kErrorValue));
+    });
+}
+
 // ---- runner ----------------------------------------------------------------
 int main()
 {
